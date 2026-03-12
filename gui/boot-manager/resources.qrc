@@ -1,0 +1,36 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <!-- QML Files -->
+        <file>gui/boot-manager/qml/Main.qml</file>
+        <file>gui/boot-manager/qml/Message.qml</file>
+        <file>gui/boot-manager/qml/EntryDialog.qml</file>
+        
+        <!-- VM Manager QML -->
+        <file>gui/vm-manager/qml/Main.qml</file>
+        
+        <!-- Icons (SVG placeholders) -->
+        <file>gui/icons/nexus-logo.svg</file>
+        <file>gui/icons/boot.svg</file>
+        <file>gui/icons/settings.svg</file>
+        <file>gui/icons/reload.svg</file>
+        <file>gui/icons/add.svg</file>
+        <file>gui/icons/save.svg</file>
+        <file>gui/icons/help.svg</file>
+        <file>gui/icons/edit.svg</file>
+        <file>gui/icons/delete.svg</file>
+        <file>gui/icons/visible.svg</file>
+        <file>gui/icons/hidden.svg</file>
+        <file>gui/icons/star.svg</file>
+        <file>gui/icons/star-filled.svg</file>
+        
+        <!-- Virtualization Mode Icons -->
+        <file>gui/icons/native.svg</file>
+        <file>gui/icons/light.svg</file>
+        <file>gui/icons/full.svg</file>
+        <file>gui/icons/container.svg</file>
+        <file>gui/icons/enclave.svg</file>
+        <file>gui/icons/compat.svg</file>
+        <file>gui/icons/custom.svg</file>
+    </qresource>
+</RCC>

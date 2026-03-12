@@ -1,795 +1,649 @@
+/*
+ * NEXUS OS - Boot Manager GUI
+ * Copyright (c) 2024 NEXUS Development Team
+ *
+ * Main.qml - Boot Manager User Interface
+ * 
+ * Modern, Material Design-inspired UI for boot configuration
+ * and virtualization mode selection
+ */
+
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 import QtQuick.Controls.Material
+import QtQuick.Layouts
+import QtQuick.Window
 
 ApplicationWindow {
-    id: window
-    width: 1024
-    height: 768
+    id: mainWindow
     visible: true
-    title: qsTr("NEXUS-OS Boot Manager")
-    color: "#0d1117"
+    width: 1024
+    height: 720
+    minimumWidth: 800
+    minimumHeight: 600
+    title: qsTr("NEXUS OS Boot Manager - ") + appVersion
     
+    // Material Design Theme
     Material.theme: Material.Dark
-    Material.primary: "#58a6ff"
-    Material.accent: "#e94560"
+    Material.primary: Material.Blue
+    Material.accent: Material.Cyan
+    
+    // Window icon
+    // icon.source: "qrc:/icons/nexus-logo.png"
     
     // Header
     header: ToolBar {
-        background: Rectangle { 
-            color: "#161b22"
-            border.color: "#30363d"
-            border.width: 1
-        }
+        Material.elevation: 4
+        z: 10
         
         RowLayout {
             anchors.fill: parent
-            anchors.margins: 15
-            
-            Text {
-                text: "🔷 NEXUS-OS"
-                font.pixelSize: 24
-                font.bold: true
-                color: "#58a6ff"
-            }
-            
-            Item { Layout.fillWidth: true }
-            
-            Text {
-                text: "Boot Configuration Manager"
-                color: "#8b949e"
-                font.pixelSize: 14
-            }
-            
-            Item { Layout.preferredWidth: 20 }
-            
-            Button {
-                text: "💾 Save"
-                
-                background: Rectangle {
-                    color: parent.pressed ? "#238636" : "#2ea043"
-                    radius: 6
-                }
-                
-                contentItem: Text {
-                    text: parent.text
-                    color: "white"
-                    horizontalAlignment: Text.AlignHCenter
-                }
-                
-                onClicked: {
-                    bootConfig.applyConfig()
-                    statusMessage.show("Configuration saved!", "success")
-                }
-            }
-        }
-    }
-    
-    // Footer with status
-    footer: Pane {
-        background: Rectangle { 
-            color: "#161b22"
-            border.color: "#30363d"
-            border.width: 1
-        }
-        
-        RowLayout {
-            anchors.fill: parent
-            
-            Text {
-                id: statusText
-                text: "Ready"
-                color: "#8b949e"
-                font.pixelSize: 12
-            }
-            
-            Item { Layout.fillWidth: true }
-            
-            Text {
-                text: "Hardware: " + virtManager.hardwareVirtSupported ? "✓ Virtualization Supported" : "✗ No Virtualization Support"
-                color: virtManager.hardwareVirtSupported ? "#3fb950" : "#f85149"
-                font.pixelSize: 12
-            }
-        }
-    }
-    
-    ScrollView {
-        anchors.fill: parent
-        anchors.margins: 20
-        
-        ColumnLayout {
-            width: window.width - 40
             spacing: 20
             
-            // Virtualization Mode Selection
-            GroupBox {
-                Layout.fillWidth: true
-                title: "⚡ Virtualization Mode"
+            // Logo and Title
+            RowLayout {
+                spacing: 12
                 
-                background: Rectangle {
-                    color: "#161b22"
-                    radius: 10
-                    border.color: "#30363d"
-                    border.width: 1
-                }
-                
-                label: Text {
-                    text: parent.title
-                    color: "#58a6ff"
-                    font.pixelSize: 16
-                    font.bold: true
+                Image {
+                    source: "qrc:/icons/nexus-logo.svg"
+                    width: 36
+                    height: 36
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
                 }
                 
                 ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 15
-                    spacing: 10
+                    Layout.leftMargin: 8
                     
-                    Repeater {
-                        model: bootConfig.getVirtModes()
+                    Label {
+                        text: "NEXUS OS"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: Material.color(Material.Blue, Material.Shade100)
+                    }
+                    
+                    Label {
+                        text: "Boot Manager"
+                        font.pixelSize: 11
+                        color: Material.color(Material.Grey, Material.Shade300)
+                    }
+                }
+            }
+            
+            Item { Layout.fillWidth: true }
+            
+            // Action Buttons
+            RowLayout {
+                spacing: 8
+                
+                ToolButton {
+                    text: "Reload"
+                    icon.source: "qrc:/icons/reload.svg"
+                    onClicked: bootConfig.reloadConfiguration()
+                    ToolTip.text: "Reload configuration"
+                    ToolTip.visible: hovered
+                }
+                
+                ToolButton {
+                    text: "Add Entry"
+                    icon.source: "qrc:/icons/add.svg"
+                    onClicked: entryDialog.open()
+                    ToolTip.text: "Add boot entry"
+                    ToolTip.visible: hovered
+                }
+                
+                ToolButton {
+                    text: "Save"
+                    icon.source: "qrc:/icons/save.svg"
+                    enabled: bootConfig.isModified
+                    onClicked: {
+                        if (bootConfig.saveConfiguration()) {
+                            statusMessage.show("Configuration saved", Message.Success)
+                        } else {
+                            statusMessage.show("Failed to save configuration", Message.Error)
+                        }
+                    }
+                    ToolTip.text: "Save changes"
+                    ToolTip.visible: hovered
+                }
+                
+                MenuSeparator {}
+                
+                ToolButton {
+                    text: "Help"
+                    icon.source: "qrc:/icons/help.svg"
+                    onClicked: helpDialog.open()
+                }
+            }
+        }
+    }
+    
+    // Main Content
+    StackLayout {
+        anchors.fill: parent
+        currentIndex: tabBar.currentIndex
+        
+        // Tab 1: Boot Entries
+        Item {
+            id: bootEntriesPage
+            
+            RowLayout {
+                anchors.fill: parent
+                spacing: 0
+                
+                // Boot Entries List
+                Card {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 16
+                    Material.elevation: 2
+                    
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 0
                         
-                        delegate: Rectangle {
-                            width: parent.width
-                            height: 80
-                            radius: 8
-                            color: modelData.id === bootConfig.selectedVirtMode ? "#1f6feb33" : "#21262d"
-                            border.color: modelData.id === bootConfig.selectedVirtMode ? "#58a6ff" : "#30363d"
-                            border.width: 2
+                        // List Header
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 56
+                            color: Material.color(Material.Blue, Material.Shade900)
                             
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.margins: 15
-                                spacing: 15
+                                anchors.leftMargin: 16
+                                anchors.rightMargin: 16
                                 
-                                Text {
-                                    text: modelData.icon
-                                    font.pixelSize: 32
+                                Label {
+                                    text: "Boot Entries"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: Material.color(Material.Blue, Material.Shade100)
+                                    Layout.alignment: Qt.AlignVCenter
                                 }
                                 
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 4
+                                Item { Layout.fillWidth: true }
+                                
+                                Label {
+                                    text: bootConfig.count + " entries"
+                                    font.pixelSize: 12
+                                    color: Material.color(Material.Blue, Material.Shade300)
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+                            }
+                        }
+                        
+                        // Entries List
+                        ListView {
+                            id: entriesListView
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            model: bootConfig
+                            currentIndex: -1
+                            
+                            delegate: ItemDelegate {
+                                id: entryDelegate
+                                width: entriesListView.width
+                                height: 80
+                                highlighted: ListView.isCurrentItem
+                                onClicked: entriesListView.currentIndex = index
+                                
+                                contentItem: RowLayout {
+                                    spacing: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.leftMargin: 16
+                                    anchors.rightMargin: 16
                                     
-                                    Text {
-                                        text: modelData.name
-                                        font.pixelSize: 16
-                                        font.bold: true
-                                        color: "white"
+                                    // Status Indicator
+                                    Rectangle {
+                                        width: 12
+                                        height: 12
+                                        radius: 6
+                                        color: model.isEnabled ? 
+                                                   (model.isDefault ? Material.color(Material.Green) : Material.color(Material.Blue)) : 
+                                                   Material.color(Material.Grey)
+                                        visible: true
+                                        
+                                        ToolTip.text: model.isDefault ? "Default entry" : (model.isEnabled ? "Enabled" : "Disabled")
+                                        ToolTip.visible: entryDelegate.hovered
                                     }
                                     
-                                    Text {
-                                        text: modelData.description
-                                        font.pixelSize: 12
-                                        color: "#8b949e"
-                                        wrapMode: Text.WordWrap
+                                    // Entry Info
+                                    ColumnLayout {
                                         Layout.fillWidth: true
+                                        spacing: 4
+                                        
+                                        Label {
+                                            text: model.name
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                            color: Material.color(Material.Blue, Material.Shade100)
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        
+                                        Label {
+                                            text: model.kernelPath
+                                            font.pixelSize: 11
+                                            color: Material.color(Material.Grey, Material.Shade500)
+                                            elide: Text.ElideMiddle
+                                            Layout.fillWidth: true
+                                        }
+                                        
+                                        RowLayout {
+                                            spacing: 12
+                                            
+                                            Label {
+                                                text: "⏱ " + (model.timeout > 0 ? model.timeout + "s" : "—")
+                                                font.pixelSize: 10
+                                                color: Material.color(Material.Grey, Material.Shade600)
+                                            }
+                                            
+                                            Label {
+                                                text: "🔄 " + model.virtMode
+                                                font.pixelSize: 10
+                                                color: Material.color(Material.Grey, Material.Shade600)
+                                            }
+                                            
+                                            Label {
+                                                text: "👢 " + model.bootCount
+                                                font.pixelSize: 10
+                                                color: Material.color(Material.Grey, Material.Shade600)
+                                            }
+                                            
+                                            Item { Layout.fillWidth: true }
+                                            
+                                            Label {
+                                                text: model.lastBooted ? "Last: " + model.lastBooted : "Never booted"
+                                                font.pixelSize: 10
+                                                color: Material.color(Material.Grey, Material.Shade700)
+                                            }
+                                        }
                                     }
                                     
+                                    // Actions
                                     RowLayout {
-                                        spacing: 15
+                                        spacing: 4
+                                        visible: entryDelegate.hovered
                                         
-                                        Text {
-                                            text: "Overhead: " + modelData.overhead
-                                            font.pixelSize: 11
-                                            color: "#8b949e"
+                                        ToolButton {
+                                            icon.source: "qrc:/icons/edit.svg"
+                                            icon.color: Material.color(Material.Blue)
+                                            onClicked: {
+                                                editEntry(index)
+                                            }
+                                            ToolTip.text: "Edit entry"
                                         }
                                         
-                                        Text {
-                                            text: "Security: " + modelData.security
-                                            font.pixelSize: 11
-                                            color: "#8b949e"
+                                        ToolButton {
+                                            icon.source: model.isDefault ? "qrc:/icons/star-filled.svg" : "qrc:/icons/star.svg"
+                                            icon.color: Material.color(Material.Yellow)
+                                            onClicked: bootConfig.setDefaultEntry(index)
+                                            ToolTip.text: "Set as default"
                                         }
                                         
-                                        Rectangle {
-                                            color: "#30363d"
-                                            radius: 4
-                                            height: 20
-                                            width: recommendationLabel.implicitWidth + 10
+                                        ToolButton {
+                                            icon.source: model.isEnabled ? "qrc:/icons/visible.svg" : "qrc:/icons/hidden.svg"
+                                            icon.color: Material.color(Material.Green)
+                                            onClicked: bootConfig.setEntryEnabled(index, !model.isEnabled)
+                                            ToolTip.text: model.isEnabled ? "Disable" : "Enable"
+                                        }
+                                        
+                                        ToolButton {
+                                            icon.source: "qrc:/icons/delete.svg"
+                                            icon.color: Material.color(Material.Red)
+                                            enabled: bootConfig.count > 1
+                                            onClicked: deleteConfirmationDialog.index = index, deleteConfirmationDialog.open()
+                                            ToolTip.text: "Delete entry"
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Empty state
+                            Label {
+                                anchors.centerIn: parent
+                                text: "No boot entries\nClick 'Add Entry' to create one"
+                                font.pixelSize: 14
+                                color: Material.color(Material.Grey, Material.Shade500)
+                                horizontalAlignment: Text.AlignHCenter
+                                visible: bootConfig.count === 0
+                            }
+                            
+                            // Scrollbar
+                            ScrollBar.vertical: ScrollBar {
+                                active: true
+                            }
+                        }
+                    }
+                }
+                
+                // Right Panel - Virtualization Mode Selection
+                Card {
+                    Layout.preferredWidth: 380
+                    Layout.fillHeight: true
+                    Layout.margins: 16
+                    Material.elevation: 2
+                    
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 0
+                        
+                        // Header
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 56
+                            color: Material.color(Material.Cyan, Material.Shade900)
+                            
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 16
+                                anchors.rightMargin: 16
+                                spacing: 4
+                                
+                                Label {
+                                    text: "Virtualization Mode"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: Material.color(Material.Cyan, Material.Shade100)
+                                }
+                                
+                                Label {
+                                    text: "Select boot-time virtualization"
+                                    font.pixelSize: 11
+                                    color: Material.color(Material.Cyan, Material.Shade300)
+                                }
+                            }
+                        }
+                        
+                        // Mode Selection List
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            model: virtModeManager
+                            
+                            delegate: ItemDelegate {
+                                id: modeDelegate
+                                width: modesListView.width
+                                height: 100
+                                highlighted: virtModeManager.selectedMode === model.modeId
+                                onClicked: virtModeManager.selectedMode = model.modeId
+                                
+                                background: Rectangle {
+                                    color: modeDelegate.highlighted ? 
+                                              Material.color(Material.Cyan, Material.Shade900) : 
+                                              (modeDelegate.hovered ? Material.color(Material.Grey, Material.Shade900) : "transparent")
+                                    border.color: modeDelegate.highlighted ? Material.color(Material.Cyan) : "transparent"
+                                    border.width: 2
+                                }
+                                
+                                contentItem: RowLayout {
+                                    spacing: 12
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.leftMargin: 16
+                                    anchors.rightMargin: 16
+                                    
+                                    // Icon placeholder
+                                    Rectangle {
+                                        width: 40
+                                        height: 40
+                                        radius: 20
+                                        color: model.isAvailable ? 
+                                                  Material.color(Material.Cyan, model.securityLevel >= 4 ? Material.Shade700 : Material.Shade800) : 
+                                                  Material.color(Material.Grey, Material.Shade800)
+                                        
+                                        Image {
+                                            anchors.centerIn: parent
+                                            source: model.modeIcon
+                                            width: 24
+                                            height: 24
+                                            fillMode: Image.PreserveAspectFit
+                                            smooth: true
+                                            visible: false // Fallback if icon not found
+                                        }
+                                        
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: model.securityLevel >= 4 ? "🔒" : "⚡"
+                                            font.pixelSize: 20
+                                        }
+                                    }
+                                    
+                                    // Mode Info
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        
+                                        RowLayout {
+                                            Layout.fillWidth: true
                                             
-                                            Text {
-                                                id: recommendationLabel
-                                                anchors.centerIn: parent
-                                                text: modelData.recommended
-                                                font.pixelSize: 10
-                                                color: "#58a6ff"
+                                            Label {
+                                                text: model.modeName
+                                                font.pixelSize: 13
+                                                font.bold: true
+                                                color: model.isAvailable ? 
+                                                          Material.color(Material.Cyan, Material.Shade100) : 
+                                                          Material.color(Material.Grey, Material.Shade500)
+                                                Layout.fillWidth: true
+                                            }
+                                            
+                                            // Availability indicator
+                                            Rectangle {
+                                                width: 8
+                                                height: 8
+                                                radius: 4
+                                                color: model.isAvailable ? Material.color(Material.Green) : Material.color(Material.Red)
+                                                visible: true
+                                                
+                                                ToolTip.text: model.isAvailable ? "Available" : "Not available"
+                                            }
+                                        }
+                                        
+                                        Label {
+                                            text: model.modeDescription
+                                            font.pixelSize: 10
+                                            color: Material.color(Material.Grey, Material.Shade400)
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        
+                                        // Security and Performance indicators
+                                        RowLayout {
+                                            spacing: 8
+                                            
+                                            Label {
+                                                text: "🛡️ Security: " + model.securityLevel + "/5"
+                                                font.pixelSize: 9
+                                                color: Material.color(Material.Grey, Material.Shade500)
+                                            }
+                                            
+                                            Label {
+                                                text: "⚡ Performance: " + model.performanceLevel + "/5"
+                                                font.pixelSize: 9
+                                                color: Material.color(Material.Grey, Material.Shade500)
                                             }
                                         }
                                     }
                                 }
-                                
-                                RadioButton {
-                                    checked: modelData.id === bootConfig.selectedVirtMode
-                                    onClicked: bootConfig.selectedVirtMode = modelData.id
-                                    
-                                    indicator: Rectangle {
-                                        implicitWidth: 24
-                                        implicitHeight: 24
-                                        radius: 12
-                                        color: "transparent"
-                                        border.color: parent.checked ? "#58a6ff" : "#8b949e"
-                                        border.width: 2
-                                        
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 12
-                                            height: 12
-                                            radius: 6
-                                            color: "#58a6ff"
-                                            visible: parent.parent.checked
-                                        }
-                                    }
-                                }
                             }
                             
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: bootConfig.selectedVirtMode = modelData.id
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Boot Options
-            GroupBox {
-                Layout.fillWidth: true
-                title: "🔧 Boot Options"
-                
-                background: Rectangle {
-                    color: "#161b22"
-                    radius: 10
-                    border.color: "#30363d"
-                    border.width: 1
-                }
-                
-                label: Text {
-                    text: parent.title
-                    color: "#58a6ff"
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 15
-                    spacing: 15
-                    
-                    // Secure Boot
-                    RowLayout {
-                        Layout.fillWidth: true
-                        
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            
-                            Text {
-                                text: "🔒 Secure Boot"
-                                font.pixelSize: 14
-                                font.bold: true
-                                color: "white"
-                            }
-                            
-                            Text {
-                                text: "Verify boot chain integrity"
-                                font.pixelSize: 11
-                                color: "#8b949e"
+                            ScrollBar.vertical: ScrollBar {
+                                active: true
                             }
                         }
                         
-                        Switch {
-                            checked: bootConfig.secureBoot
-                            onCheckedChanged: bootConfig.secureBoot = checked
-                            
-                            indicator: Rectangle {
-                                implicitWidth: 50
-                                implicitHeight: 26
-                                radius: 13
-                                color: parent.checked ? "#2ea043" : "#30363d"
-                                border.color: parent.checked ? "#2ea043" : "#8b949e"
-                                border.width: 2
-                                
-                                Rectangle {
-                                    x: parent.checked ? parent.width - width - 2 : 2
-                                    y: 2
-                                    width: 20
-                                    height: 20
-                                    radius: 10
-                                    color: "white"
-                                    Behavior on x {
-                                        NumberAnimation { duration: 150 }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: "#30363d"
-                    }
-                    
-                    // Fast Boot
-                    RowLayout {
-                        Layout.fillWidth: true
-                        
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            
-                            Text {
-                                text: "⚡ Fast Boot"
-                                font.pixelSize: 14
-                                font.bold: true
-                                color: "white"
-                            }
-                            
-                            Text {
-                                text: "Skip hardware checks for faster startup"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-                        
-                        Switch {
-                            checked: bootConfig.fastBoot
-                            onCheckedChanged: bootConfig.fastBoot = checked
-                            
-                            indicator: Rectangle {
-                                implicitWidth: 50
-                                implicitHeight: 26
-                                radius: 13
-                                color: parent.checked ? "#2ea043" : "#30363d"
-                                border.color: parent.checked ? "#2ea043" : "#8b949e"
-                                border.width: 2
-                                
-                                Rectangle {
-                                    x: parent.checked ? parent.width - width - 2 : 2
-                                    y: 2
-                                    width: 20
-                                    height: 20
-                                    radius: 10
-                                    color: "white"
-                                    Behavior on x {
-                                        NumberAnimation { duration: 150 }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: "#30363d"
-                    }
-                    
-                    // Verbose Boot
-                    RowLayout {
-                        Layout.fillWidth: true
-                        
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            
-                            Text {
-                                text: "📝 Verbose Boot"
-                                font.pixelSize: 14
-                                font.bold: true
-                                color: "white"
-                            }
-                            
-                            Text {
-                                text: "Show detailed boot messages"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-                        
-                        Switch {
-                            checked: bootConfig.verboseBoot
-                            onCheckedChanged: bootConfig.verboseBoot = checked
-                            
-                            indicator: Rectangle {
-                                implicitWidth: 50
-                                implicitHeight: 26
-                                radius: 13
-                                color: parent.checked ? "#2ea043" : "#30363d"
-                                border.color: parent.checked ? "#2ea043" : "#8b949e"
-                                border.width: 2
-                                
-                                Rectangle {
-                                    x: parent.checked ? parent.width - width - 2 : 2
-                                    y: 2
-                                    width: 20
-                                    height: 20
-                                    radius: 10
-                                    color: "white"
-                                    Behavior on x {
-                                        NumberAnimation { duration: 150 }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Hardware Configuration
-            GroupBox {
-                Layout.fillWidth: true
-                title: "🖥️ Hardware Configuration"
-                
-                background: Rectangle {
-                    color: "#161b22"
-                    radius: 10
-                    border.color: "#30363d"
-                    border.width: 1
-                }
-                
-                label: Text {
-                    text: parent.title
-                    color: "#58a6ff"
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 15
-                    spacing: 15
-                    
-                    // CPU Count
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        
-                        RowLayout {
-                            Layout.fillWidth: true
-                            
-                            Text {
-                                text: "CPU Cores: " + (bootConfig.cpuCount === 0 ? "All (" + Thread.idealThreadCount + ")" : bootConfig.cpuCount)
-                                font.pixelSize: 14
-                                color: "white"
-                            }
-                            
-                            Item { Layout.fillWidth: true }
-                            
-                            Button {
-                                text: "Reset"
-                                implicitWidth: 80
-                                
-                                background: Rectangle {
-                                    color: "#30363d"
-                                    radius: 6
-                                }
-                                
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: "#8b949e"
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-                                
-                                onClicked: bootConfig.cpuCount = 0
-                            }
-                        }
-                        
-                        Slider {
-                            Layout.fillWidth: true
-                            from: 0
-                            to: Thread.idealThreadCount
-                            stepSize: 1
-                            value: bootConfig.cpuCount
-                            onValueChanged: bootConfig.cpuCount = value
-                            
-                            background: Rectangle {
-                                x: parent.leftPadding
-                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                                implicitWidth: 200
-                                implicitHeight: 6
-                                width: parent.availableWidth
-                                radius: 3
-                                color: "#30363d"
-                                
-                                Rectangle {
-                                    width: parent.visualPosition * parent.width
-                                    height: parent.height
-                                    color: "#58a6ff"
-                                    radius: 3
-                                }
-                            }
-                            
-                            handle: Rectangle {
-                                x: parent.leftPadding + parent.visualPosition * (parent.availableWidth - width)
-                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                                implicitWidth: 20
-                                implicitHeight: 20
-                                radius: 10
-                                color: parent.pressed ? "#58a6ff" : "#1f6feb"
-                            }
-                        }
-                    }
-                    
-                    // Memory Size
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        
-                        RowLayout {
-                            Layout.fillWidth: true
-                            
-                            Text {
-                                text: "Memory: " + (bootConfig.memorySize === 0 ? "All (" + Math.floor(QSysInfo.totalPhysicalMemory / 1024 / 1024) + " MB)" : bootConfig.memorySize + " MB")
-                                font.pixelSize: 14
-                                color: "white"
-                            }
-                            
-                            Item { Layout.fillWidth: true }
-                            
-                            Button {
-                                text: "Reset"
-                                implicitWidth: 80
-                                
-                                background: Rectangle {
-                                    color: "#30363d"
-                                    radius: 6
-                                }
-                                
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: "#8b949e"
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-                                
-                                onClicked: bootConfig.memorySize = 0
-                            }
-                        }
-                        
-                        Slider {
-                            Layout.fillWidth: true
-                            from: 0
-                            to: Math.floor(QSysInfo.totalPhysicalMemory / 1024 / 1024)
-                            stepSize: 512
-                            value: bootConfig.memorySize
-                            onValueChanged: bootConfig.memorySize = value
-                            
-                            background: Rectangle {
-                                x: parent.leftPadding
-                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                                implicitWidth: 200
-                                implicitHeight: 6
-                                width: parent.availableWidth
-                                radius: 3
-                                color: "#30363d"
-                                
-                                Rectangle {
-                                    width: parent.visualPosition * parent.width
-                                    height: parent.height
-                                    color: "#58a6ff"
-                                    radius: 3
-                                }
-                            }
-                            
-                            handle: Rectangle {
-                                x: parent.leftPadding + parent.visualPosition * (parent.availableWidth - width)
-                                y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                                implicitWidth: 20
-                                implicitHeight: 20
-                                radius: 10
-                                color: parent.pressed ? "#58a6ff" : "#1f6feb"
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Security Profile
-            GroupBox {
-                Layout.fillWidth: true
-                title: "🔐 Security Profile"
-                
-                background: Rectangle {
-                    color: "#161b22"
-                    radius: 10
-                    border.color: "#30363d"
-                    border.width: 1
-                }
-                
-                label: Text {
-                    text: parent.title
-                    color: "#58a6ff"
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-                
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 15
-                    spacing: 10
-                    
-                    Repeater {
-                        model: ["minimal", "balanced", "maximum"]
-                        
-                        delegate: Rectangle {
+                        // System Info Footer
+                        Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 80
-                            radius: 8
-                            color: modelData === bootConfig.securityProfile ? "#1f6feb33" : "#21262d"
-                            border.color: modelData === bootConfig.securityProfile ? "#58a6ff" : "#30363d"
-                            border.width: 2
+                            color: Material.color(Material.Grey, Material.Shade900)
                             
                             ColumnLayout {
-                                anchors.centerIn: parent
-                                spacing: 5
-                                
-                                Text {
-                                    text: modelData === "minimal" ? "🔓" : modelData === "balanced" ? "🔒" : "🔐"
-                                    font.pixelSize: 24
-                                }
-                                
-                                Text {
-                                    text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    color: "white"
-                                }
-                            }
-                            
-                            MouseArea {
                                 anchors.fill: parent
-                                onClicked: bootConfig.securityProfile = modelData
+                                anchors.margins: 12
+                                spacing: 4
+                                
+                                Label {
+                                    text: "System Information"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: Material.color(Material.Grey, Material.Shade300)
+                                }
+                                
+                                Label {
+                                    text: virtModeManager.systemInfo
+                                    font.pixelSize: 9
+                                    color: Material.color(Material.Grey, Material.Shade500)
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+        
+        // Tab 2: System Settings (placeholder)
+        Item {
+            id: settingsPage
             
-            // Action Buttons
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 15
-                
-                Button {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 50
-                    text: "💾 Save Configuration"
-                    
-                    background: Rectangle {
-                        color: parent.pressed ? "#238636" : "#2ea043"
-                        radius: 8
-                    }
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                    
-                    onClicked: {
-                        bootConfig.applyConfig()
-                        statusMessage.show("Configuration saved successfully!", "success")
-                    }
-                }
-                
-                Button {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 50
-                    text: "🔄 Reset to Defaults"
-                    
-                    background: Rectangle {
-                        color: parent.pressed ? "#da3633" : "#f85149"
-                        radius: 8
-                    }
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                    
-                    onClicked: {
-                        bootConfig.resetToDefaults()
-                        statusMessage.show("Reset to defaults", "info")
-                    }
-                }
-            }
-            
-            // Recommendation
-            GroupBox {
-                Layout.fillWidth: true
-                title: "💡 Recommendation"
-                
-                background: Rectangle {
-                    color: "#161b22"
-                    radius: 10
-                    border.color: "#30363d"
-                    border.width: 1
-                }
-                
-                label: Text {
-                    text: parent.title
-                    color: "#58a6ff"
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-                
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 80
-                    color: "#1f6feb22"
-                    radius: 8
-                    border.color: "#1f6feb"
-                    border.width: 1
-                    
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 15
-                        
-                        Text {
-                            text: "💡"
-                            font.pixelSize: 32
-                        }
-                        
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            
-                            Text {
-                                text: "Based on your hardware (" + virtManager.getModeRecommendation().platform + "), we recommend:"
-                                font.pixelSize: 12
-                                color: "#8b949e"
-                            }
-                            
-                            Text {
-                                text: virtManager.getModeRecommendation().reason
-                                font.pixelSize: 14
-                                font.bold: true
-                                color: "#58a6ff"
-                            }
-                        }
-                    }
-                }
-            }
-            
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 20
+            Label {
+                anchors.centerIn: parent
+                text: "System Settings\nComing soon..."
+                font.pixelSize: 18
+                color: Material.color(Material.Grey, Material.Shade500)
+                horizontalAlignment: Text.AlignHCenter
             }
         }
     }
     
-    // Status message popup
-    Popup {
+    // Bottom Tab Bar
+    footer: TabBar {
+        id: tabBar
+        currentIndex: 0
+        
+        TabButton {
+            text: "Boot Entries"
+            icon.source: "qrc:/icons/boot.svg"
+        }
+        
+        TabButton {
+            text: "System Settings"
+            icon.source: "qrc:/icons/settings.svg"
+            enabled: false
+        }
+    }
+    
+    // Status Message Component
+    Message {
         id: statusMessage
-        property string messageType: "info"
-        
+    }
+    
+    // Add/Edit Entry Dialog
+    EntryDialog {
+        id: entryDialog
+        onEntryAccepted: function(name, kernelPath, initrdPath, cmdline, virtMode) {
+            bootConfig.addEntry(name, kernelPath, initrdPath, cmdline, virtMode)
+            statusMessage.show("Entry added successfully", Message.Success)
+        }
+    }
+    
+    // Delete Confirmation Dialog
+    Dialog {
+        id: deleteConfirmationDialog
+        parent: mainWindow.overlay
         modal: true
-        implicitWidth: 300
-        implicitHeight: 80
         anchors.centerIn: parent
-        background: Rectangle {
-            color: statusMessage.messageType === "success" ? "#238636" : "#1f6feb"
-            radius: 8
+        width: 400
+        
+        property int index: -1
+        
+        title: "Confirm Deletion"
+        
+        Label {
+            text: "Are you sure you want to delete this boot entry?\n\nThis action cannot be undone."
+            wrapMode: Text.WordWrap
+            width: parent.width
         }
         
-        contentItem: Text {
-            text: statusMessage.messageType === "success" ? "✓ " + statusMessage.title : statusMessage.title
-            color: "white"
-            font.bold: true
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: {
+            if (deleteConfirmationDialog.index >= 0) {
+                bootConfig.removeEntry(deleteConfirmationDialog.index)
+                statusMessage.show("Entry deleted", Message.Info)
+            }
+        }
+    }
+    
+    // Help Dialog
+    Dialog {
+        id: helpDialog
+        parent: mainWindow.overlay
+        modal: true
+        anchors.centerIn: parent
+        width: 600
+        height: 500
+        
+        title: "NEXUS OS Boot Manager Help"
+        
+        ScrollView {
+            anchors.fill: parent
+            clip: true
+            
+            Label {
+                width: parent.width - 32
+                wrapMode: Text.WordWrap
+                text: `
+<h2>NEXUS OS Boot Manager</h2>
+
+<h3>Getting Started</h3>
+<p>The Boot Manager allows you to configure boot entries and select virtualization modes for your NEXUS OS system.</p>
+
+<h3>Boot Entries</h3>
+<p>Each boot entry represents a different way to start your system:</p>
+<ul>
+<li><b>Name:</b> Display name for the entry</li>
+<li><b>Kernel Path:</b> Location of the kernel file</li>
+<li><b>Initrd Path:</b> Initial ramdisk (optional)</li>
+<li><b>Command Line:</b> Kernel parameters</li>
+<li><b>Virtualization Mode:</b> How the system virtualizes</li>
+</ul>
+
+<h3>Virtualization Modes</h3>
+<ul>
+<li><b>Native:</b> Direct hardware, maximum performance</li>
+<li><b>Light:</b> Process isolation, balanced (Recommended)</li>
+<li><b>Full:</b> Complete virtualization, enterprise security</li>
+<li><b>Container:</b> Lightweight, development optimized</li>
+<li><b>Secure Enclave:</b> Maximum security isolation</li>
+<li><b>Compatibility:</b> Legacy OS support</li>
+<li><b>Custom:</b> Advanced configuration</li>
+</ul>
+
+<h3>Tips</h3>
+<ul>
+<li>Set a default entry for automatic boot</li>
+<li>Use Safe Mode if you encounter issues</li>
+<li>Debug Mode provides detailed logging</li>
+<li>Memory Test checks your RAM</li>
+</ul>
+
+<p><i>Version: </i>` + appVersion + `</p>
+`
+            }
         }
         
-        Timer {
-            interval: 2000
-            running: false
-            onTriggered: statusMessage.close()
-        }
-        
-        function show(text, type) {
-            title = text
-            messageType = type
-            open()
-            timer.start()
-        }
+        standardButtons: Dialog.Close
+    }
+    
+    // Functions
+    function editEntry(index) {
+        // Open edit dialog with existing entry data
+        entryDialog.entryIndex = index
+        entryDialog.open()
     }
 }

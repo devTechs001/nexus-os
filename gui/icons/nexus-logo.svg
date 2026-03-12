@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="nexusGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#42A5F5"/>
+      <stop offset="100%" style="stop-color:#2962FF"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#nexusGrad)"/>
+  <path d="M32 12 L48 28 L44 32 L32 20 L20 32 L16 28 Z" fill="#FFFFFF" opacity="0.9"/>
+  <circle cx="32" cy="38" r="14" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.7"/>
+  <circle cx="32" cy="38" r="6" fill="#FFFFFF" opacity="0.5"/>
+</svg>
