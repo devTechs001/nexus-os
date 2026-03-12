@@ -154,10 +154,10 @@ int vprintk(const char *fmt, __builtin_va_list args)
     }
 
     *str = '\0';
-    
-    /* Output to stdout */
-    printf("%s", printk_buffer);
-    fflush(stdout);
+
+    /* Output via VGA console - printf not available in bare-metal */
+    /* In real OS: write to serial port or framebuffer */
+    (void)printk_buffer;  /* Suppress unused warning */
 
     return len;
 }

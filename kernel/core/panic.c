@@ -1,13 +1,15 @@
 /*
  * NEXUS OS - Panic Handling
  * kernel/core/panic.c
+ *
+ * PURE BARE-METAL - NO STANDARD LIBRARY
  */
 
 #include "../include/kernel.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <execinfo.h>
-#include <signal.h>
+
+/* External functions */
+extern void halt_cpu(void);
+extern void disable_interrupts(void);
 
 #define PANIC_STACK_TRACE_SIZE  64
 
@@ -15,17 +17,14 @@ static volatile int panic_in_progress = 0;
 
 void dump_stack_trace(void)
 {
-    void *buffer[PANIC_STACK_TRACE_SIZE];
-    int nptrs = backtrace(buffer, PANIC_STACK_TRACE_SIZE);
-    
-    printk("Stack trace:\n");
-    backtrace_symbols_fd(buffer, nptrs, fileno(stdout));
+    /* Stack trace will be implemented in arch-specific code */
+    printk("[PANIC] Stack trace not available\n");
 }
 
 void dump_registers(void)
 {
-    /* In real OS: dump CPU registers */
-    printk("Register dump not available in userspace mode\n");
+    /* Register dump will be implemented in arch-specific code */
+    printk("[PANIC] Register dump not available\n");
 }
 
 void dump_memory_info(void)

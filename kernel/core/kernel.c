@@ -5,16 +5,29 @@
  * kernel.c - Kernel Core Entry Point
  *
  * This is the main kernel entry point after boot.
- * PURE BARE-METAL CODE - NO STANDARD LIBRARY
+ * NO userspace libraries - pure bare-metal code.
  */
 
 #include "../include/kernel.h"
 #include "../include/types.h"
 #include "../include/config.h"
 
-/* Tell compiler this is freestanding */
-__attribute__((used))
-const char *_freestanding_marker = "freestanding";
+/* Kernel state constants */
+#define KERNEL_STATE_BOOTING        0
+#define KERNEL_STATE_INITIALIZING   1
+#define KERNEL_STATE_RUNNING        2
+#define KERNEL_STATE_SHUTTING_DOWN  3
+
+/* Spinlock initializer */
+#define SPINLOCK_UNLOCKED           { .lock = 0 }
+
+/* Forward declarations for port I/O (implemented at bottom) */
+extern void outb(unsigned short port, unsigned char val);
+extern unsigned char inb(unsigned short port);
+extern void io_wait(void);
+
+/* Spinlock init stub */
+#define spin_lock_init(lock) do { (lock)->lock = 0; } while(0)
 
 /*===========================================================================*/
 /*                         KERNEL BSS SECTION                                */
@@ -263,11 +276,12 @@ static void print_string(const char *str, u8 color)
 
 /**
  * vprintk - Format and print to VGA console
+ * Note: Also in printk.c - this is a weak alias
  */
+__attribute__((weak))
 int vprintk(const char *fmt, __builtin_va_list args)
 {
     u8 color = vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    u8 default_color = color;
     const char *p = fmt;
     
     while (*p) {
@@ -340,7 +354,9 @@ int vprintk(const char *fmt, __builtin_va_list args)
 
 /**
  * printk - Print formatted string to console
+ * Note: Also in printk.c - this is a weak alias
  */
+__attribute__((weak))
 int printk(const char *fmt, ...)
 {
     __builtin_va_list args;
@@ -478,7 +494,7 @@ void kernel_early_init(void)
     printk("\n");
 
     /* Initialize spinlock */
-    spin_lock_init(&kernel_lock);
+    kernel_lock.lock = 0;
 
     /* Architecture-specific early init (GDT, IDT, early console) */
     arch_early_init();
@@ -601,21 +617,25 @@ void kernel_init(void)
 
 /**
  * kernel_start_scheduler - Start the scheduler
- * 
+ *
  * This function should never return on the idle task.
  */
 void kernel_start_scheduler(void)
 {
     printk("[INFO] Starting scheduler on CPU %u...\n", arch_get_cpu_id());
-    
+
     /* Enable interrupts before starting scheduler */
     arch_enable_interrupts();
-    
+
     /* Start the scheduler - this should never return for idle */
     scheduler_start();
-    
-    /* If we get here, we're running on idle thread */
+
+    /* If we get here, we're running on idle thread - halt */
     printk("[WARN] Scheduler returned to idle (should not happen)\n");
+
+    for (;;) {
+        arch_halt_cpu();
+    }
 }
 
 /**
@@ -688,7 +708,9 @@ void __noreturn kernel_panic(const char *fmt, ...)
 
 /**
  * kernel_assert_failed - Assertion failure handler
+ * Note: Also in panic.c - this is a weak alias
  */
+__attribute__((weak))
 void kernel_assert_failed(const char *expr, const char *file, int line)
 {
     printk("\n[BUG] Assertion failed: %s\n", expr);
@@ -711,6 +733,7 @@ percpu_data_t *get_percpu(void)
 /**
  * get_cpu_id - Get current CPU ID
  */
+__attribute__((weak))
 u32 get_cpu_id(void)
 {
     return arch_get_cpu_id();
@@ -789,13 +812,28 @@ void shutdown(void)
 /*                         MEMORY ALLOCATION (Kernel)                        */
 /*===========================================================================*/
 
+/* Simple early boot allocator - will be replaced by proper heap */
+static unsigned char early_heap[1024 * 1024];  /* 1MB early heap */
+static unsigned long early_heap_offset = 0;
+
 /**
  * kmalloc - Allocate kernel memory
  */
 void *kmalloc(size_t size)
 {
-    /* Will be implemented in mm/heap.c */
-    return NULL;
+    void *ptr;
+
+    /* Align to 8 bytes */
+    size = (size + 7) & ~7;
+
+    if (early_heap_offset + size > sizeof(early_heap)) {
+        return NULL;  /* Out of memory */
+    }
+
+    ptr = &early_heap[early_heap_offset];
+    early_heap_offset += size;
+
+    return ptr;
 }
 
 /**
@@ -812,10 +850,13 @@ void *kzalloc(size_t size)
 
 /**
  * kfree - Free kernel memory
+ * Note: Early allocator doesn't support free - memory is permanently allocated
  */
 void kfree(void *ptr)
 {
-    /* Will be implemented in mm/heap.c */
+    /* Early boot allocator - no free support */
+    /* Proper kfree will be implemented in mm/heap.c */
+    (void)ptr;
 }
 
 /*===========================================================================*/
@@ -923,19 +964,16 @@ int strcmp(const char *s1, const char *s2)
 
 /*===========================================================================*/
 /*                         PORT I/O                                          */
+/* Note: These are also in boot.asm - weak aliases here                      */
 /*===========================================================================*/
 
-/**
- * outb - Write byte to port
- */
+__attribute__((weak))
 void outb(u16 port, u8 val)
 {
     __asm__ __volatile__("outb %0, %1" :: "a"(val), "Nd"(port));
 }
 
-/**
- * inb - Read byte from port
- */
+__attribute__((weak))
 u8 inb(u16 port)
 {
     u8 val;
@@ -943,17 +981,13 @@ u8 inb(u16 port)
     return val;
 }
 
-/**
- * outw - Write word to port
- */
+__attribute__((weak))
 void outw(u16 port, u16 val)
 {
     __asm__ __volatile__("outw %0, %1" :: "a"(val), "Nd"(port));
 }
 
-/**
- * inw - Read word from port
- */
+__attribute__((weak))
 u16 inw(u16 port)
 {
     u16 val;
@@ -961,17 +995,13 @@ u16 inw(u16 port)
     return val;
 }
 
-/**
- * outl - Write dword to port
- */
+__attribute__((weak))
 void outl(u16 port, u32 val)
 {
     __asm__ __volatile__("outl %0, %1" :: "a"(val), "Nd"(port));
 }
 
-/**
- * inl - Read dword from port
- */
+__attribute__((weak))
 u32 inl(u16 port)
 {
     u32 val;
@@ -979,9 +1009,7 @@ u32 inl(u16 port)
     return val;
 }
 
-/**
- * io_wait - Small delay for I/O
- */
+__attribute__((weak))
 void io_wait(void)
 {
     outb(0x80, 0);
@@ -1014,3 +1042,38 @@ u32 kernel_get_state(void)
 {
     return kernel_state.state;
 }
+
+/*===========================================================================*/
+/*                         STUB FUNCTIONS FOR INCOMPLETE SUBSYSTEMS          */
+/*         These will be properly implemented in respective modules          */
+/*===========================================================================*/
+
+/* Memory Management stubs */
+void vmm_init(void) { }
+void heap_init(void) { }
+void slab_init(void) { }
+void pmm_init(void) { }
+
+/* Interrupt stubs */
+void interrupt_init(void) { }
+
+/* Timer stubs */
+void arch_init_timer(u64 freq) { (void)freq; }
+
+/* Scheduler stubs */
+void scheduler_init(void) { }
+void scheduler_start(void) { }
+
+/* SMP stubs */
+void arch_init_smp(void) { }
+
+/* ACPI stub */
+void acpi_init(void) { }
+
+/* Architecture init stubs */
+void arch_init_gdt(void) { }
+void arch_init_idt(void) { }
+void arch_init_paging(void) { }
+
+/* CPU info */
+unsigned int arch_get_apic_id(void) { return 0; }
