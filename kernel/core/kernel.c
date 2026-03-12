@@ -27,6 +27,11 @@ __section(".bss") static struct {
     u32 cpu_count;
     bool smp_enabled;
     bool virt_enabled;
+    bool is_vmware;           /* VMware detection */
+    bool is_virtualbox;       /* VirtualBox detection */
+    bool is_qemu;             /* QEMU detection */
+    bool is_hyperv;           /* Hyper-V detection */
+    char virt_mode[16];       /* Current virtualization mode */
 } kernel_state;
 
 __section(".bss") static percpu_data_t percpu_data[MAX_CPUS];
@@ -345,38 +350,138 @@ int printk(const char *fmt, ...)
 /*                         KERNEL INITIALIZATION                             */
 /*===========================================================================*/
 
+/*===========================================================================*/
+/*                     VIRTUALIZATION DETECTION                              */
+/*===========================================================================*/
+
+/**
+ * detect_virtualization - Detect if running in a VM (VMware, VirtualBox, etc.)
+ *
+ * Uses CPUID hypervisor detection to identify the virtualization environment.
+ * Sets kernel_state.virt_mode and appropriate flags.
+ */
+static void detect_virtualization(void)
+{
+    u32 eax, ebx, ecx, edx;
+    char hypervisor_sig[13];
+
+    /* Initialize */
+    kernel_state.is_vmware = false;
+    kernel_state.is_virtualbox = false;
+    kernel_state.is_qemu = false;
+    kernel_state.is_hyperv = false;
+    memset(kernel_state.virt_mode, 0, sizeof(kernel_state.virt_mode));
+
+    /* Check for hypervisor presence (CPUID leaf 1, ECX bit 31) */
+    __asm__ __volatile__(
+        "cpuid"
+        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+        : "a"(1)
+    );
+
+    if (!(ecx & (1 << 31))) {
+        /* No hypervisor detected - running on bare metal */
+        strcpy(kernel_state.virt_mode, "native");
+        return;
+    }
+
+    /* Get hypervisor signature (CPUID leaf 0x40000000) */
+    __asm__ __volatile__(
+        "cpuid"
+        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+        : "a"(0x40000000)
+    );
+
+    hypervisor_sig[0] = ((char*)&ebx)[0];
+    hypervisor_sig[1] = ((char*)&ebx)[1];
+    hypervisor_sig[2] = ((char*)&ebx)[2];
+    hypervisor_sig[3] = ((char*)&ebx)[3];
+    hypervisor_sig[4] = ((char*)&ecx)[0];
+    hypervisor_sig[5] = ((char*)&ecx)[1];
+    hypervisor_sig[6] = ((char*)&ecx)[2];
+    hypervisor_sig[7] = ((char*)&ecx)[3];
+    hypervisor_sig[8] = ((char*)&edx)[0];
+    hypervisor_sig[9] = ((char*)&edx)[1];
+    hypervisor_sig[10] = ((char*)&edx)[2];
+    hypervisor_sig[11] = ((char*)&edx)[3];
+    hypervisor_sig[12] = '\0';
+
+    /* Identify hypervisor */
+    if (strcmp(hypervisor_sig, "VMwareVMware") == 0) {
+        kernel_state.is_vmware = true;
+        strcpy(kernel_state.virt_mode, "vmware");
+    } else if (strcmp(hypervisor_sig, "VBoxVBoxVBox") == 0) {
+        kernel_state.is_virtualbox = true;
+        strcpy(kernel_state.virt_mode, "vbox");
+    } else if (strcmp(hypervisor_sig, "Microsoft Hv") == 0) {
+        kernel_state.is_hyperv = true;
+        strcpy(kernel_state.virt_mode, "hyperv");
+    } else {
+        /* Check for QEMU by CPUID vendor string */
+        __asm__ __volatile__(
+            "cpuid"
+            : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+            : "a"(0)
+        );
+
+        hypervisor_sig[0] = ((char*)&ebx)[0];
+        hypervisor_sig[1] = ((char*)&ebx)[1];
+        hypervisor_sig[2] = ((char*)&ebx)[2];
+        hypervisor_sig[3] = ((char*)&ebx)[3];
+        hypervisor_sig[4] = ((char*)&edx)[0];
+        hypervisor_sig[5] = ((char*)&edx)[1];
+        hypervisor_sig[6] = ((char*)&edx)[2];
+        hypervisor_sig[7] = ((char*)&edx)[3];
+        hypervisor_sig[8] = ((char*)&ecx)[0];
+        hypervisor_sig[9] = ((char*)&ecx)[1];
+        hypervisor_sig[10] = ((char*)&ecx)[2];
+        hypervisor_sig[11] = ((char*)&ecx)[3];
+        hypervisor_sig[12] = '\0';
+
+        if (strcmp(hypervisor_sig, "QEMUQEMUQ") == 0) {
+            kernel_state.is_qemu = true;
+            strcpy(kernel_state.virt_mode, "qemu");
+        } else {
+            strcpy(kernel_state.virt_mode, "unknown");
+        }
+    }
+}
+
 /**
  * kernel_early_init - Early kernel initialization
- * 
+ *
  * Called immediately after bootloader hands control to kernel.
  * Only safe to call very basic functions here.
  */
 void kernel_early_init(void)
 {
     kernel_state.state = KERNEL_STATE_BOOTING;
-    
+
     /* Clear screen with blue background */
     vga_clear(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE));
-    
+
     /* Print boot banner */
     printk("\n");
     printk("  ____   ___   __  __   _   _  _____ \n");
     printk(" |  _ \\ / _ \\ |  \\/  | | \\ | || ____|\n");
     printk(" | |_) | | | || |\\/| | |  \\| ||  _|  \n");
     printk(" |  _ <| |_| || |  | | | |\\  || |___ \n");
-    printk(" |_| \\_\\\\___/ |_|  |_| |_| \\_||_____|\nn");
+    printk(" |_| \\_\\\\___/ |_|  |_| |_| \\_||_____|\n");
     printk("\n");
     printk("  Version: %s (%s)\n", NEXUS_VERSION_STRING, NEXUS_CODENAME);
     printk("  Built: %s %s\n", __DATE__, __TIME__);
     printk("  ==============================================\n");
     printk("\n");
-    
+
     /* Initialize spinlock */
     spin_lock_init(&kernel_lock);
-    
+
     /* Architecture-specific early init (GDT, IDT, early console) */
     arch_early_init();
-    
+
+    /* Detect virtualization environment EARLY */
+    detect_virtualization();
+
     /* Initialize boot CPU data */
     u32 boot_cpu = arch_get_cpu_id();
     percpu_data[boot_cpu].cpu_id = boot_cpu;
@@ -386,11 +491,24 @@ void kernel_early_init(void)
     percpu_data[boot_cpu].context_switches = 0;
     percpu_data[boot_cpu].interrupts = 0;
     percpu_data[boot_cpu].kernel_stack = NULL;
-    
+
     kernel_state.cpu_count = 1;
     kernel_state.smp_enabled = false;
     kernel_state.virt_enabled = false;
-    
+
+    /* Print virtualization status */
+    if (kernel_state.is_vmware) {
+        printk("[VM] VMware environment detected - using VMware optimizations\n");
+    } else if (kernel_state.is_virtualbox) {
+        printk("[VM] VirtualBox environment detected\n");
+    } else if (kernel_state.is_qemu) {
+        printk("[VM] QEMU environment detected\n");
+    } else if (kernel_state.is_hyperv) {
+        printk("[VM] Hyper-V environment detected\n");
+    } else {
+        printk("[OK] Running on bare metal (%s mode)\n", kernel_state.virt_mode);
+    }
+
     printk("[OK] Early initialization complete\n");
 }
 

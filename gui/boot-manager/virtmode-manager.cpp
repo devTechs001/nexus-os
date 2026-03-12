@@ -360,7 +360,21 @@ void VirtModeManager::initializeModes()
 {
     beginResetModel();
     m_modes.clear();
-    
+
+    // VMware Mode (DEFAULT)
+    VirtModeInfo vmware;
+    vmware.id = "vmware";
+    vmware.name = "VMware Mode";
+    vmware.description = "Optimized for VMware virtualization with full hardware compatibility. Default mode for virtual machines.";
+    vmware.icon = "qrc:/icons/vmware.svg";
+    vmware.securityLevel = 3;
+    vmware.performanceLevel = 4;
+    vmware.isAvailable = true;
+    vmware.requiresHardwareSupport = false;
+    vmware.requirements = "VMware Workstation, Player, or ESXi";
+    vmware.recommendedFor = "Virtual Machines, Development, Testing (DEFAULT)";
+    m_modes.append(vmware);
+
     // Native Mode
     VirtModeInfo native;
     native.id = "native";
@@ -374,12 +388,12 @@ void VirtModeManager::initializeModes()
     native.requirements = "None";
     native.recommendedFor = "Gaming, Development, Performance-critical tasks";
     m_modes.append(native);
-    
+
     // Light Virtualization
     VirtModeInfo light;
     light.id = "light";
     light.name = "Light Virtualization";
-    light.description = "Process isolation via micro-VMs with minimal overhead. Default mode for balanced security and performance.";
+    light.description = "Process isolation via micro-VMs with minimal overhead. Balanced security and performance.";
     light.icon = "qrc:/icons/light.svg";
     light.securityLevel = 3;
     light.performanceLevel = 4;
@@ -460,7 +474,7 @@ void VirtModeManager::initializeModes()
     m_modes.append(custom);
     
     endResetModel();
-    
-    // Set default selection
-    m_selectedMode = "light";
+
+    // Set default selection to VMware mode
+    m_selectedMode = "vmware";
 }

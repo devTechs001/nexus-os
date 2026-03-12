@@ -669,7 +669,7 @@ void BootConfigModel::clearAll()
 
 void BootConfigModel::createDefaultEntries()
 {
-    // NEXUS OS Default
+    // NEXUS OS Default (VMware Mode)
     BootEntry nexusEntry;
     nexusEntry.id = "nexus-default";
     nexusEntry.name = "NEXUS OS";
@@ -680,7 +680,7 @@ void BootConfigModel::createDefaultEntries()
     nexusEntry.isDefault = true;
     nexusEntry.isEnabled = true;
     nexusEntry.timeout = 0;
-    nexusEntry.virtMode = "light";
+    nexusEntry.virtMode = "vmware";  // DEFAULT: VMware Mode
     nexusEntry.bootCount = 0;
     m_entries.append(nexusEntry);
     

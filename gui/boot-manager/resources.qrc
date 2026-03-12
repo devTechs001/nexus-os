@@ -5,11 +5,11 @@
         <file>gui/boot-manager/qml/Main.qml</file>
         <file>gui/boot-manager/qml/Message.qml</file>
         <file>gui/boot-manager/qml/EntryDialog.qml</file>
-        
+
         <!-- VM Manager QML -->
         <file>gui/vm-manager/qml/Main.qml</file>
-        
-        <!-- Icons (SVG placeholders) -->
+
+        <!-- Icons (SVG) -->
         <file>gui/icons/nexus-logo.svg</file>
         <file>gui/icons/boot.svg</file>
         <file>gui/icons/settings.svg</file>
@@ -23,8 +23,9 @@
         <file>gui/icons/hidden.svg</file>
         <file>gui/icons/star.svg</file>
         <file>gui/icons/star-filled.svg</file>
-        
+
         <!-- Virtualization Mode Icons -->
+        <file>gui/icons/vmware.svg</file>
         <file>gui/icons/native.svg</file>
         <file>gui/icons/light.svg</file>
         <file>gui/icons/full.svg</file>
