@@ -1,6 +1,6 @@
 /*
  * NEXUS OS - Boot Manager GUI
- * Copyright (c) 2024 NEXUS Development Team
+ * Copyright (c) 2026 NEXUS Development Team
  *
  * virtmode-manager.h - Virtualization Mode Manager
  */

@@ -1,6 +1,6 @@
 /*
  * NEXUS OS - AI/ML Framework
- * Copyright (c) 2024 NEXUS Development Team
+ * Copyright (c) 2026 NEXUS Development Team
  *
  * ai_ml.h - AI/ML Framework Header
  *

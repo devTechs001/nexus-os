@@ -1,6 +1,6 @@
 /*
  * NEXUS OS - Universal Operating System
- * Copyright (c) 2024 NEXUS Development Team
+ * Copyright (c) 2026 NEXUS Development Team
  *
  * init.c - Kernel Initialization
  */

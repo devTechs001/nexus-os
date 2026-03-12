@@ -1,6 +1,6 @@
 /*
  * NEXUS OS - Mobile Framework
- * Copyright (c) 2024 NEXUS Development Team
+ * Copyright (c) 2026 NEXUS Development Team
  *
  * mobile.h - Mobile Framework Header
  *

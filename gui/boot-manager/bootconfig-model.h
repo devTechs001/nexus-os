@@ -1,6 +1,6 @@
 /*
  * NEXUS OS - Boot Manager GUI
- * Copyright (c) 2024 NEXUS Development Team
+ * Copyright (c) 2026 NEXUS Development Team
  *
  * bootconfig-model.h - Boot Configuration Data Model
  */

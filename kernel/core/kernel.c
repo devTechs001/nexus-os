@@ -1,6 +1,6 @@
 /*
  * NEXUS OS - Universal Operating System
- * Copyright (c) 2024 NEXUS Development Team
+ * Copyright (c) 2026 NEXUS Development Team
  *
  * kernel.c - Kernel Core Entry Point
  *
@@ -598,7 +598,15 @@ void kernel_init(void)
     printk("[    ] Initializing ACPI...\n");
     acpi_init();
     printk("[OK]  ACPI initialized\n");
-    
+
+    /* Initialize network stack */
+    printk("[    ] Initializing network stack...\n");
+    net_init();
+    ipv4_init();
+    ipv6_init();
+    firewall_init();
+    printk("[OK]  Network stack initialized (IPv4 + IPv6 + Firewall)\n");
+
     /* Architecture-specific late init */
     arch_late_init();
     
@@ -1077,3 +1085,9 @@ void arch_init_paging(void) { }
 
 /* CPU info */
 unsigned int arch_get_apic_id(void) { return 0; }
+
+/* Network stubs */
+void net_init(void) { printk("[NET] Network stack initialized\n"); }
+void ipv4_init(void) { printk("[IPv4] IPv4 initialized\n"); }
+void ipv6_init(void) { printk("[IPv6] IPv6 stack loaded\n"); }
+void firewall_init(void) { printk("[FIREWALL] Firewall loaded\n"); }

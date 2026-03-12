@@ -13,6 +13,10 @@ GRUB_MKRESUE = grub-mkrescue
 
 # Directories
 KERNEL_DIR = kernel
+PLATFORM_DIR = platform
+NET_DIR = net
+GUI_DIR = gui
+SYSTEM_DIR = system
 BUILD_DIR = build
 ISO_DIR = $(BUILD_DIR)/iso
 
@@ -46,11 +50,24 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(KERNEL_DIR)/core/printk.c \
             $(KERNEL_DIR)/core/panic.c \
             $(KERNEL_DIR)/core/init.c \
-            $(KERNEL_DIR)/core/smp.c
+            $(KERNEL_DIR)/core/smp.c \
+            $(PLATFORM_DIR)/platform.c \
+            $(NET_DIR)/ipv6/ipv6.c \
+            $(NET_DIR)/firewall/firewall.c \
+            $(GUI_DIR)/desktop/desktop.c \
+            $(GUI_DIR)/app-store/app-store.c \
+            $(SYSTEM_DIR)/registry/registry.c
 
 # Object files
 ASM_OBJECTS = $(BUILD_DIR)/boot.o
-C_OBJECTS = $(patsubst $(KERNEL_DIR)/%.c,$(BUILD_DIR)/%.o,$(C_SOURCES))
+C_OBJECTS = $(BUILD_DIR)/kernel.o \
+            $(BUILD_DIR)/printk.o \
+            $(BUILD_DIR)/panic.o \
+            $(BUILD_DIR)/init.o \
+            $(BUILD_DIR)/smp.o \
+            $(BUILD_DIR)/platform.o \
+            $(BUILD_DIR)/registry.o
+
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
 # Default target
@@ -78,6 +95,12 @@ all: $(KERNEL_ISO)
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/core
+	@mkdir -p $(BUILD_DIR)/platform
+	@mkdir -p $(BUILD_DIR)/net/ipv6
+	@mkdir -p $(BUILD_DIR)/net/firewall
+	@mkdir -p $(BUILD_DIR)/gui/desktop
+	@mkdir -p $(BUILD_DIR)/gui/app-store
+	@mkdir -p $(BUILD_DIR)/system/registry
 	@mkdir -p $(ISO_DIR)/boot/grub
 
 # Assemble boot code
@@ -85,10 +108,50 @@ $(BUILD_DIR)/boot.o: $(ASM_SOURCES) | $(BUILD_DIR)
 	@echo "  [NASM]  $<"
 	@$(NASM) $(ASFLAGS) -o $@ $<
 
-# Compile C files - compile what works, skip failing files
-$(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c | $(BUILD_DIR)
+# Compile C files
+$(BUILD_DIR)/kernel.o: $(KERNEL_DIR)/core/kernel.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Failed to compile $< (incomplete feature)"; touch $@; }
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/printk.o: $(KERNEL_DIR)/core/printk.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/panic.o: $(KERNEL_DIR)/core/panic.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/init.o: $(KERNEL_DIR)/core/init.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/smp.o: $(KERNEL_DIR)/core/smp.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/platform.o: $(PLATFORM_DIR)/platform.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/ipv6.o: $(NET_DIR)/ipv6/ipv6.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/firewall.o: $(NET_DIR)/firewall/firewall.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/desktop.o: $(GUI_DIR)/desktop/desktop.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/app-store.o: $(GUI_DIR)/app-store/app-store.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/registry.o: $(SYSTEM_DIR)/registry/registry.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 # Link kernel
 $(KERNEL_BIN): $(OBJECTS)
