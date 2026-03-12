@@ -91,7 +91,7 @@ all: check-deps $(KERNEL_ISO)
 	@echo "  Default: VMware mode (auto-detected)"
 	@echo ""
 
-# Check dependencies (never fails - provides solutions)
+# Check dependencies (REQUIRED - will install if missing)
 .PHONY: check-deps
 check-deps:
 	@echo ""
@@ -100,29 +100,55 @@ check-deps:
 	@if command -v $(CC) > /dev/null 2>&1; then \
 		echo "  ✓ GCC found"; \
 	else \
-		echo "  ✗ GCC not found"; \
-		echo "    Solution: sudo apt-get install gcc"; \
-		echo "    Attempting to install..."; \
+		echo "  ✗ GCC not found - Installing..."; \
 		sudo apt-get update && sudo apt-get install -y gcc || { \
-			echo "    Automatic installation failed"; \
-			echo "    Please install manually: sudo apt-get install gcc"; \
+			echo "  ✗ Failed to install GCC"; \
+			echo "  Please install manually: sudo apt-get install gcc"; \
+			exit 1; \
 		} \
 	fi
 	@if command -v $(NASM) > /dev/null 2>&1; then \
 		echo "  ✓ NASM found"; \
 	else \
-		echo "  ✗ NASM not found"; \
-		echo "    Solution: sudo apt-get install nasm"; \
-		echo "    Attempting to install..."; \
-		sudo apt-get install -y nasm || echo "    Install manually: sudo apt-get install nasm"; \
+		echo "  ✗ NASM not found - Installing..."; \
+		sudo apt-get install -y nasm || { \
+			echo "  ✗ Failed to install NASM"; \
+			echo "  Please install manually: sudo apt-get install nasm"; \
+			exit 1; \
+		} \
 	fi
 	@if command -v $(GRUB_MKRESUE) > /dev/null 2>&1; then \
 		echo "  ✓ GRUB found"; \
 	else \
-		echo "  ⚠ GRUB not found (ISO creation may fail)"; \
-		echo "    Solution: sudo apt-get install grub-pc-bin grub-common"; \
-		echo "    Continuing anyway - binary will still work"; \
+		echo "  ✗ GRUB not found - Installing (REQUIRED for ISO)..."; \
+		sudo apt-get update && sudo apt-get install -y grub-pc-bin grub-common || { \
+			echo "  ✗ Failed to install GRUB"; \
+			echo "  Please install manually: sudo apt-get install grub-pc-bin grub-common"; \
+			exit 1; \
+		} \
 	fi
+	@if command -v xorriso > /dev/null 2>&1; then \
+		echo "  ✓ xorriso found"; \
+	else \
+		echo "  ✗ xorriso not found - Installing (REQUIRED for ISO)..."; \
+		sudo apt-get install -y xorriso || { \
+			echo "  ✗ Failed to install xorriso"; \
+			echo "  Please install manually: sudo apt-get install xorriso"; \
+			exit 1; \
+		} \
+	fi
+	@if command -v mtools > /dev/null 2>&1; then \
+		echo "  ✓ mtools found"; \
+	else \
+		echo "  ✗ mtools not found - Installing (REQUIRED for ISO)..."; \
+		sudo apt-get install -y mtools || { \
+			echo "  ✗ Failed to install mtools"; \
+			echo "  Please install manually: sudo apt-get install mtools"; \
+			exit 1; \
+		} \
+	fi
+	@echo ""
+	@echo "  All required dependencies installed!"
 	@echo ""
 
 # Create build directories

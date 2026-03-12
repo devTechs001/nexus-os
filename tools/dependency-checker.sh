@@ -191,57 +191,98 @@ check_build_deps() {
     echo ""
     print_info "Checking build dependencies..."
     echo ""
-    
+
     local build_deps=(
         "build-essential:GCC and build tools:echo 'Install manually: sudo apt-get install build-essential'"
         "gcc:GNU Compiler Collection:$PKG_INSTALL gcc"
         "make:Build automation tool:$PKG_INSTALL make"
         "nasm:Netwide Assembler:$PKG_INSTALL nasm"
-        "grub-pc-bin:GRUB bootloader:$PKG_INSTALL grub-pc-bin"
-        "grub-common:GRUB common files:$PKG_INSTALL grub-common"
-        "xorriso:ISO creation tool:$PKG_INSTALL xorriso"
-        "mtools:MS-DOS tools:$PKG_INSTALL mtools"
+        "grub-pc-bin:GRUB bootloader (REQUIRED):$PKG_INSTALL grub-pc-bin"
+        "grub-common:GRUB common files (REQUIRED):$PKG_INSTALL grub-common"
+        "xorriso:ISO creation tool (REQUIRED):$PKG_INSTALL xorriso"
+        "mtools:MS-DOS tools (REQUIRED):$PKG_INSTALL mtools"
     )
-    
+
     local missing_count=0
-    
+    local critical_missing=0
+
     for dep_info in "${build_deps[@]}"; do
         IFS=':' read -r pkg desc fallback <<< "$dep_info"
-        
+
         if is_installed "$pkg"; then
             print_success "✓ $pkg ($desc)"
             INSTALLED_DEPS["$pkg"]="installed"
         else
-            print_warning "✗ $pkg ($desc) - MISSING"
+            if [[ "$desc" == *"REQUIRED"* ]]; then
+                print_error "✗ $pkg ($desc) - CRITICAL"
+                ((critical_missing++))
+            else
+                print_warning "✗ $pkg ($desc) - MISSING"
+            fi
             MISSING_DEPS["$pkg"]="$fallback"
             ((missing_count++))
         fi
     done
-    
+
     echo ""
-    
-    if [ $missing_count -gt 0 ]; then
-        print_warning "$missing_count build dependencies missing"
+
+    if [ $critical_missing -gt 0 ]; then
+        print_error "$critical_missing CRITICAL dependencies missing!"
         echo ""
-        
+        print_info "These MUST be installed for the build to work."
+        echo ""
+
+        if [ "$AUTO_INSTALL" = true ] || [ "$INTERACTIVE" = true ]; then
+            read -p "Install ALL critical dependencies now? (Y/n): " install_critical
+
+            if [ "$install_critical" != "n" ] && [ "$install_critical" != "N" ]; then
+                print_info "Updating package list..."
+                eval "$PKG_UPDATE" || {
+                    print_error "Failed to update package list"
+                    return 1
+                }
+
+                # Install critical packages
+                for dep_info in "${build_deps[@]}"; do
+                    IFS=':' read -r pkg desc fallback <<< "$dep_info"
+
+                    if [[ "$desc" == *"REQUIRED"* ]] && [ -n "${MISSING_DEPS[$pkg]}" ]; then
+                        install_package "$pkg" "$desc" "$fallback" || {
+                            print_error "Failed to install $pkg"
+                            return 1
+                        }
+                    fi
+                done
+
+                print_success "Critical dependencies installed!"
+            else
+                print_error "Build cannot continue without critical dependencies"
+                return 1
+            fi
+        else
+            print_error "Run with --auto or --fix to auto-install"
+            return 1
+        fi
+    elif [ $missing_count -gt 0 ]; then
+        print_warning "$missing_count optional dependencies missing"
+        echo ""
+
         if [ "$AUTO_INSTALL" = true ]; then
             print_info "Attempting to install missing dependencies..."
             echo ""
-            
+
             for dep_info in "${build_deps[@]}"; do
                 IFS=':' read -r pkg desc fallback <<< "$dep_info"
-                
+
                 if [ -n "${MISSING_DEPS[$pkg]}" ]; then
                     install_package "$pkg" "$desc" "$fallback"
                 fi
             done
-        else
-            print_info "Auto-install disabled. Run with --auto to enable."
         fi
     else
         print_success "All build dependencies installed!"
     fi
-    
+
     return 0
 }
 
