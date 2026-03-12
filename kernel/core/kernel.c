@@ -3,14 +3,18 @@
  * Copyright (c) 2024 NEXUS Development Team
  *
  * kernel.c - Kernel Core Entry Point
- * 
+ *
  * This is the main kernel entry point after boot.
- * NO userspace libraries - pure bare-metal code.
+ * PURE BARE-METAL CODE - NO STANDARD LIBRARY
  */
 
 #include "../include/kernel.h"
 #include "../include/types.h"
 #include "../include/config.h"
+
+/* Tell compiler this is freestanding */
+__attribute__((used))
+const char *_freestanding_marker = "freestanding";
 
 /*===========================================================================*/
 /*                         KERNEL BSS SECTION                                */
