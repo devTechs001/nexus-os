@@ -202,6 +202,11 @@ $(KERNEL_ISO): $(KERNEL_BIN) $(ISO_DIR)/boot/grub/grub.cfg
 		echo "  Using kernel binary directly..."; \
 	fi
 
+# Force ISO rebuild
+.PHONY: iso
+iso: clean $(KERNEL_ISO)
+	@echo "  [INFO] ISO rebuilt successfully"
+
 # Run in QEMU
 run: $(KERNEL_ISO)
 	@echo "  [QEMU]  Starting NEXUS OS in VMware mode..."
@@ -231,7 +236,7 @@ run-debug: $(KERNEL_ISO)
 		-serial stdio -d int -no-reboot -no-shutdown
 
 # Run in VMware (auto-create and boot)
-run-vmware: $(KERNEL_ISO)
+run-vm: $(KERNEL_ISO)
 	@echo "  [VMWARE] Auto-creating and launching VMware..."
 	@$(PROJECT_DIR)/tools/auto-vm-boot.sh
 
