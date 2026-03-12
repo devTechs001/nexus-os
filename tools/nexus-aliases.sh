@@ -114,20 +114,35 @@ nexus_check_vmware() {
 #                         BUILD ALIASES
 #===========================================================================
 
-# Build the kernel and ISO
+# Build the kernel and ISO (with dependency check)
 nexus-build() {
     nexus_print_header
     nexus_check_dir || return 1
-    
+
+    # Check and fix dependencies first
+    nexus_print_info "Checking dependencies..."
+    if [ -f "$NEXUS_OS_DIR/tools/dependency-checker.sh" ]; then
+        "$NEXUS_OS_DIR/tools/dependency-checker.sh" --check || {
+            nexus_print_warning "Some dependencies missing"
+            read -p "Attempt to fix? (Y/n): " fix_deps
+            if [ "$fix_deps" != "n" ] && [ "$fix_deps" != "N" ]; then
+                "$NEXUS_OS_DIR/tools/dependency-checker.sh" --fix || return 1
+            else
+                nexus_print_error "Build may fail without dependencies"
+            fi
+        }
+    fi
+
     nexus_print_info "Building NEXUS OS..."
     cd "$NEXUS_OS_DIR" && make
-    
+
     if [ $? -eq 0 ]; then
         nexus_print_success "Build complete!"
         nexus_print_info "ISO: $NEXUS_ISO"
-        ls -lh "$NEXUS_ISO" 2>/dev/null
+        ls -lh "$NEXUS_ISO" 2>/dev/null || nexus_print_warning "ISO not created"
     else
         nexus_print_error "Build failed!"
+        nexus_print_info "Run './tools/dependency-checker.sh --fix' to fix issues"
         return 1
     fi
 }

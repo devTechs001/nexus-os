@@ -71,7 +71,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
 # Default target
-all: $(KERNEL_ISO)
+all: check-deps $(KERNEL_ISO)
 	@echo ""
 	@echo "=========================================="
 	@echo "  NEXUS OS Kernel Built Successfully!"
@@ -89,6 +89,40 @@ all: $(KERNEL_ISO)
 	@echo "  3. Start VM"
 	@echo ""
 	@echo "  Default: VMware mode (auto-detected)"
+	@echo ""
+
+# Check dependencies (never fails - provides solutions)
+.PHONY: check-deps
+check-deps:
+	@echo ""
+	@echo "Checking dependencies..."
+	@echo ""
+	@if command -v $(CC) > /dev/null 2>&1; then \
+		echo "  ✓ GCC found"; \
+	else \
+		echo "  ✗ GCC not found"; \
+		echo "    Solution: sudo apt-get install gcc"; \
+		echo "    Attempting to install..."; \
+		sudo apt-get update && sudo apt-get install -y gcc || { \
+			echo "    Automatic installation failed"; \
+			echo "    Please install manually: sudo apt-get install gcc"; \
+		} \
+	fi
+	@if command -v $(NASM) > /dev/null 2>&1; then \
+		echo "  ✓ NASM found"; \
+	else \
+		echo "  ✗ NASM not found"; \
+		echo "    Solution: sudo apt-get install nasm"; \
+		echo "    Attempting to install..."; \
+		sudo apt-get install -y nasm || echo "    Install manually: sudo apt-get install nasm"; \
+	fi
+	@if command -v $(GRUB_MKRESUE) > /dev/null 2>&1; then \
+		echo "  ✓ GRUB found"; \
+	else \
+		echo "  ⚠ GRUB not found (ISO creation may fail)"; \
+		echo "    Solution: sudo apt-get install grub-pc-bin grub-common"; \
+		echo "    Continuing anyway - binary will still work"; \
+	fi
 	@echo ""
 
 # Create build directories
