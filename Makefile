@@ -67,6 +67,9 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(NET_DIR)/protocols/network_protocols.c \
             $(GUI_DIR)/desktop/desktop.c \
             $(GUI_DIR)/desktop/desktop_grid.c \
+            $(GUI_DIR)/app-launcher/app-launcher.c \
+            $(GUI_DIR)/task-manager/task-manager.c \
+            $(GUI_DIR)/control-panel/control-panel.c \
             $(GUI_DIR)/compositor/compositing_manager.c \
             $(GUI_DIR)/control-center/control-center.c \
             $(GUI_DIR)/file-manager/file-manager.c \
@@ -128,6 +131,9 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/network_protocols.o \
             $(BUILD_DIR)/desktop.o \
             $(BUILD_DIR)/desktop_grid.o \
+            $(BUILD_DIR)/app-launcher.o \
+            $(BUILD_DIR)/task-manager.o \
+            $(BUILD_DIR)/control-panel.o \
             $(BUILD_DIR)/compositing_manager.o \
             $(BUILD_DIR)/control-center.o \
             $(BUILD_DIR)/file-manager.o \
@@ -379,6 +385,18 @@ $(BUILD_DIR)/network_manager.o: $(NET_DIR)/network_manager.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/desktop_grid.o: $(GUI_DIR)/desktop/desktop_grid.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/app-launcher.o: $(GUI_DIR)/app-launcher/app-launcher.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/task-manager.o: $(GUI_DIR)/task-manager/task-manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/control-panel.o: $(GUI_DIR)/control-panel/control-panel.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
