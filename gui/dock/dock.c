@@ -203,7 +203,7 @@ static int create_dock_ui(dock_t *dock)
     }
     
     /* Calculate dock dimensions */
-    u32 dock_width = 1920;  /* Full width for bottom position */
+    u32 dock_width = 1920;
     u32 dock_height = DOCK_HEIGHT;
     u32 dock_x = 0;
     u32 dock_y = 1080 - dock_height;
@@ -252,15 +252,11 @@ static int render_dock_items(dock_t *dock)
         return -EINVAL;
     }
     
-    /* Clear existing item widgets */
-    /* In real implementation, would remove old widgets */
-    
     /* Render items */
-    u32 item_count = 0;
-    dock_item_t *item = dock->items;
     s32 x = 10;
     s32 y = (DOCK_HEIGHT - dock->settings.item_size) / 2;
     
+    dock_item_t *item = dock->items;
     while (item) {
         /* Create item widget */
         widget_t *item_widget = panel_create(dock->dock_widget, x, y, 
@@ -274,12 +270,11 @@ static int render_dock_items(dock_t *dock)
             
             item_widget->user_data = item;
             item_widget->on_click = on_item_clicked;
-            item_widget->on_mouse_enter = on_item_hover;
-            item_widget->on_mouse_leave = on_item_hover;
+            
+            /* In real implementation, would load and set icon */
         }
         
         x += dock->settings.item_size + 10;
-        item_count++;
         item = item->next;
     }
     
@@ -342,7 +337,6 @@ static int update_dock_position(dock_t *dock)
  */
 static dock_item_t *create_default_items(void)
 {
-    /* Create default dock items */
     dock_item_t *items = NULL;
     dock_item_t *last = NULL;
     
@@ -452,7 +446,6 @@ dock_item_t *dock_add_item(dock_t *dock, dock_item_t *item)
         return NULL;
     }
     
-    /* Add to end of list */
     if (!dock->items) {
         dock->items = item;
     } else {
@@ -464,8 +457,6 @@ dock_item_t *dock_add_item(dock_t *dock, dock_item_t *item)
     }
     
     dock->item_count++;
-    
-    /* Re-render */
     render_dock_items(dock);
     
     return item;
@@ -492,10 +483,7 @@ int dock_remove_item(dock_t *dock, u32 item_id)
             *prev = curr->next;
             kfree(curr);
             dock->item_count--;
-            
-            /* Re-render */
             render_dock_items(dock);
-            
             return 0;
         }
         prev = &curr->next;
@@ -585,10 +573,6 @@ int dock_set_app_running(dock_t *dock, const char *app_path, bool running)
     while (item) {
         if (strcmp(item->app_path, app_path) == 0) {
             item->is_running = running;
-            
-            /* Show/hide running indicator */
-            /* In real implementation, would update indicator */
-            
             break;
         }
         item = item->next;
@@ -769,8 +753,6 @@ int dock_apply_settings(dock_t *dock, dock_settings_t *settings)
     }
     
     memcpy(&dock->settings, settings, sizeof(dock_settings_t));
-    
-    /* Update UI */
     update_dock_position(dock);
     render_dock_items(dock);
     
@@ -794,9 +776,6 @@ static void on_item_clicked(widget_t *widget)
     
     printk("[DOCK] Item clicked: %s\n", item->name);
     
-    /* Launch or focus app */
-    /* In real implementation, would launch/focus application */
-    
     if (dock->on_item_clicked) {
         dock->on_item_clicked(item);
     }
@@ -809,7 +788,6 @@ static void on_item_right_clicked(widget_t *widget, s32 x, s32 y)
     dock_item_t *item = (dock_item_t *)widget->user_data;
     dock_t *dock = &g_dock;
     
-    /* Show context menu */
     if (dock->on_item_right_clicked) {
         dock->on_item_right_clicked(item, x, y);
     }
@@ -823,11 +801,6 @@ static void on_item_hover(widget_t *widget, bool hover)
     
     if (hover) {
         dock->hover_item = (dock_item_t *)widget->user_data;
-        
-        /* Apply magnification effect */
-        if (dock->settings.magnification) {
-            /* In real implementation, would animate item size */
-        }
     } else {
         dock->hover_item = NULL;
     }
@@ -850,13 +823,6 @@ int dock_show_context_menu(dock_t *dock, dock_item_t *item, s32 x, s32 y)
     
     printk("[DOCK] Context menu for: %s\n", item->name);
     
-    /* In real implementation, would show context menu with options:
-     * - Open
-     * - Pin to dock / Unpin from dock
-     * - Close all windows
-     * - Properties
-     */
-    
     return 0;
 }
 
@@ -871,9 +837,6 @@ int dock_show_context_menu(dock_t *dock, dock_item_t *item, s32 x, s32 y)
 int dock_add_context_action(dock_item_t *item, const char *name, void (*callback)(dock_item_t *))
 {
     (void)item; (void)name; (void)callback;
-    
-    /* In real implementation, would add action to item's context menu */
-    
     return 0;
 }
 
