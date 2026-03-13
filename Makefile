@@ -143,6 +143,7 @@ ASM_OBJECTS = $(BUILD_DIR)/boot.o
 C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/printk.o \
             $(BUILD_DIR)/string.o \
+            $(BUILD_DIR)/cmdline.o \
             $(BUILD_DIR)/panic.o \
             $(BUILD_DIR)/init.o \
             $(BUILD_DIR)/smp.o \
@@ -192,6 +193,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/display.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/console.o \
+            $(BUILD_DIR)/splash.o \
             $(BUILD_DIR)/input.o \
             $(BUILD_DIR)/ps2.o \
             $(BUILD_DIR)/touchscreen.o \
@@ -354,6 +356,10 @@ $(BUILD_DIR)/printk.o: $(KERNEL_DIR)/core/printk.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/string.o: $(KERNEL_DIR)/core/string.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/cmdline.o: $(KERNEL_DIR)/core/cmdline.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
@@ -564,6 +570,10 @@ $(BUILD_DIR)/display_manager.o: $(DRIVERS_DIR)/display/display_manager.c | $(BUI
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/console.o: $(DRIVERS_DIR)/video/console.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/splash.o: $(DRIVERS_DIR)/video/splash.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 

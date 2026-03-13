@@ -659,15 +659,76 @@ void kernel_start_scheduler(void)
 
 /**
  * kernel_main - Main kernel entry point
- * 
+ * @multiboot_info: Pointer to multiboot info structure from bootloader
+ *
  * Called from arch-specific boot code after basic setup.
  */
-void kernel_main(void)
+void kernel_main(u64 multiboot_info)
 {
+    const char *cmdline = NULL;
+
+    /* Parse multiboot info to get command line */
+    if (multiboot_info) {
+        /* Multiboot2 info structure */
+        u32 *info = (u32 *)(uintptr_t)multiboot_info;
+        u32 total_size = info[1];
+        u32 offset = 8;  /* Skip basic info header */
+
+        while (offset < total_size) {
+            u32 *tag = (u32 *)((u8 *)info + offset);
+            u32 type = tag[0];
+            u32 size = tag[1];
+
+            /* Type 1 = command line tag */
+            if (type == 1 && size > 8) {
+                cmdline = (const char *)(tag + 2);
+                break;
+            }
+
+            /* Move to next tag (align to 8 bytes) */
+            offset += (size + 7) & ~7;
+        }
+    }
+
+    /* Parse boot parameters */
+    if (cmdline && cmdline[0]) {
+        parse_boot_params(cmdline);
+    } else {
+        printk("[BOOT] No command line provided\n");
+    }
+
+    /* Initialize console based on boot mode */
+    console_init();
+
+    /* Show boot splash */
+    boot_params_t *params = get_boot_params();
+    if (params->graphics_mode) {
+        console_print("\n\033[2J\033[H");
+        console_print("  ╔════════════════════════════════════════╗\n");
+        console_print("  ║                                        ║\n");
+        console_print("  ║     \033[1;36mN E X U S   O S\033[0m                  ║\n");
+        console_print("  ║     \033[2;36mGenesis Edition\033[0m                  ║\n");
+        console_print("  ║                                        ║\n");
+        console_print("  ║     \033[33mBoot Mode: ");
+        if (params->safe_mode)
+            console_print("Safe Mode\033[0m");
+        else if (params->debug_mode)
+            console_print("Debug Mode\033[0m");
+        else if (params->native_mode)
+            console_print("Native Hardware\033[0m");
+        else if (params->text_mode)
+            console_print("Text Mode\033[0m");
+        else
+            console_print("Graphical Mode\033[0m");
+        console_print("          ║\n");
+        console_print("  ║                                        ║\n");
+        console_print("  ╚════════════════════════════════════════╝\n\n");
+    }
+
     kernel_early_init();
     kernel_init();
     kernel_start_scheduler();
-    
+
     /* Idle loop - should never reach here in normal operation */
     while (1) {
         arch_halt_cpu();

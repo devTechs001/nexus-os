@@ -217,7 +217,7 @@ typedef struct percpu_data {
 } percpu_data_t;
 
 /* Kernel Core Functions */
-void kernel_main(void);
+void kernel_main(u64 multiboot_info);
 void kernel_early_init(void);
 void kernel_init(void);
 void kernel_start_scheduler(void) __noreturn;
@@ -259,6 +259,32 @@ struct task_struct *get_current(void);
 #define current         get_current()
 #define current_thread()    (get_percpu()->current_thread)
 #define current_process()   (get_percpu()->current_process)
+
+/* Boot Parameters */
+typedef struct {
+    bool graphics_mode;
+    bool text_mode;
+    bool safe_mode;
+    bool debug_mode;
+    bool native_mode;
+    bool vmware_mode;
+    u32 vga_mode;
+    u32 gfx_width;
+    u32 gfx_height;
+    u32 gfx_depth;
+    bool nomodeset;
+    bool nosmp;
+    bool noapic;
+    bool nolapic;
+} boot_params_t;
+
+void parse_boot_params(const char *cmdline);
+boot_params_t *get_boot_params(void);
+bool is_graphics_mode(void);
+bool is_safe_mode(void);
+bool is_debug_mode(void);
+unsigned long simple_strtoul(const char *cp, char **endp, unsigned int base);
+char *strsep(char **stringp, const char *delim);
 
 /* Interrupts */
 void local_irq_enable(void);

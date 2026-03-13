@@ -863,22 +863,55 @@ pid_t wait_for_children(int *exit_code, int options)
  * @arg: Unused
  *
  * The first user-space process. Responsible for starting
- * other system services and the first shell.
+ * other system services and the login screen.
  */
 static void init_thread(void *arg)
 {
+    boot_params_t *params = get_boot_params();
+
     pr_info("Init process started (PID: %u)\n", init_task->pid);
 
     /* Initialize system services */
     pr_info("Init: Starting system services...\n");
 
-    /* In a real OS, this would:
-     * - Mount filesystems
-     * - Start system daemons
-     * - Launch the first shell
-     */
+    /* Show boot mode message */
+    console_print("\n\033[2J\033[H");
+    console_print("  ╔════════════════════════════════════════╗\n");
+    console_print("  ║     \033[1;32mSystem Initialized Successfully!\033[0m    ║\n");
+    console_print("  ╚════════════════════════════════════════╝\n\n");
 
-    /* Infinite loop for now */
+    if (params->safe_mode) {
+        console_print("  \033[33m[SAFE MODE]\033[0m\n");
+        console_print("  Minimal system services started.\n");
+        console_print("  Press Ctrl+Alt+F1 for console.\n\n");
+    } else if (params->debug_mode) {
+        console_print("  \033[36m[DEBUG MODE]\033[0m\n");
+        console_print("  Verbose logging enabled.\n\n");
+    } else if (params->text_mode) {
+        console_print("  \033[37m[TEXT MODE]\033[0m\n");
+        console_print("  Starting text-based interface...\n\n");
+        console_print("  Login: ");
+    } else {
+        console_print("  \033[36m[GRAPHICAL MODE]\033[0m\n");
+        console_print("  Starting graphical subsystem...\n");
+        console_print("  Loading login screen...\n\n");
+
+        /* In a real implementation, this would:
+         * - Initialize framebuffer/GPU
+         * - Start display manager
+         * - Launch login screen (gui/login/login-screen.c)
+         * - After login, start desktop environment
+         */
+        console_print("  ╔════════════════════════════════════════╗\n");
+        console_print("  ║  \033[1;35m→ Login Screen\033[0m                       ║\n");
+        console_print("  ║  → User Selection                    ║\n");
+        console_print("  ║  → Password Authentication           ║\n");
+        console_print("  ║  → Session Selection                 ║\n");
+        console_print("  ║  → Desktop Environment               ║\n");
+        console_print("  ╚════════════════════════════════════════╝\n\n");
+    }
+
+    /* Infinite loop - in real OS this would run init system */
     while (1) {
         task_sleep(init_task);
     }

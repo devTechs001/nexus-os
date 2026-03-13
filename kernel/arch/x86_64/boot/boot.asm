@@ -45,7 +45,12 @@ _start:
     cpuid
     test edx, 1 << 29
     jz .no_long_mode
+
+    ; Pass multiboot info pointer (in EBX from bootloader)
+    ; kernel_main(const char *cmdline)
+    mov rdi, rbx    ; Pass multiboot info pointer as first argument
     call kernel_main
+
 .halt:
     cli
     hlt

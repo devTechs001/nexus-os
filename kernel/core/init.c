@@ -299,40 +299,6 @@ static void do_initcalls(void)
 /*===========================================================================*/
 /*                     BOOT PARAMETERS                                       */
 /*===========================================================================*/
-
-/**
- * boot_params - Kernel boot parameters
- */
-static struct {
-    char cmdline[1024];
-    u32 magic;
-    u32 flags;
-} boot_params;
-
-#define BOOT_MAGIC          0x12345678
-#define BOOT_FLAG_DEBUG     0x00000001
-#define BOOT_FLAG_SINGLE    0x00000002
-#define BOOT_FLAG_INITRD    0x00000004
-
-/**
- * parse_boot_params - Parse boot parameters
- */
-static void parse_boot_params(void)
-{
-    pr_info("Boot command line: %s\n", boot_params.cmdline);
-    
-    /* Check for debug mode */
-    if (boot_params.flags & BOOT_FLAG_DEBUG) {
-        pr_info("Debug mode enabled\n");
-    }
-    
-    /* Check for single-user mode */
-    if (boot_params.flags & BOOT_FLAG_SINGLE) {
-        pr_info("Single-user mode\n");
-    }
-}
-
-/*===========================================================================*/
 /*                     INITIALIZATION DEBUGGING                              */
 /*===========================================================================*/
 
@@ -367,7 +333,15 @@ void init_trace(const char *msg)
  */
 const char *get_kernel_cmdline(void)
 {
-    return boot_params.cmdline;
+    boot_params_t *params = get_boot_params();
+    static char cmdline_buf[256];
+
+    snprintf(cmdline_buf, sizeof(cmdline_buf),
+             "graphics=%d text=%d safe=%d debug=%d",
+             params->graphics_mode, params->text_mode,
+             params->safe_mode, params->debug_mode);
+
+    return cmdline_buf;
 }
 
 /**
@@ -375,5 +349,20 @@ const char *get_kernel_cmdline(void)
  */
 bool check_kernel_option(const char *option)
 {
-    return strstr(boot_params.cmdline, option) != NULL;
+    boot_params_t *params = get_boot_params();
+
+    if (strcmp(option, "graphics") == 0)
+        return params->graphics_mode;
+    if (strcmp(option, "text") == 0)
+        return params->text_mode;
+    if (strcmp(option, "safe") == 0 || strcmp(option, "nomodeset") == 0)
+        return params->safe_mode;
+    if (strcmp(option, "debug") == 0)
+        return params->debug_mode;
+    if (strcmp(option, "nosmp") == 0)
+        return params->nosmp;
+    if (strcmp(option, "noapic") == 0)
+        return params->noapic;
+
+    return false;
 }
