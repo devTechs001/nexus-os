@@ -373,9 +373,6 @@ struct socket_ops {
 
     /* Socket Address */
     int (*getname)(struct socket *sock, struct sockaddr *addr, int *addr_len, int peer);
-
-    /* Socket Statistics */
-    int (*getsockopt)(struct socket *sock, int level, int optname, void *optval, int *optlen);
 };
 
 /*===========================================================================*/
@@ -484,7 +481,7 @@ struct net_device {
 
     /* Statistics */
     struct net_device_stats stats;      /* Device statistics */
-    struct net_device_stats __percpu *pcpu_stats;
+    struct net_device_stats *pcpu_stats;  /* Per-CPU statistics */
 
     /* Wait Queue */
     wait_queue_head_t waitq;    /* Wait queue */
@@ -613,7 +610,6 @@ void free_skb(struct sk_buff *skb);
 
 /* Reference Counting */
 struct sk_buff *skb_get(struct sk_buff *skb);
-void skb_put(struct sk_buff *skb);
 bool skb_cloned(const struct sk_buff *skb);
 struct sk_buff *skb_clone(struct sk_buff *skb);
 struct sk_buff *skb_copy(const struct sk_buff *skb);

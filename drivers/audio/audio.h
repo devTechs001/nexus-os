@@ -42,6 +42,8 @@
 #define AUDIO_TYPE_LINE_OUT         10
 #define AUDIO_TYPE_HEADPHONE        11
 #define AUDIO_TYPE_SPDIF            12
+#define AUDIO_TYPE_INPUT            13
+#define AUDIO_TYPE_OUTPUT           14
 
 /*===========================================================================*/
 /*                         AUDIO FORMATS                                     */
@@ -96,7 +98,8 @@
 #define AUDIO_STATE_SUSPENDED       5
 #define AUDIO_STATE_XRUN            6
 #define AUDIO_STATE_DRAINING        7
-#define AUDIO_STATE_CLOSED          8
+#define AUDIO_STATE_STOPPED         8
+#define AUDIO_STATE_CLOSED          9
 
 /*===========================================================================*/
 /*                         HDA WIDGET TYPES                                  */

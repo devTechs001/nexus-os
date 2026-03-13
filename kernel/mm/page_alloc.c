@@ -67,7 +67,7 @@ static struct zone *default_zone = NULL;
 
 /* Total system memory tracking */
 static size_t total_pages = 0;
-static size_t free_pages = 0;
+static size_t num_free_pages = 0;
 static size_t reserved_pages = 0;
 
 /* Spinlock for global operations */
@@ -758,14 +758,13 @@ void page_alloc_init(void)
     /* Reserve kernel memory */
     zone_reserve_pages(default_zone, mem_start, 256); /* First 1MB */
 
-    free_pages = default_zone->nr_free;
     reserved_pages = default_zone->nr_reserved;
 
     pr_info("  Zones initialized:\n");
     pr_info("    DMA: %lu pages\n", nodes[0].zones[ZONE_DMA].nr_pages);
     pr_info("    DMA32: %lu pages\n", nodes[0].zones[ZONE_DMA32].nr_pages);
     pr_info("    Normal: %lu pages\n", nodes[0].zones[ZONE_NORMAL].nr_pages);
-    pr_info("  Free Pages: %lu\n", free_pages);
+    pr_info("  Free Pages: %lu\n", default_zone->nr_free);
     pr_info("  Reserved Pages: %lu\n", reserved_pages);
 
     pr_info("Page Frame Allocator initialized.\n");

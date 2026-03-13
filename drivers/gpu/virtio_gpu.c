@@ -186,24 +186,24 @@ static void virtio_gpu_add_descriptor(void *buf, u32 len, u32 flags)
 /*                         GPU COMMANDS                                      */
 /*===========================================================================*/
 
-static int virtio_gpu_get_display_info(void)
+static int virtio_gpu_query_display_info(void)
 {
     printk("[VIRTIO-GPU] Getting display info...\n");
-    
+
     virtio_gpu_ctrl_hdr_t hdr;
     memset(&hdr, 0, sizeof(hdr));
     hdr.type = VIRTIO_GPU_CMD_GET_DISPLAY_INFO;
-    
+
     /* Send command and wait for response */
     /* In real implementation, would use virtqueue */
-    
+
     /* Mock response */
     g_virtio_gpu.display_count = 1;
     g_virtio_gpu.displays[0].width = 1920;
     g_virtio_gpu.displays[0].height = 1080;
     g_virtio_gpu.displays[0].enabled = 1;
     strcpy(g_virtio_gpu.displays[0].name, "VirtIO Display");
-    
+
     return 0;
 }
 

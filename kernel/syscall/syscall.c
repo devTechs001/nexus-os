@@ -10,17 +10,21 @@
 #include "../sched/sched.h"
 #include "../mm/mm.h"
 
+/* External syscall table from syscall_table.c */
+extern struct syscall_entry syscall_table[NR_SYSCALLS];
+
 /*===========================================================================*/
 /*                         SYSCALL STATISTICS                                */
 /*===========================================================================*/
 
 /* Per-syscall invocation counters */
-static struct {
+struct syscall_stat_entry {
     atomic_t count;
     u64 total_time_ns;
     u64 min_time_ns;
     u64 max_time_ns;
-} syscall_stats[NR_SYSCALLS];
+};
+static struct syscall_stat_entry syscall_stats[NR_SYSCALLS];
 
 /* Global syscall statistics */
 static struct {
@@ -333,7 +337,7 @@ static void syscall_enter(struct syscall_args *args)
  *
  * Called when exiting a syscall. Performs accounting and tracing.
  */
-static void syscall_exit(struct syscall_args *args, s64 ret, u64 duration_ns)
+void syscall_exit(struct syscall_args *args, s64 ret, u64 duration_ns)
 {
     u64 nr = args->nr;
 
@@ -551,7 +555,7 @@ void syscall_reset_count(u64 nr)
  *
  * Displays invocation counts and timing information for all syscalls.
  */
-void syscall_stats(void)
+void syscall_stats_print(void)
 {
     u64 i;
     u64 total;

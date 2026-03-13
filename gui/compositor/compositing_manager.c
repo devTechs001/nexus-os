@@ -7,6 +7,7 @@
  */
 
 #include "../gui.h"
+#include "compositor.h"
 #include "../kernel/include/kernel.h"
 
 /*===========================================================================*/
@@ -42,12 +43,12 @@ typedef struct {
     u32 target_id;
     u32 duration_ms;
     u32 start_time;
-    float progress;
+    u32 progress;  /* 0-256 range */
     float start_value;
     float end_value;
     bool running;
     bool reverse;
-    int (*easing)(float);
+    int (*easing)(int);
 } comp_animation_t;
 
 typedef struct {
@@ -74,7 +75,7 @@ typedef struct {
     u32 refresh_rate;
     u64 frame_count;
     u64 last_frame_time;
-    float fps;
+    u32 fps;
     comp_window_decor_t decorations[COMP_MAX_WINDOWS];
     u32 decor_count;
     comp_animation_t animations[COMP_MAX_ANIMATIONS];
@@ -94,58 +95,52 @@ static compositor_state_t g_comp;
 /*                         EASING FUNCTIONS                                  */
 /*===========================================================================*/
 
-static float ease_linear(float t)
+/* Integer-based easing functions to avoid SSE on x86_64 */
+static int ease_linear(int t)
 {
     return t;
 }
 
-static float ease_in_quad(float t)
+static int ease_in_quad(int t)
 {
-    return t * t;
+    return (t * t) / 256;
 }
 
-static float ease_out_quad(float t)
+static int ease_out_quad(int t)
 {
-    return t * (2 - t);
+    return (t * (512 - t)) / 256;
 }
 
-static float ease_in_out_quad(float t)
+static int ease_in_out_quad(int t)
 {
-    return t < 0.5f ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    if (t < 128) return (2 * t * t) / 256;
+    return (-1 + (8 - 2 * t) * t / 256);
 }
 
-static float ease_out_cubic(float t)
+static int ease_out_cubic(int t)
 {
-    float inv = 1 - t;
-    return 1 - inv * inv * inv;
+    int inv = 256 - t;
+    return 256 - (inv * inv * inv) / 65536;
 }
 
-static float ease_in_out_cubic(float t)
+static int ease_in_out_cubic(int t)
 {
-    return t < 0.5f ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+    if (t < 128) return (4 * t * t * t) / 65536;
+    return 256 - (pow(-2 * t + 512, 3) / 2) / 65536;
 }
 
-static float ease_out_elastic(float t)
+static int ease_out_elastic(int t)
 {
-    if (t == 0 || t == 1) return t;
-    float p = 0.3f;
-    return pow(2, -10 * t) * sin((t - p / 4) * (2 * 3.14159f) / p) + 1;
+    /* Simplified elastic easing using integer math */
+    if (t == 0 || t == 256) return t;
+    return 256 + (t * (256 - t)) / 64;
 }
 
-static float ease_out_bounce(float t)
+static int ease_out_bounce(int t)
 {
-    if (t < 1 / 2.75f) {
-        return 7.5625f * t * t;
-    } else if (t < 2 / 2.75f) {
-        t -= 1.5f / 2.75f;
-        return 7.5625f * t * t + 0.75f;
-    } else if (t < 2.5 / 2.75f) {
-        t -= 2.25f / 2.75f;
-        return 7.5625f * t * t + 0.9375f;
-    } else {
-        t -= 2.625f / 2.75f;
-        return 7.5625f * t * t + 0.984375f;
-    }
+    if (t < 93) return (7 * t * t) / 256;
+    if (t < 186) return (7 * (t - 140) * (t - 140)) / 256 + 192;
+    return (7 * (t - 232) * (t - 232)) / 256 + 240;
 }
 
 /*===========================================================================*/
@@ -182,14 +177,12 @@ int compositor_init(void)
     return 0;
 }
 
-int compositor_shutdown(void)
+void compositor_shutdown(void)
 {
     printk("[COMP] Shutting down compositor...\n");
-    
+
     g_comp.compositing_enabled = false;
     g_comp.initialized = false;
-    
-    return 0;
 }
 
 /*===========================================================================*/
@@ -311,7 +304,7 @@ comp_animation_t *compositor_create_animation(u32 type, u32 target_id,
     return anim;
 }
 
-int compositor_set_animation_easing(comp_animation_t *anim, int (*easing)(float))
+int compositor_set_animation_easing(comp_animation_t *anim, int (*easing)(int))
 {
     if (!anim) return -EINVAL;
     anim->easing = easing;
@@ -344,33 +337,34 @@ int compositor_stop_all_animations(void)
 static void update_animations(void)
 {
     u32 active = 0;
-    
+
     for (u32 i = 0; i < g_comp.anim_count; i++) {
         comp_animation_t *anim = &g_comp.animations[i];
-        
+
         if (!anim->running) continue;
-        
+
         u32 elapsed = ktime_get_ms() - anim->start_time;
-        
+
         if (elapsed >= anim->duration_ms) {
-            anim->progress = anim->reverse ? 0 : 1;
+            anim->progress = anim->reverse ? 0 : 256;
             anim->running = false;
             g_comp.active_animations--;
         } else {
-            float t = (float)elapsed / anim->duration_ms;
+            /* Calculate progress as 0-256 range */
+            u32 t = (elapsed * 256) / anim->duration_ms;
             if (anim->easing) {
                 anim->progress = anim->easing(t);
             } else {
                 anim->progress = t;
             }
-            
+
             if (anim->reverse) {
-                anim->progress = 1.0f - anim->progress;
+                anim->progress = 256 - anim->progress;
             }
             active++;
         }
     }
-    
+
     g_comp.active_animations = active;
 }
 
@@ -496,39 +490,41 @@ static void render_border(comp_window_decor_t *decor, void *surface)
     (void)decor; (void)surface;
 }
 
-int compositor_composite(void)
+int compositor_composite(void *output_surface)
 {
+    (void)output_surface;  /* Use parameter */
     if (!g_comp.initialized || !g_comp.compositing_enabled) {
         return -EINVAL;
     }
-    
+
     spinlock_lock(&g_comp.lock);
-    
+
     /* Update animations */
     if (g_comp.animations_enabled) {
         update_animations();
     }
-    
+
     /* Clear output */
     /* In real implementation, would clear surface */
-    
+
     /* Render all windows with decorations */
     for (u32 i = 0; i < g_comp.decor_count; i++) {
         comp_window_decor_t *decor = &g_comp.decorations[i];
         
         /* Apply animation transform */
-        float scale = 1.0f;
+        u32 scale = 256;  /* 1.0 = 256 */
         u32 opacity = decor->opacity;
-        
+
         for (u32 j = 0; j < g_comp.anim_count; j++) {
             comp_animation_t *anim = &g_comp.animations[j];
             if (anim->running && anim->target_id == decor->window_id) {
                 if (anim->type == ANIM_SCALE || anim->type == ANIM_ZOOM) {
-                    scale = anim->start_value + 
-                            (anim->end_value - anim->start_value) * anim->progress;
+                    /* Integer interpolation: progress is 0-256 */
+                    scale = (anim->start_value * (256 - anim->progress) +
+                             anim->end_value * anim->progress) / 256;
                 } else if (anim->type == ANIM_FADE) {
-                    opacity = (u32)(anim->start_value + 
-                            (anim->end_value - anim->start_value) * anim->progress);
+                    opacity = (u32)((anim->start_value * (256 - anim->progress) +
+                             anim->end_value * anim->progress) / 256);
                 }
             }
         }
@@ -548,7 +544,7 @@ int compositor_composite(void)
     if (g_comp.last_frame_time > 0) {
         u64 delta = now - g_comp.last_frame_time;
         if (delta > 0) {
-            g_comp.fps = 1000000.0f / delta;
+            g_comp.fps = 1000000 / delta;
         }
     }
     g_comp.last_frame_time = now;
@@ -559,10 +555,11 @@ int compositor_composite(void)
     return 0;
 }
 
-int compositor_wait_vsync(void)
+int compositor_wait_vsync(compositor_t *comp)
 {
+    (void)comp;  /* Use parameter */
     if (!g_comp.vsync_enabled) return 0;
-    
+
     /* In real implementation, would wait for VBlank */
     /* Mock: just return */
     return 0;
@@ -613,9 +610,9 @@ int compositor_set_animation_speed(u32 speed)
 /*                         UTILITY FUNCTIONS                                 */
 /*===========================================================================*/
 
-float compositor_get_fps(void)
+u32 compositor_get_fps(void)
 {
-    return g_comp.fps;
+    return (u32)g_comp.fps;
 }
 
 u32 compositor_get_active_animations(void)

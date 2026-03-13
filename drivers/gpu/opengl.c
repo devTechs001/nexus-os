@@ -7,6 +7,7 @@
  */
 
 #include "gpu.h"
+#include "acceleration.h"
 #include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/

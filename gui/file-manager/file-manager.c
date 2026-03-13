@@ -9,6 +9,9 @@
 #include "../gui.h"
 #include "../kernel/include/kernel.h"
 
+/* Forward declaration for string function */
+extern const char *strrchr(const char *s, int c);
+
 /*===========================================================================*/
 /*                         FILE MANAGER CONFIGURATION                        */
 /*===========================================================================*/

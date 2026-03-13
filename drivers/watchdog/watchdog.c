@@ -30,7 +30,7 @@
 /*                         DATA STRUCTURES                                   */
 /*===========================================================================*/
 
-typedef struct {
+typedef struct wdt_device {
     u32 device_id;
     char name[32];
     u16 vendor_id;

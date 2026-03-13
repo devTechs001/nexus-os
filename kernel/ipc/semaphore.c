@@ -4,12 +4,14 @@
  */
 
 #include "ipc.h"
+#include "../sched/sched.h"
+#include <stdarg.h>
 
 /*===========================================================================*/
 /*                         SEMAPHORE CONFIGURATION                           */
 /*===========================================================================*/
 
-#define SEM_MAGIC           0xSEM00001
+#define SEM_MAGIC           0x53450001
 #define SEM_HASH_SIZE       128
 #define SEM_MIN_ID          0
 #define SEM_MAX_ID          32767
@@ -372,8 +374,8 @@ struct sem_undo *sem_undo_alloc(struct sem_array *sma, int semnum)
 
     un->semadj[0] = 0;
 
-    INIT_LIST_HEAD(&un->next_id);
-    INIT_LIST_HEAD(&un->prev_id);
+    INIT_LIST_HEAD(&un->list);
+    INIT_LIST_HEAD(&un->list_id);
 
     return un;
 }
@@ -413,7 +415,7 @@ void sem_undo_exit(struct task_struct *task)
     spin_lock(&sem_undo_global.lock);
 
     /* Process all undo structures for this task */
-    list_for_each_entry_safe(un, next, &sem_undo_global.undo_list, next_id) {
+    list_for_each_entry_safe(un, next, &sem_undo_global.undo_list, list_id) {
         sma = sem_find(un->semid);
         if (!sma) {
             continue;
@@ -434,7 +436,7 @@ void sem_undo_exit(struct task_struct *task)
         atomic_dec(&sma->refcount);
 
         /* Remove from list and free */
-        list_del(&un->next_id);
+        list_del(&un->list_id);
         sem_undo_free(un);
     }
 
@@ -490,7 +492,7 @@ int semop_single(struct sem_array *sma, struct sembuf *sop)
         /* Simulated wait */
         while (sem->semval + sop->sem_op < 0) {
             delay_ms(1);
-            if (signal_pending()) {
+            if (signal_pending_current()) {
                 return -EINTR;
             }
         }
@@ -501,7 +503,7 @@ int semop_single(struct sem_array *sma, struct sembuf *sop)
 
     /* Apply operation */
     sem->semval = new_val;
-    sem->sempid = current_process() ? current_process()->pid : 0;
+    sem->sempid = current ? current->pid : 0;
 
     /* Handle SEM_UNDO */
     if (sop->sem_flg & SEM_UNDO_FLAG) {
@@ -510,7 +512,7 @@ int semop_single(struct sem_array *sma, struct sembuf *sop)
 
     /* Update operation time */
     sma->sem_otime = get_time_ms() / 1000;
-    sma->sem_otime_pid = current_process() ? current_process()->pid : 0;
+    sma->sem_otime_pid = current ? current->pid : 0;
 
     spin_unlock(&sma->lock);
 
@@ -691,7 +693,11 @@ int semctl(int semid, int semnum, int cmd, ...)
         }
 
         spin_lock(&sma->lock);
-        *buf = sma->sem_perm;
+        buf->sem_perm = sma->sem_perm;
+        buf->sem_segsz = 0;
+        buf->sem_nsems = sma->sem_nsems;
+        buf->sem_otime = sma->sem_otime;
+        buf->sem_ctime = sma->sem_ctime;
         spin_unlock(&sma->lock);
         break;
 
@@ -703,9 +709,9 @@ int semctl(int semid, int semnum, int cmd, ...)
         }
 
         spin_lock(&sma->lock);
-        sma->sem_perm.mode = buf->mode;
-        sma->sem_perm.uid = buf->uid;
-        sma->sem_perm.gid = buf->gid;
+        sma->sem_perm.mode = buf->sem_perm.mode;
+        sma->sem_perm.uid = buf->sem_perm.uid;
+        sma->sem_perm.gid = buf->sem_perm.gid;
         sma->sem_ctime = get_time_ms() / 1000;
         spin_unlock(&sma->lock);
         break;

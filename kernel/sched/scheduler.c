@@ -3,8 +3,55 @@
  * kernel/sched/scheduler.c
  */
 
-#include "../include/kernel.h"
 #include "sched.h"
+#include "../include/types.h"
+#include "../include/kernel.h"
+
+/* Forward declarations for scheduler classes */
+struct task_struct *pick_next_task_rt(struct rq *rq);
+struct task_struct *pick_next_task_fair(struct rq *rq);
+static struct task_struct *pull_task(struct rq *src_rq, struct rq *dst_rq);
+
+/* Preemption and reschedule */
+void set_need_resched(void);
+bool need_resched(void);
+void clear_need_resched(void);
+
+/* Architecture stubs */
+void arch_prepare_switch(struct task_struct *prev, struct task_struct *next)
+{
+    (void)prev;
+    (void)next;
+}
+
+void arch_finish_switch(struct task_struct *prev)
+{
+    (void)prev;
+}
+
+void arch_switch_mm(struct address_space *prev_mm, struct address_space *next_mm)
+{
+    (void)prev_mm;
+    (void)next_mm;
+}
+
+void arch_switch_to(struct task_struct *prev, struct task_struct *next)
+{
+    (void)prev;
+    (void)next;
+}
+
+int arch_task_kill(struct task_struct *task, int signal)
+{
+    (void)task;
+    (void)signal;
+    return 0;
+}
+
+void arch_idle_cpu(void)
+{
+    /* Halt CPU until interrupt */
+}
 
 /*===========================================================================*/
 /*                         SCHEDULER GLOBAL DATA                             */
@@ -34,7 +81,7 @@ static struct {
 static struct task_struct *idle_tasks[MAX_CPUS];
 
 /* Preemption count per CPU */
-static DEFINE_PER_CPU(int, preempt_count) = 0;
+DEFINE_PER_CPU(int, per_cpu_preempt_count) = 0;
 
 /* Scheduler tick timer */
 static u64 scheduler_tick_ns = NS_PER_TICK;
@@ -47,7 +94,7 @@ static u64 scheduler_tick_ns = NS_PER_TICK;
  * rq_lock - Acquire run queue spinlock
  * @rq: Run queue to lock
  */
-static inline void rq_lock(struct rq *rq)
+void rq_lock(struct rq *rq)
 {
     spin_lock(&rq->lock);
 }
@@ -56,7 +103,7 @@ static inline void rq_lock(struct rq *rq)
  * rq_unlock - Release run queue spinlock
  * @rq: Run queue to unlock
  */
-static inline void rq_unlock(struct rq *rq)
+void rq_unlock(struct rq *rq)
 {
     spin_unlock(&rq->lock);
 }
@@ -66,7 +113,7 @@ static inline void rq_unlock(struct rq *rq)
  * @rq: Run queue to lock
  * @flags: IRQ flags storage
  */
-static inline void rq_lock_irqsave(struct rq *rq, u64 *flags)
+void rq_lock_irqsave(struct rq *rq, u64 *flags)
 {
     spin_lock_irqsave(&rq->lock, *flags);
 }
@@ -76,7 +123,7 @@ static inline void rq_lock_irqsave(struct rq *rq, u64 *flags)
  * @rq: Run queue to unlock
  * @flags: IRQ flags to restore
  */
-static inline void rq_unlock_irqrestore(struct rq *rq, u64 flags)
+void rq_unlock_irqrestore(struct rq *rq, u64 flags)
 {
     spin_unlock_irqrestore(&rq->lock, flags);
 }
@@ -84,7 +131,7 @@ static inline void rq_unlock_irqrestore(struct rq *rq, u64 flags)
 /**
  * get_cpu_rq - Get run queue for current CPU
  */
-static inline struct rq *get_cpu_rq(void)
+struct rq *get_cpu_rq(void)
 {
     return &run_queues[get_cpu_id()];
 }
@@ -93,7 +140,7 @@ static inline struct rq *get_cpu_rq(void)
  * get_rq - Get run queue for specific CPU
  * @cpu: CPU number
  */
-static inline struct rq *get_rq(u32 cpu)
+struct rq *get_rq(u32 cpu)
 {
     if (cpu >= MAX_CPUS) {
         cpu = 0;
@@ -138,7 +185,6 @@ static void init_rq(struct rq *rq, u32 cpu)
     rq->cfs.rq = rq;
 
     /* Initialize RT run queue */
-    INIT_LIST_HEAD(&rq->rt.queue);
     rq->rt.nr_running = 0;
     rq->rt.time = 0;
     rq->rt.rt_runtime = 950 * NS_PER_MS;
@@ -232,7 +278,11 @@ static int create_idle_task(u32 cpu)
     task->se.vruntime = 0;
     task->se.sum_exec_runtime = 0;
     task->se.prev_sum_exec_runtime = 0;
-    task->se.rb_node = RB_ROOT.rb_node;
+    task->se.rb_node.rb_parent_color = 0;
+    task->se.rb_node.rb_right = NULL;
+    task->se.rb_node.rb_left = NULL;
+    task->se.rb_node.rb_parent = NULL;
+    task->se.rb_node.rb_color = RB_BLACK;
     INIT_LIST_HEAD(&task->run_list);
     task->se.task = task;
 
@@ -242,8 +292,7 @@ static int create_idle_task(u32 cpu)
     task->parent = NULL;
 
     /* Initialize wait queue */
-    INIT_LIST_HEAD(&task->wait_queue.list);
-    task->wait_queue.task = task;
+    wait_queue_init(&task->wait_queue);
 
     /* Set comm */
     snprintf(task->comm, sizeof(task->comm), "swapper/%u", cpu);
@@ -668,7 +717,7 @@ void preempt_schedule(void)
  */
 void preempt_disable(void)
 {
-    int *count = get_cpu_ptr(&preempt_count);
+    int *count = &per_cpu_preempt_count;
     (*count)++;
     barrier();
 }
@@ -681,7 +730,7 @@ void preempt_disable(void)
  */
 void preempt_enable(void)
 {
-    int *count = get_cpu_ptr(&preempt_count);
+    int *count = &per_cpu_preempt_count;
 
     barrier();
     (*count)--;
@@ -696,8 +745,18 @@ void preempt_enable(void)
  */
 int preempt_count(void)
 {
-    int *count = get_cpu_ptr(&preempt_count);
+    int *count = &per_cpu_preempt_count;
     return *count;
+}
+
+/**
+ * set_preempt_count - Set preemption count
+ * @val: Value to set
+ */
+void set_preempt_count(int val)
+{
+    int *count = &per_cpu_preempt_count;
+    *count = val;
 }
 
 /*===========================================================================*/
@@ -710,7 +769,7 @@ int preempt_count(void)
  * @task: Task to enqueue
  * @flags: Enqueue flags
  */
-static void enqueue_task(struct rq *rq, struct task_struct *task, int flags)
+void enqueue_task(struct rq *rq, struct task_struct *task, int flags)
 {
     if (task->policy >= SCHED_FIFO && task->policy <= SCHED_RR) {
         enqueue_task_rt(rq, task, flags);
@@ -727,7 +786,7 @@ static void enqueue_task(struct rq *rq, struct task_struct *task, int flags)
  * @task: Task to dequeue
  * @flags: Dequeue flags
  */
-static void dequeue_task(struct rq *rq, struct task_struct *task, int flags)
+void dequeue_task(struct rq *rq, struct task_struct *task, int flags)
 {
     if (task->policy >= SCHED_FIFO && task->policy <= SCHED_RR) {
         dequeue_task_rt(rq, task, flags);
@@ -1189,5 +1248,24 @@ extern void arch_finish_switch(struct task_struct *prev);
 extern void arch_switch_mm(struct address_space *prev_mm, struct address_space *next_mm);
 extern void arch_switch_to(struct task_struct *prev, struct task_struct *next);
 extern int arch_task_kill(struct task_struct *task, int signal);
-extern void set_need_resched(void);
-extern bool need_resched(void);
+
+/* Per-CPU need reschedule flag */
+static DEFINE_PER_CPU(bool, need_resched_flag) = false;
+
+void set_need_resched(void)
+{
+    bool *flag = &need_resched_flag;
+    *flag = true;
+}
+
+bool need_resched(void)
+{
+    bool *flag = &need_resched_flag;
+    return *flag;
+}
+
+void clear_need_resched(void)
+{
+    bool *flag = &need_resched_flag;
+    *flag = false;
+}

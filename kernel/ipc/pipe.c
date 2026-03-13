@@ -326,7 +326,7 @@ ssize_t pipe_read(struct pipe_inode_info *pipe, char *buf, size_t count)
         /* Simulated wait */
         delay_ms(1);
 
-        if (signal_pending()) {
+        if (signal_pending_current()) {
             pipe->waiting_readers--;
             return -EINTR;
         }
@@ -447,7 +447,7 @@ ssize_t pipe_write(struct pipe_inode_info *pipe, const char *buf, size_t count)
         /* Simulated wait */
         delay_ms(1);
 
-        if (signal_pending()) {
+        if (signal_pending_current()) {
             pipe->waiting_writers--;
             return -EINTR;
         }

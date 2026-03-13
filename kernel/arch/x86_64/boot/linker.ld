@@ -7,14 +7,8 @@ SECTIONS
 {
     . = 1M;  /* Load kernel at 1MB */
 
-    /* Multiboot header must be first */
-    .multiboot :
-    {
-        *(.multiboot)
-    }
-
-    /* Text section (code) */
-    .text : ALIGN(4K)
+    /* Text section (code) - multiboot header is at start */
+    .text :
     {
         *(.text)
         *(.text.*)
@@ -46,7 +40,7 @@ SECTIONS
 
     __kernel_start = 1M;
     __kernel_end = .;
-    
+
     /* Discard unwanted sections */
     /DISCARD/ :
     {

@@ -6,6 +6,35 @@
 #include "sync.h"
 
 /*===========================================================================*/
+/*                         BASIC ATOMIC OPERATIONS                           */
+/*===========================================================================*/
+
+/**
+ * atomic_read - Read atomic value
+ * @v: Atomic value to read
+ *
+ * Returns: Current value of atomic variable
+ */
+s32 atomic_read(const atomic_t *v)
+{
+    return v->counter;
+}
+
+/**
+ * atomic_set - Set atomic value
+ * @v: Atomic value to set
+ * @i: Value to set
+ */
+void atomic_set(atomic_t *v, s32 i)
+{
+    v->counter = i;
+}
+
+/*===========================================================================*/
+/*                         ATOMIC CONFIGURATION                              */
+/*===========================================================================*/
+
+/*===========================================================================*/
 /*                         ATOMIC CONFIGURATION                              */
 /*===========================================================================*/
 

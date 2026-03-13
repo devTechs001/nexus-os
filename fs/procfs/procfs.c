@@ -50,6 +50,15 @@ typedef struct {
 static procfs_t g_procfs;
 
 /*===========================================================================*/
+/*                         FORWARD DECLARATIONS                              */
+/*===========================================================================*/
+
+proc_entry_t *proc_create(const char *name, u32 mode, proc_read_fn read);
+proc_entry_t *proc_mkdir(const char *name);
+proc_entry_t *proc_create_child(proc_entry_t *parent, const char *name,
+                                 u32 mode, proc_read_fn read);
+
+/*===========================================================================*/
 /*                         INITIALIZATION                                    */
 /*===========================================================================*/
 
@@ -107,18 +116,18 @@ int procfs_init(void)
 proc_entry_t *proc_create(const char *name, u32 mode, proc_read_fn read)
 {
     spinlock_lock(&g_procfs.lock);
-    
+
     if (g_procfs.entry_count >= PROCFS_MAX_ENTRIES) {
         spinlock_unlock(&g_procfs.lock);
         return NULL;
     }
-    
+
     proc_entry_t *entry = kmalloc(sizeof(proc_entry_t));
     if (!entry) {
         spinlock_unlock(&g_procfs.lock);
         return NULL;
     }
-    
+
     memset(entry, 0, sizeof(proc_entry_t));
     strncpy(entry->name, name, sizeof(entry->name) - 1);
     entry->flags = mode;
@@ -127,7 +136,7 @@ proc_entry_t *proc_create(const char *name, u32 mode, proc_read_fn read)
     entry->next = g_procfs.root->children;
     g_procfs.root->children = entry;
     g_procfs.entry_count++;
-    
+
     spinlock_unlock(&g_procfs.lock);
     return entry;
 }
@@ -135,18 +144,18 @@ proc_entry_t *proc_create(const char *name, u32 mode, proc_read_fn read)
 proc_entry_t *proc_mkdir(const char *name)
 {
     spinlock_lock(&g_procfs.lock);
-    
+
     if (g_procfs.entry_count >= PROCFS_MAX_ENTRIES) {
         spinlock_unlock(&g_procfs.lock);
         return NULL;
     }
-    
+
     proc_entry_t *entry = kmalloc(sizeof(proc_entry_t));
     if (!entry) {
         spinlock_unlock(&g_procfs.lock);
         return NULL;
     }
-    
+
     memset(entry, 0, sizeof(proc_entry_t));
     strncpy(entry->name, name, sizeof(entry->name) - 1);
     entry->is_directory = true;
@@ -154,12 +163,12 @@ proc_entry_t *proc_mkdir(const char *name)
     entry->next = g_procfs.root->children;
     g_procfs.root->children = entry;
     g_procfs.entry_count++;
-    
+
     spinlock_unlock(&g_procfs.lock);
     return entry;
 }
 
-proc_entry_t *proc_create_child(proc_entry_t *parent, const char *name, 
+proc_entry_t *proc_create_child(proc_entry_t *parent, const char *name,
                                  u32 mode, proc_read_fn read)
 {
     if (!parent || !parent->is_directory) return NULL;
@@ -308,7 +317,7 @@ proc_entry_t *proc_lookup(const char *path)
     if (!path || !g_procfs.root) return NULL;
     
     /* Simple path lookup */
-    proc_entry_t *current = g_procfs.root;
+    proc_entry_t *curr_entry = g_procfs.root;
     
     /* Skip leading slash */
     if (path[0] == '/') path++;
@@ -328,7 +337,7 @@ proc_entry_t *proc_lookup(const char *path)
         
         /* Search children */
         proc_entry_t *found = NULL;
-        for (proc_entry_t *child = current->children; child; child = child->next) {
+        for (proc_entry_t *child = curr_entry->children; child; child = child->next) {
             if (strcmp(child->name, component) == 0) {
                 found = child;
                 break;
@@ -336,10 +345,10 @@ proc_entry_t *proc_lookup(const char *path)
         }
         
         if (!found) return NULL;
-        current = found;
+        curr_entry = found;
     }
     
-    return current;
+    return curr_entry;
 }
 
 s32 proc_read(proc_entry_t *entry, void *buffer, u32 size, u32 offset)

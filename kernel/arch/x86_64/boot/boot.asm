@@ -5,29 +5,35 @@
 [bits 64]
 [default rel]
 
-section .multiboot
-    align 8
-    MBOOT_MAGIC equ 0x1BADB002
-    MBOOT_FLAGS equ 0x00000003
-    MBOOT_CHECKSUM equ -(MBOOT_MAGIC + MBOOT_FLAGS)
-    
-    dd MBOOT_MAGIC
-    dd MBOOT_FLAGS
-    dd MBOOT_CHECKSUM
-
-section .bss
-    align 16
-    stack_bottom:
-        resb 65536
-    stack_top:
-
 section .text
+    align 8
+
+    ; Multiboot2 header - must be in first 8KB of file
+    MBOOT2_MAGIC equ 0xE85250D6
+    MBOOT2_ARCH equ 0x00000000  ; Protected mode (i386)
+    MBOOT2_HEADER_LEN equ mboot2_header_end - mboot2_header
+    MBOOT2_CHECKSUM equ -(MBOOT2_MAGIC + MBOOT2_ARCH + MBOOT2_HEADER_LEN)
+
+    ; Entry point
     global _start
     global _start_kernel
     extern kernel_main
     extern kernel_panic
 
 _start:
+    ; Multiboot2 header immediately after entry point
+    mboot2_header:
+        dd MBOOT2_MAGIC           ; Magic number
+        dw MBOOT2_ARCH            ; Architecture (0 = i386)
+        dw MBOOT2_HEADER_LEN      ; Header length
+        dd MBOOT2_CHECKSUM        ; Checksum
+        ; End tag
+        dw 0                      ; Type (0 = end)
+        dw 0                      ; Flags
+        dd 8                      ; Size
+    mboot2_header_end:
+
+    ; Continue with kernel entry
     mov rsp, stack_top
     push 0
     popfq
@@ -392,3 +398,9 @@ tss_descriptor:
     db 0
     dq 0
     dd 0
+
+section .bss
+    align 16
+    stack_bottom:
+        resb 65536
+    stack_top:

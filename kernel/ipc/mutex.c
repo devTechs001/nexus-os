@@ -9,7 +9,7 @@
 /*                         MUTEX CONFIGURATION                               */
 /*===========================================================================*/
 
-#define MUTEX_MAGIC         0xMUT00001
+#define MUTEX_MAGIC         0x4D555401
 #define MUTEX_MAX_WAITERS   1024
 #define MUTEX_SPIN_COUNT    1000
 
@@ -111,7 +111,7 @@ void mutex_init_locked(mutex_t *mutex)
 
     mutex->magic = MUTEX_MAGIC;
     mutex->flags = 0;
-    mutex->owner = current_thread();
+    mutex->owner = current;
     mutex->spin_count = MUTEX_SPIN_COUNT;
 
     /* Update global statistics */
@@ -196,7 +196,7 @@ static void mutex_lock_slowpath(mutex_t *mutex)
     struct mutex_waiter waiter;
     struct task_struct *task;
 
-    task = current_thread();
+    task = current;
 
     /* Create waiter entry */
     waiter.task = task;
@@ -228,7 +228,7 @@ static void mutex_lock_slowpath(mutex_t *mutex)
         }
 
         /* Check for signals */
-        if (signal_pending()) {
+        if (signal_pending_current()) {
             /* Remove from wait list */
             spin_lock(&mutex->wait_lock);
             list_del(&waiter.list);
@@ -275,13 +275,13 @@ void mutex_lock(mutex_t *mutex)
 
     /* Fast path: try atomic acquire */
     if (atomic_cmpxchg(&mutex->count, 1, 0) == 1) {
-        mutex->owner = current_thread();
+        mutex->owner = current;
         atomic_inc(&mutex_global.total_acquisitions);
         return;
     }
 
     /* Check for recursive lock */
-    if (mutex->owner == current_thread()) {
+    if (mutex->owner == current) {
         pr_err("Mutex: Recursive lock attempt on mutex %p\n", mutex);
         return;
     }
@@ -305,19 +305,19 @@ int mutex_lock_interruptible(mutex_t *mutex)
 
     /* Fast path */
     if (atomic_cmpxchg(&mutex->count, 1, 0) == 1) {
-        mutex->owner = current_thread();
+        mutex->owner = current;
         atomic_inc(&mutex_global.total_acquisitions);
         return 0;
     }
 
     /* Check for recursive lock */
-    if (mutex->owner == current_thread()) {
+    if (mutex->owner == current) {
         return -EDEADLK;
     }
 
     /* Try spinning first */
     if (mutex_spin_lock(mutex)) {
-        mutex->owner = current_thread();
+        mutex->owner = current;
         atomic_inc(&mutex_global.total_acquisitions);
         return 0;
     }
@@ -343,7 +343,7 @@ bool mutex_trylock(mutex_t *mutex)
     }
 
     if (atomic_cmpxchg(&mutex->count, 1, 0) == 1) {
-        mutex->owner = current_thread();
+        mutex->owner = current;
         atomic_inc(&mutex_global.total_acquisitions);
         return true;
     }
@@ -391,7 +391,7 @@ void mutex_unlock(mutex_t *mutex)
     }
 
     /* Check ownership */
-    if (mutex->owner != current_thread()) {
+    if (mutex->owner != current) {
         pr_err("Mutex: Unlock by non-owner on mutex %p\n", mutex);
         return;
     }
@@ -450,16 +450,16 @@ void mutex_init_recursive(mutex_t *mutex)
  */
 void mutex_lock_recursive(mutex_t *mutex)
 {
-    struct task_struct *current;
+    struct task_struct *curr_task;
 
     if (!mutex || mutex->magic != MUTEX_MAGIC) {
         return;
     }
 
-    current = current_thread();
+    curr_task = current;
 
     /* Check if we already own the mutex */
-    if (mutex->owner == current) {
+    if (mutex->owner == curr_task) {
         mutex->recursion_count++;
         return;
     }
@@ -480,7 +480,7 @@ void mutex_unlock_recursive(mutex_t *mutex)
     }
 
     /* Check ownership */
-    if (mutex->owner != current_thread()) {
+    if (mutex->owner != current) {
         pr_err("Mutex: Recursive unlock by non-owner on mutex %p\n", mutex);
         return;
     }
@@ -525,20 +525,20 @@ void mutex_lock_adaptive(mutex_t *mutex)
 
     /* Fast path */
     if (atomic_cmpxchg(&mutex->count, 1, 0) == 1) {
-        mutex->owner = current_thread();
+        mutex->owner = current;
         atomic_inc(&mutex_global.total_acquisitions);
         return;
     }
 
     /* Check for recursive lock */
-    if (mutex->owner == current_thread()) {
+    if (mutex->owner == current) {
         pr_err("Mutex: Recursive lock attempt on adaptive mutex %p\n", mutex);
         return;
     }
 
     /* Adaptive spinning */
     if (mutex_spin_lock(mutex)) {
-        mutex->owner = current_thread();
+        mutex->owner = current;
         atomic_inc(&mutex_global.total_acquisitions);
         return;
     }

@@ -16,6 +16,7 @@
 #define PCI_MAX_DEVICES           256
 #define PCI_MAX_BARS              6
 #define PCI_MAX_IRQ_LINES         32
+#define PCI_ANY_ID                0xFFFFFFFF
 
 /* PCI Config Space Offsets */
 #define PCI_CONFIG_VENDOR_ID      0x00
@@ -160,10 +161,12 @@ static inline u32 pci_read_config_dword(u32 bus, u32 dev, u32 func, u32 offset)
 /*                         PCI DEVICE OPERATIONS                             */
 /*===========================================================================*/
 
+static void pci_scan_bus(u32 bus);
+
 static void pci_scan_device(u32 bus, u32 dev, u32 func)
 {
     if (g_pci.device_count >= PCI_MAX_DEVICES) return;
-    
+
     u16 vendor_id = pci_read_config_word(bus, dev, func, PCI_CONFIG_VENDOR_ID);
     if (vendor_id == 0xFFFF) return;  /* Device not present */
     

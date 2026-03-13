@@ -28,6 +28,10 @@
 #define FB_FLAG_GLOBAL_ALPHA      0x10
 #define FB_FLAG_LOCAL_ALPHA       0x20
 
+/* FB Acceleration Types */
+#define FB_HAS_ACCEL              1
+#define FB_NO_ACCEL               0
+
 /*===========================================================================*/
 /*                         DATA STRUCTURES                                   */
 /*===========================================================================*/
@@ -98,8 +102,8 @@ typedef struct {
     u32 ref_count;
     
     /* Acceleration ops */
-    void (*fillrect)(struct fb_fillrect_t *rect);
-    void (*copyarea)(struct fb_copyarea_t *area);
+    void (*fillrect)(fb_fillrect_t *rect);
+    void (*copyarea)(fb_copyarea_t *area);
     void (*imageblit)(void *image);
     
     /* Driver private data */

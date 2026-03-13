@@ -22,7 +22,7 @@ static size_t bitmap_size = 0;
 
 /* Memory statistics */
 static size_t total_pages = 0;
-static size_t free_pages = 0;
+static size_t num_free_pages = 0;
 static size_t reserved_pages = 0;
 
 /* Physical memory boundaries */
@@ -119,7 +119,7 @@ void pmm_init_region(phys_addr_t base, size_t size)
         bitmap_clear(pmm_bitmap, start_page + i);
     }
     
-    free_pages += num_pages;
+    num_free_pages += num_pages;
     
     spin_unlock(&pmm_lock);
 }
@@ -139,7 +139,7 @@ void pmm_free_region(phys_addr_t base, size_t size)
         bitmap_clear(pmm_bitmap, start_page + i);
     }
     
-    free_pages += num_pages;
+    num_free_pages += num_pages;
     
     spin_unlock(&pmm_lock);
 }
@@ -158,7 +158,7 @@ phys_addr_t pmm_alloc_page(void)
     
     spin_lock(&pmm_lock);
     
-    if (free_pages == 0) {
+    if (num_free_pages == 0) {
         spin_unlock(&pmm_lock);
         return 0;
     }
@@ -170,7 +170,7 @@ phys_addr_t pmm_alloc_page(void)
     }
     
     bitmap_set(pmm_bitmap, page_idx);
-    free_pages--;
+    num_free_pages--;
     
     spin_unlock(&pmm_lock);
     
@@ -190,7 +190,7 @@ phys_addr_t pmm_alloc_pages(size_t count)
     
     spin_lock(&pmm_lock);
     
-    if (free_pages < count) {
+    if (num_free_pages < count) {
         spin_unlock(&pmm_lock);
         return 0;
     }
@@ -205,7 +205,7 @@ phys_addr_t pmm_alloc_pages(size_t count)
         bitmap_set(pmm_bitmap, page_idx + i);
     }
     
-    free_pages -= count;
+    num_free_pages -= count;
     
     spin_unlock(&pmm_lock);
     
@@ -237,7 +237,7 @@ void pmm_free_page(phys_addr_t page)
     }
     
     bitmap_clear(pmm_bitmap, page_idx);
-    free_pages++;
+    num_free_pages++;
     
     spin_unlock(&pmm_lock);
 }
@@ -261,7 +261,7 @@ void pmm_free_pages(phys_addr_t pages, size_t count)
     for (i = 0; i < count; i++) {
         if (bitmap_test(pmm_bitmap, page_idx + i)) {
             bitmap_clear(pmm_bitmap, page_idx + i);
-            free_pages++;
+            num_free_pages++;
         }
     }
     
@@ -313,7 +313,7 @@ size_t pmm_get_free_pages(void)
     size_t count;
     
     spin_lock(&pmm_lock);
-    count = free_pages;
+    count = num_free_pages;
     spin_unlock(&pmm_lock);
     
     return count;
@@ -335,7 +335,7 @@ size_t pmm_get_used_pages(void)
     size_t count;
     
     spin_lock(&pmm_lock);
-    count = total_pages - free_pages;
+    count = total_pages - num_free_pages;
     spin_unlock(&pmm_lock);
     
     return count;
@@ -372,7 +372,7 @@ void pmm_init(void)
     
     /* Calculate total pages */
     total_pages = (mem_end - mem_start) / PAGE_SIZE;
-    free_pages = total_pages;
+    num_free_pages = total_pages;
     
     /* Calculate bitmap size */
     bitmap_size = (total_pages + 63) / 64;
@@ -394,7 +394,7 @@ void pmm_init(void)
         bitmap_set(pmm_bitmap, i);
     }
     
-    free_pages -= bitmap_pages;
+    num_free_pages -= bitmap_pages;
     reserved_pages = bitmap_pages;
     
     /* Mark first MB as reserved */
@@ -402,11 +402,11 @@ void pmm_init(void)
         bitmap_set(pmm_bitmap, i);
     }
     
-    free_pages -= 256;
+    num_free_pages -= 256;
     reserved_pages += 256;
     
     pr_info("  Reserved Pages: %lu\n", reserved_pages);
-    pr_info("  Free Pages: %lu\n", free_pages);
+    pr_info("  Free Pages: %lu\n", num_free_pages);
     
     pr_info("Physical Memory Manager initialized.\n");
 }
@@ -441,8 +441,8 @@ void mem_info(void)
 {
     printk("\n=== Memory Information ===\n");
     printk("Total Memory: %lu MB\n", (total_pages * PAGE_SIZE) / (1024 * 1024));
-    printk("Used Memory: %lu MB\n", ((total_pages - free_pages) * PAGE_SIZE) / (1024 * 1024));
-    printk("Free Memory: %lu MB\n", (free_pages * PAGE_SIZE) / (1024 * 1024));
+    printk("Used Memory: %lu MB\n", ((total_pages - num_free_pages) * PAGE_SIZE) / (1024 * 1024));
+    printk("Free Memory: %lu MB\n", (num_free_pages * PAGE_SIZE) / (1024 * 1024));
     printk("Reserved Memory: %lu MB\n", (reserved_pages * PAGE_SIZE) / (1024 * 1024));
     printk("\n");
 }

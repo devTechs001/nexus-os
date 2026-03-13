@@ -3,8 +3,12 @@
  * kernel/sched/realtime.c
  */
 
-#include "../include/kernel.h"
 #include "sched.h"
+#include "../include/types.h"
+#include "../include/kernel.h"
+
+/* Forward declarations */
+struct rt_mutex;
 
 /*===========================================================================*/
 /*                         RT SCHEDULER CONFIGURATION                        */
@@ -55,7 +59,6 @@ static void rt_rq_init(struct rt_rq *rt_rq, struct rq *rq)
 {
     int i;
 
-    INIT_LIST_HEAD(&rt_rq->queue);
     rt_rq->nr_running = 0;
     rt_rq->time = 0;
     rt_rq->rt_runtime = rt_tunables.rt_runtime_us * NS_PER_US;
@@ -590,7 +593,7 @@ bool rt_task(struct task_struct *task)
  *
  * Initializes an RT mutex with priority inheritance support.
  */
-void rt_mutex_init(struct rt_mutex *lock)
+void rt_mutex_init(rt_mutex_t *lock)
 {
     if (!lock) {
         return;
@@ -611,7 +614,7 @@ void rt_mutex_init(struct rt_mutex *lock)
  *
  * Returns: 0 on success, negative error code on failure
  */
-int rt_mutex_lock(struct rt_mutex *lock)
+int rt_mutex_lock(rt_mutex_t *lock)
 {
     struct task_struct *task = current;
     struct task_struct *owner;
@@ -682,7 +685,7 @@ int rt_mutex_lock(struct rt_mutex *lock)
  *
  * Returns: 0 on success, negative error code on failure
  */
-int rt_mutex_unlock(struct rt_mutex *lock)
+int rt_mutex_unlock(rt_mutex_t *lock)
 {
     struct task_struct *task = current;
     struct task_struct *next;
@@ -729,7 +732,7 @@ int rt_mutex_unlock(struct rt_mutex *lock)
  *
  * Returns: 0 on success, -EBUSY if lock is held
  */
-int rt_mutex_trylock(struct rt_mutex *lock)
+int rt_mutex_trylock(rt_mutex_t *lock)
 {
     unsigned long flags;
     int ret = 0;
@@ -881,7 +884,7 @@ void for_each_rt_task(struct task_struct *task, struct rq *rq)
 {
     /* This is implemented as a macro in the header */
     (void)task;
-    (void)sq;
+    (void)rq;
 }
 
 /*===========================================================================*/
@@ -912,14 +915,6 @@ extern void resched_cpu(int cpu);
 /* Enqueue flags */
 #define ENQUEUE_REPLENISH     0x01
 #define ENQUEUE_HEAD          0x02
-
-/* RT mutex structure */
-struct rt_mutex {
-    spinlock_t wait_lock;
-    struct task_struct *owner;
-    int pi_boosted_prio;
-    struct list_head wait_list;
-};
 
 /* Scheduler class structure */
 struct sched_class {

@@ -155,9 +155,9 @@ int vprintk(const char *fmt, __builtin_va_list args)
 
     *str = '\0';
 
-    /* Output via VGA console - printf not available in bare-metal */
-    /* In real OS: write to serial port or framebuffer */
-    (void)printk_buffer;  /* Suppress unused warning */
+    /* Output via VGA console */
+    extern void console_write(const char *str, u32 len);
+    console_write(printk_buffer, len);
 
     return len;
 }

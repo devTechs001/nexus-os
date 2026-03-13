@@ -133,7 +133,7 @@ typedef struct fw_rule {
 /**
  * fw_chain_t - Firewall chain (list of rules)
  */
-typedef struct {
+typedef struct fw_chain {
     char name[32];
     u32 id;
     u32 table;
@@ -142,6 +142,7 @@ typedef struct {
     u8 default_policy;
     u64 packets_processed;
     u64 bytes_processed;
+    struct fw_chain *next;
 } fw_chain_t;
 
 /**

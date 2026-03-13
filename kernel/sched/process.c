@@ -3,8 +3,9 @@
  * kernel/sched/process.c
  */
 
-#include "../include/kernel.h"
 #include "sched.h"
+#include "../include/kernel.h"
+#include "../sync/sync.h"
 
 /*===========================================================================*/
 /*                         PROCESS MANAGEMENT DATA                           */
@@ -25,12 +26,12 @@ static struct {
 };
 
 /* Task list head */
-static struct list_head task_list = LIST_HEAD_INIT(task_list);
-static spinlock_t task_list_lock = { .lock = 0 };
+struct list_head task_list = LIST_HEAD_INIT(task_list);
+spinlock_t task_list_lock = { .lock = 0 };
 
 /* Process count */
-static atomic_t process_count = { .counter = 0 };
-static atomic_t thread_count = { .counter = 0 };
+atomic_t process_count = { .counter = 0 };
+atomic_t thread_count = { .counter = 0 };
 
 /* Init task (first process) */
 static struct task_struct *init_task = NULL;
@@ -45,7 +46,7 @@ static struct task_struct *init_task = NULL;
  * Returns a unique process ID for a new process.
  * Uses a simple incrementing counter with wraparound protection.
  */
-static pid_t allocate_pid(void)
+pid_t allocate_pid(void)
 {
     pid_t pid;
 
@@ -68,7 +69,7 @@ static pid_t allocate_pid(void)
  *
  * Returns a unique thread ID for a new thread.
  */
-static tid_t allocate_tid(void)
+tid_t allocate_tid(void)
 {
     tid_t tid;
 
@@ -90,7 +91,7 @@ static tid_t allocate_tid(void)
  * free_pid - Free a process ID
  * @pid: PID to free
  */
-static void free_pid(pid_t pid)
+void free_pid(pid_t pid)
 {
     /* In a full implementation, this would add PID to a free list */
     /* For now, we just let the counter wrap around naturally */
@@ -101,7 +102,7 @@ static void free_pid(pid_t pid)
  * free_tid - Free a thread ID
  * @tid: TID to free
  */
-static void free_tid(tid_t tid)
+void free_tid(tid_t tid)
 {
     /* In a full implementation, this would add TID to a free list */
     (void)tid;
@@ -124,7 +125,7 @@ static inline u32 task_hash_func(pid_t pid)
  * task_hash_insert - Insert task into hash table
  * @task: Task to insert
  */
-static void task_hash_insert(struct task_struct *task)
+void task_hash_insert(struct task_struct *task)
 {
     u32 hash = task_hash_func(task->pid);
 
@@ -146,7 +147,7 @@ static void task_hash_insert(struct task_struct *task)
  * task_hash_remove - Remove task from hash table
  * @task: Task to remove
  */
-static void task_hash_remove(struct task_struct *task)
+void task_hash_remove(struct task_struct *task)
 {
     u32 hash = task_hash_func(task->pid);
     struct task_struct *curr, *prev;
@@ -184,7 +185,7 @@ static void task_hash_remove(struct task_struct *task)
  *
  * Allocates memory for a new task_struct and initializes basic fields.
  */
-static struct task_struct *alloc_task_struct(void)
+struct task_struct *alloc_task_struct(void)
 {
     struct task_struct *task;
 
@@ -203,10 +204,14 @@ static struct task_struct *alloc_task_struct(void)
     INIT_LIST_HEAD(&task->run_list);
     INIT_LIST_HEAD(&task->children);
     INIT_LIST_HEAD(&task->sibling);
-    INIT_LIST_HEAD(&task->wait_queue.list);
+    wait_queue_init(&task->wait_queue);
 
     /* Initialize scheduler entity */
-    task->se.rb_node = (struct rb_node){ NULL, NULL, NULL };
+    task->se.rb_node.rb_parent_color = 0;
+    task->se.rb_node.rb_right = NULL;
+    task->se.rb_node.rb_left = NULL;
+    task->se.rb_node.rb_parent = NULL;
+    task->se.rb_node.rb_color = RB_BLACK;
     task->se.vruntime = 0;
     task->se.prev_vruntime = 0;
     INIT_LIST_HEAD(&task->se.run_list);
@@ -228,7 +233,6 @@ static struct task_struct *alloc_task_struct(void)
     task->rt.time_slice = 0;
 
     /* Initialize wait queue */
-    task->wait_queue.task = task;
     task->sleeping_on = NULL;
 
     /* Initialize reference count */
@@ -264,7 +268,7 @@ static struct task_struct *alloc_task_struct(void)
  * free_task_struct - Free task structure
  * @task: Task to free
  */
-static void free_task_struct(struct task_struct *task)
+void free_task_struct(struct task_struct *task)
 {
     if (!task) {
         return;
@@ -493,7 +497,7 @@ void task_destroy(struct task_struct *task)
  * Internal function to handle task exit. Sets task state to
  * EXITING, notifies parent, and cleans up resources.
  */
-static void do_exit(struct task_struct *task, int code)
+void do_exit(struct task_struct *task, int code)
 {
     struct task_struct *parent;
     struct rq *rq;
@@ -991,3 +995,60 @@ extern int arch_copy_files(struct task_struct *parent, struct task_struct *child
 extern void arch_set_return_value(struct task_struct *task, int value);
 extern int arch_load_binary(struct task_struct *task, const char *path,
                             char **argv, char **envp);
+
+/* Architecture stubs */
+void arch_free_task_arch(void *arch_data)
+{
+    if (arch_data)
+        kfree(arch_data);
+}
+
+void arch_set_return_value(struct task_struct *task, int value)
+{
+    (void)task;
+    (void)value;
+    /* In real implementation: set return value in thread context */
+}
+
+int arch_init_task(struct task_struct *task, void (*fn)(void *), void *arg)
+{
+    (void)fn;
+    (void)arg;
+    if (!task->arch) {
+        task->arch = kzalloc(256);
+        if (!task->arch)
+            return -ENOMEM;
+    }
+    return 0;
+}
+
+int arch_copy_thread(struct task_struct *parent, struct task_struct *child)
+{
+    (void)parent;
+    (void)child;
+    return 0;
+}
+
+int arch_copy_mm(struct task_struct *parent, struct task_struct *child)
+{
+    (void)parent;
+    (void)child;
+    return 0;
+}
+
+int arch_copy_files(struct task_struct *parent, struct task_struct *child)
+{
+    (void)parent;
+    (void)child;
+    return 0;
+}
+
+int arch_load_binary(struct task_struct *task, const char *path,
+                     char **argv, char **envp)
+{
+    (void)task;
+    (void)path;
+    (void)argv;
+    (void)envp;
+    return -ENOSYS;
+}

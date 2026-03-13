@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* PCI constants */
+#define PCI_ANY_ID  0xFFFFFFFF
+
 /*===========================================================================*/
 /*                         BLUETOOTH CONFIGURATION                           */
 /*===========================================================================*/

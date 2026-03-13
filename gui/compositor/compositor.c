@@ -161,32 +161,33 @@ int compositor_run(compositor_t *comp)
 }
 
 /**
- * compositor_shutdown - Shutdown compositor
+ * compositor_shutdown_internal - Shutdown compositor (internal implementation)
  * @comp: Pointer to compositor structure
  *
  * Returns: 0 on success, negative error code on failure
+ * Note: Public API compositor_shutdown() is in compositing_manager.c
  */
-int compositor_shutdown(compositor_t *comp)
+int compositor_shutdown_internal(compositor_t *comp)
 {
     if (!comp || !comp->initialized) {
         return -EINVAL;
     }
-    
+
     printk("[COMP] Shutting down compositor...\n");
-    
+
     comp->running = false;
     comp->active = false;
-    
+
     /* Destroy all surfaces */
     for (u32 i = 0; i < comp->surface_count; i++) {
         compositor_destroy_surface(comp, &comp->surfaces[i]);
     }
-    
+
     /* Destroy all layers */
     for (u32 i = 0; i < comp->layer_count; i++) {
         compositor_destroy_layer(comp, i);
     }
-    
+
     /* Destroy framebuffers */
     for (u32 i = 0; i < 3; i++) {
         if (comp->framebuffers[i].data) {

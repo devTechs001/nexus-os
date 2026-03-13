@@ -174,7 +174,7 @@ typedef struct point {
  */
 typedef struct size {
     s32 width, height;
-} size_t;
+} gui_size_t;
 
 /**
  * Matrix 4x4 (for transformations)

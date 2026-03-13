@@ -4,6 +4,7 @@
  */
 
 #include "ipc.h"
+#include "../sched/sched.h"
 
 /*===========================================================================*/
 /*                         MESSAGE QUEUE CONFIGURATION                       */
@@ -86,7 +87,7 @@ static void msgq_hash_insert(struct msqid_kernel *msq)
     }
 
     hash = msgq_hash_key(msq->msg_perm.key);
-    list_add(&msq->msg_perm.key, &msgq_key_hash[hash]);
+    list_add(&msq->msg_perm.list, &msgq_key_hash[hash]);
 }
 
 /**
@@ -99,8 +100,8 @@ static void msgq_hash_remove(struct msqid_kernel *msq)
         return;
     }
 
-    list_del(&msq->msg_perm.key);
-    INIT_LIST_HEAD(&msq->msg_perm.key);
+    list_del(&msq->msg_perm.list);
+    INIT_LIST_HEAD(&msq->msg_perm.list);
 }
 
 /**
@@ -120,7 +121,7 @@ static struct msqid_kernel *msgq_hash_find(key_t key)
 
     hash = msgq_hash_key(key);
 
-    list_for_each_entry(msq, &msgq_key_hash[hash], msg_perm.key) {
+    list_for_each_entry(msq, &msgq_key_hash[hash], msg_perm.list) {
         if (msq->msg_perm.key == key) {
             return msq;
         }
@@ -293,7 +294,7 @@ struct msqid_kernel *msgq_alloc(key_t key, int flags)
     spin_lock(&msgq_global.lock);
     atomic_inc(&msgq_global.msgq_count);
     atomic_inc(&msgq_global.total_allocated);
-    list_add(&msq->msg_perm.key, &msgq_global.msgq_list);
+    list_add(&msq->msg_perm.list, &msgq_global.msgq_list);
     spin_unlock(&msgq_global.lock);
 
     pr_debug("MsgQ: Allocated queue id=%d key=%x\n", id, key);
@@ -347,7 +348,7 @@ void msgq_free(struct msqid_kernel *msq)
     spin_lock(&msgq_global.lock);
     atomic_dec(&msgq_global.msgq_count);
     atomic_inc(&msgq_global.total_freed);
-    list_del(&msq->msg_perm.key);
+    list_del(&msq->msg_perm.list);
     spin_unlock(&msgq_global.lock);
 
     /* Free queue structure */
@@ -474,7 +475,7 @@ int msg_send(struct msqid_kernel *msq, long mtype, const void *msg, size_t size)
     msq->msg_cbytes += size;
     msq->msg_qnum++;
     msq->msg_stime = get_time_ms() / 1000;
-    msq->msg_lspid = current_process() ? current_process()->pid : 0;
+    msq->msg_lspid = current ? current->pid : 0;
 
     spin_unlock(&msq->lock);
 
@@ -561,7 +562,7 @@ int msg_recv(struct msqid_kernel *msq, long mtype, void *msg, size_t size)
     msq->msg_cbytes -= found_msg->msize;
     msq->msg_qnum--;
     msq->msg_rtime = get_time_ms() / 1000;
-    msq->msg_lrpid = current_process() ? current_process()->pid : 0;
+    msq->msg_lrpid = current ? current->pid : 0;
 
     spin_unlock(&msq->lock);
 
@@ -663,7 +664,7 @@ int msgsnd(int msqid, const void *msgp, size_t msgsz, int msgflg)
         /* In real implementation: wait for space */
         ret = msg_send(msq, mbuf->mtype, mbuf->mtext, msgsz);
         while (ret == -EAGAIN) {
-            if (signal_pending()) {
+            if (signal_pending_current()) {
                 atomic_dec(&msq->refcount);
                 return -EINTR;
             }
@@ -718,7 +719,7 @@ ssize_t msgrcv(int msqid, void *msgp, size_t msgsz, long msgtyp, int msgflg)
         /* In real implementation: wait for message */
         ret = msg_recv(msq, msgtyp, mbuf->mtext, msgsz);
         while (ret == -ENOMSG) {
-            if (signal_pending()) {
+            if (signal_pending_current()) {
                 atomic_dec(&msq->refcount);
                 return -EINTR;
             }

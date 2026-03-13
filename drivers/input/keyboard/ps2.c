@@ -90,6 +90,7 @@ typedef struct {
     u8 resolution;
     u8 sample_rate;
     u32 packet_count;
+    u32 errors;
 } ps2_mouse_t;
 
 typedef struct {

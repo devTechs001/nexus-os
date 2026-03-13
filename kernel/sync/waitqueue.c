@@ -9,7 +9,7 @@
 /*                         WAIT QUEUE CONFIGURATION                          */
 /*===========================================================================*/
 
-#define WAITQUEUE_MAGIC_VALUE   0xWQ0000001
+#define WAITQUEUE_MAGIC_VALUE   0x57510001  /* "WQ" magic */
 #define WAITQUEUE_DEBUG         1
 
 /* Wait states */
@@ -43,6 +43,15 @@ static struct {
 /*===========================================================================*/
 /*                         WAIT QUEUE INITIALIZATION                         */
 /*===========================================================================*/
+
+/**
+ * wait_queue_init - Initialize a wait queue head (alias)
+ * @wq: Wait queue to initialize
+ */
+void wait_queue_init(wait_queue_head_t *wq)
+{
+    init_waitqueue_head(wq);
+}
 
 /**
  * init_waitqueue_head - Initialize a wait queue head
@@ -277,7 +286,7 @@ static int __wait_event_common(wait_queue_head_t *wq, int condition,
         }
 
         /* Check for signals if interruptible */
-        if (interruptible && signal_pending()) {
+        if (interruptible && signal_pending_current()) {
             finish_wait(wq, &wait);
             ret = -EINTR;
             break;

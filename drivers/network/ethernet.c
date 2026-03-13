@@ -55,7 +55,7 @@ typedef struct {
     u32 status;
 } eth_tx_desc_t;
 
-typedef struct {
+typedef struct eth_device {
     u32 device_id;
     char name[32];
     u16 vendor_id;
@@ -65,7 +65,7 @@ typedef struct {
     bool is_link_up;
     u32 speed;
     u32 mtu;
-    
+
     /* Ring buffers */
     eth_rx_desc_t *rx_ring;
     eth_tx_desc_t *tx_ring;
@@ -75,7 +75,7 @@ typedef struct {
     u32 rx_tail;
     u32 tx_head;
     u32 tx_tail;
-    
+
     /* Statistics */
     u64 rx_packets;
     u64 tx_packets;
@@ -84,7 +84,7 @@ typedef struct {
     u64 rx_errors;
     u64 tx_errors;
     u64 collisions;
-    
+
     /* Driver callbacks */
     int (*init)(struct eth_device *);
     int (*start)(struct eth_device *);
@@ -92,7 +92,7 @@ typedef struct {
     int (*send)(struct eth_device *, void *, u32);
     int (*recv)(struct eth_device *, void *, u32 *);
     void (*set_mac)(struct eth_device *, u8 *);
-    
+
     void *private_data;
 } eth_device_t;
 

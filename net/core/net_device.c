@@ -1337,6 +1337,39 @@ void net_device_init(void)
 }
 
 /**
+ * netdev_transmit - Transmit a socket buffer through network device
+ * @dev: Network device
+ * @skb: Socket buffer to transmit
+ *
+ * Transmits the given socket buffer through the specified network device.
+ * This is the main transmit path for network packets.
+ */
+int netdev_transmit(struct net_device *dev, struct sk_buff *skb)
+{
+    if (!dev || !skb) {
+        return -EINVAL;
+    }
+
+    /* Check if device is up and running */
+    if (!(dev->flags & NETDEV_FLAG_UP)) {
+        return -ENETDOWN;
+    }
+
+    /* Update statistics */
+    dev->stats.tx_packets++;
+    dev->stats.tx_bytes += skb->len;
+
+    /* Call device's hard_start_xmit if available */
+    if (dev->hard_start_xmit) {
+        return dev->hard_start_xmit(skb, dev);
+    }
+
+    /* Free the skb if no transmit function */
+    dev_kfree_skb(skb);
+    return 0;
+}
+
+/**
  * net_device_exit - Shutdown network device subsystem
  */
 void net_device_exit(void)

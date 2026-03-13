@@ -7,6 +7,8 @@
  */
 
 #include "display.h"
+#include "../gpu/gpu.h"
+#include "../video/drm.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
 

@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declarations */
+int restore_create(const char *name, const char *description, u32 type, bool protected);
+
 /*===========================================================================*/
 /*                         RESTORE POINTS CONFIGURATION                      */
 /*===========================================================================*/

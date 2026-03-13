@@ -7,6 +7,7 @@
 #define _NEXUS_SCHED_H
 
 #include "../include/kernel.h"
+#include "../sync/sync.h"
 
 /*===========================================================================*/
 /*                         SCHEDULER CONSTANTS                               */
@@ -48,6 +49,11 @@
 #define PF_USED_ASYNC         0x00000800
 #define PF_THREAD_BOUND       0x00001000
 
+/* Enqueue Flags */
+#define ENQUEUE_REPLENISH     0x0001
+#define ENQUEUE_HEAD          0x0002
+#define ENQUEUE_WAKING        0x0004
+
 /* Priority Range */
 #define MAX_RT_PRIO           100
 #define MAX_PRIO              (MAX_RT_PRIO + 10)
@@ -77,6 +83,51 @@
 /*                         SCHEDULER STRUCTURES                              */
 /*===========================================================================*/
 
+/* Forward declarations */
+struct task_struct;
+
+/**
+ * sched_entity - Scheduler entity for CFS
+ */
+struct sched_entity {
+    /* RB-Tree Node */
+    struct rb_node rb_node;
+
+    /* Virtual Runtime */
+    u64 vruntime;
+    u64 prev_vruntime;
+
+    /* Run Queue Link */
+    struct list_head run_list;
+
+    /* Parent/Children */
+    struct sched_entity *parent;
+    struct cfs_rq *cfs_rq;
+    struct cfs_rq *my_q;
+
+    /* Load Weight */
+    unsigned long load_weight;
+
+    /* Execution Time */
+    u64 sum_exec_runtime;
+    u64 prev_sum_exec_runtime;
+
+    /* Statistics */
+    u64 nr_migrations;
+    u64 wait_start;
+    u64 wait_max;
+    u64 wait_count;
+    u64 wait_sum;
+
+    /* Deadline */
+    u64 deadline;
+    u64 runtime;
+    u64 period;
+
+    /* Task Backlink */
+    struct task_struct *task;
+};
+
 /**
  * task_struct - Process/Task control block
  */
@@ -85,49 +136,53 @@ struct task_struct {
     volatile long state;
     u32 flags;
     u32 ptrace;
-    
+
     /* Identification */
     pid_t pid;
     pid_t tgid;
     tid_t tid;
     uid_t uid;
     gid_t gid;
-    
+
     /* Names */
     char comm[16];
-    
+
     /* Priority */
     int prio;
     int static_prio;
     int normal_prio;
     unsigned int rt_priority;
-    
+
     /* Scheduler Class */
     u32 policy;
-    
+
     /* CPU Affinity */
     u64 cpus_allowed;
     u32 cpu;
     u32 last_cpu;
-    
+
     /* Run Queue */
     struct list_head run_list;
     struct rb_node rb_node;
-    
-    /* Timing */
-    u64 se.sum_exec_runtime;
-    u64 se.vruntime;
-    u64 se.prev_sum_exec_runtime;
-    
+
+    /* Scheduler Entity (CFS) */
+    struct sched_entity se;
+
+    /* Context Switches */
     u64 nvcsw;
     u64 nivcsw;
-    
+
     /* Real-time */
-    u64 rt.timeout;
-    u64 rt.time_slice;
-    
+    struct {
+        u64 timeout;
+        u64 time_slice;
+    } rt;
+
+    /* Priority Inheritance */
+    s32 pi_boosted_prio;
+
     /* Sleep/Wakeup */
-    wait_queue_t wait_queue;
+    wait_queue_head_t wait_queue;
     void *sleeping_on;
     
     /* Stack */
@@ -166,45 +221,89 @@ struct task_struct {
 };
 
 /**
- * sched_entity - Scheduler entity for CFS
+ * process - Process structure
  */
-struct sched_entity {
-    /* RB-Tree Node */
-    struct rb_node rb_node;
-    
-    /* Virtual Runtime */
-    u64 vruntime;
-    u64 prev_vruntime;
-    
-    /* Run Queue Link */
-    struct list_head run_list;
-    
-    /* Parent/Children */
-    struct sched_entity *parent;
-    struct cfs_rq *cfs_rq;
-    struct cfs_rq *my_q;
-    
-    /* Load Weight */
-    unsigned long load_weight;
-    
-    /* Execution Time */
-    u64 sum_exec_runtime;
-    u64 prev_sum_exec_runtime;
-    
-    /* Statistics */
-    u64 nr_migrations;
-    u64 wait_start;
-    u64 wait_max;
-    u64 wait_count;
-    u64 wait_sum;
-    
-    /* Deadline */
-    u64 deadline;
-    u64 runtime;
-    u64 period;
-    
-    /* Task Backlink */
-    struct task_struct *task;
+struct process {
+    pid_t pid;                      /* Process ID */
+    pid_t ppid;                     /* Parent process ID */
+    pid_t tgid;                     /* Thread group ID */
+    uid_t uid;                      /* User ID */
+    gid_t gid;                      /* Group ID */
+
+    char name[64];                  /* Process name */
+    char cmdline[256];              /* Command line */
+
+    struct task_struct *leader;     /* Thread group leader */
+    struct list_head threads;       /* Thread list */
+    spinlock_t thread_lock;         /* Thread list lock */
+
+    struct mm_struct *mm;           /* Memory descriptor */
+    struct files_struct *files;     /* File descriptor table */
+    struct fs_struct *fs;           /* Filesystem info */
+    struct signal_struct *signal;   /* Signal handlers */
+
+    u32 state;                      /* Process state */
+    u32 flags;                      /* Process flags */
+
+    u64 start_time;                 /* Start time */
+    u64 exit_time;                  /* Exit time */
+    int exit_code;                  /* Exit code */
+
+    atomic_t refcount;              /* Reference count */
+    struct list_head list;          /* Global process list */
+};
+
+/**
+ * files_struct - File descriptor table
+ */
+struct files_struct {
+    atomic_t count;
+    spinlock_t file_lock;
+    int max_fds;
+    int next_fd;
+    struct file **fd;
+    fd_set *open_fds;
+    fd_set *close_on_exec;
+};
+
+/**
+ * path - Filesystem path
+ */
+struct path {
+    struct vfsmount *mnt;
+    struct dentry *dentry;
+};
+
+/**
+ * fs_struct - Filesystem info
+ */
+struct fs_struct {
+    atomic_t count;
+    spinlock_t lock;
+    struct path root;
+    struct path pwd;
+};
+
+/**
+ * k_sigaction - Kernel signal action
+ */
+struct k_sigaction {
+    void (*sa_handler)(int);
+    void (*sa_sigaction)(int, siginfo_t *, void *);
+    sigset_t sa_mask;
+    unsigned long sa_flags;
+};
+
+/**
+ * signal_struct - Signal handlers
+ */
+struct signal_struct {
+    atomic_t count;
+    spinlock_t siglock;
+    struct k_sigaction action[64];
+    sigset_t signal;
+    sigset_t blocked;
+    sigset_t ignored;
 };
 
 /**
@@ -249,25 +348,23 @@ struct cfs_rq {
  * rt_rq - Real-Time Run Queue
  */
 struct rt_rq {
-    struct list_head queue;
-    unsigned int nr_running;
-    
     /* Priority Array */
     struct list_head queue[MAX_RT_PRIO];
-    
+    unsigned int nr_running;
+
     /* Time */
     u64 time;
     u64 rt_runtime;
     u64 rt_period;
-    
+
     /* Throttling */
     int throttled;
     int throttled_clock;
-    
+
     /* Push/Pull */
     int pushable_tasks;
-    struct plist_head pushable_tasks_list;
-    
+    struct list_head pushable_tasks_list;
+
     /* Per-CPU */
     struct rq *rq;
 };
@@ -306,12 +403,27 @@ struct rq {
     /* Statistics */
     u64 nr_switches;
     u64 nr_sched_events;
-    
+
     /* Load Balancing */
     unsigned long cpu_load[5];
-    
+
     /* Per-CPU Data */
     percpu_data_t *percpu;
+};
+
+/**
+ * sched_class - Scheduler class operations
+ */
+struct sched_class {
+    void (*enqueue_task)(struct rq *rq, struct task_struct *task, int flags);
+    void (*dequeue_task)(struct rq *rq, struct task_struct *task, int flags);
+    void (*put_prev_task)(struct rq *rq, struct task_struct *task);
+    struct task_struct *(*pick_next_task)(struct rq *rq);
+    void (*check_preempt_curr)(struct rq *rq, struct task_struct *task, int flags);
+    void (*task_tick)(struct rq *rq, struct task_struct *task);
+    void (*switched_from)(struct rq *rq, struct task_struct *task);
+    void (*switched_to)(struct rq *rq, struct task_struct *task);
+    void (*prio_changed)(struct rq *rq, struct task_struct *task);
 };
 
 /*===========================================================================*/
@@ -324,8 +436,25 @@ void scheduler_start(void);
 void scheduler_enable_all(void);
 
 /* Task Creation/Destruction */
+struct task_struct *alloc_task_struct(void);
+void free_task_struct(struct task_struct *task);
 struct task_struct *task_create(const char *name, void (*fn)(void *), void *arg);
 void task_destroy(struct task_struct *task);
+void do_exit(struct task_struct *task, int code);
+
+/* PID/TID Management */
+tid_t allocate_tid(void);
+void free_tid(tid_t tid);
+pid_t allocate_pid(void);
+void free_pid(pid_t pid);
+
+/* Task Hash Table */
+void task_hash_insert(struct task_struct *task);
+void task_hash_remove(struct task_struct *task);
+
+/* Task Queue Management */
+void enqueue_task(struct rq *rq, struct task_struct *task, int flags);
+void dequeue_task(struct rq *rq, struct task_struct *task, int flags);
 
 /* Task Control */
 int task_wake_up(struct task_struct *task);
@@ -363,6 +492,12 @@ bool is_idle_task(struct task_struct *task);
 struct task_struct *get_current(void);
 #define current get_current()
 
+/* Run Queue Access */
+struct rq *get_rq(u32 cpu);
+struct rq *get_cpu_rq(void);
+void rq_lock(struct rq *rq);
+void rq_unlock(struct rq *rq);
+
 /* Task Reference */
 void get_task(struct task_struct *task);
 void put_task(struct task_struct *task);
@@ -374,7 +509,7 @@ void for_each_task(struct task_struct *task);
 
 /* Wait Queue Operations */
 void wait_event(wait_queue_t *wq, int condition);
-void wait_event_interruptible(wait_queue_t *wq, int condition);
+int wait_event_interruptible(wait_queue_t *wq, int condition);
 void wake_up(wait_queue_t *wq);
 void wake_up_interruptible(wait_queue_t *wq);
 

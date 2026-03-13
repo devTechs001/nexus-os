@@ -45,7 +45,7 @@ typedef struct {
     bool is_active;
 } bio_template_t;
 
-typedef struct {
+typedef struct bio_device {
     u32 device_id;
     char name[64];
     u32 type;

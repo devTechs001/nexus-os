@@ -30,12 +30,20 @@
 #define KERNEL_HEAP_SIZE        (1024 * 1024 * 1024)
 
 /* Page Sizes */
+#ifndef PAGE_SIZE_4K
 #define PAGE_SIZE_4K            0x1000
+#endif
 #define PAGE_SIZE_2M            0x200000
 #define PAGE_SIZE_1G            0x40000000
+#ifndef PAGE_SIZE
 #define PAGE_SIZE               PAGE_SIZE_4K
+#endif
+#ifndef PAGE_SHIFT
 #define PAGE_SHIFT              12
+#endif
+#ifndef PAGE_MASK
 #define PAGE_MASK               (~(PAGE_SIZE - 1))
+#endif
 
 /* Page Table Flags */
 #define PAGE_PRESENT            (1ULL << 0)
@@ -98,7 +106,9 @@
     const typeof(((type *)0)->member) *__mptr = (ptr);          \
     (type *)((char *)__mptr - offsetof(type, member)); })
 
+#ifndef offsetof
 #define offsetof(type, member) ((size_t)&((type *)0)->member)
+#endif
 
 /* List Operations */
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
@@ -128,11 +138,26 @@ static inline void list_del(struct list_head *entry) {
     entry->next->prev = entry->prev;
 }
 
+static inline void list_del_init(struct list_head *entry) {
+    entry->prev->next = entry->next;
+    entry->next->prev = entry->prev;
+    entry->next = entry;
+    entry->prev = entry;
+}
+
 static inline bool list_empty(const struct list_head *head) {
     return head->next == head;
 }
 
 #define list_entry(ptr, type, member) container_of(ptr, type, member)
+
+#define list_first_entry(ptr, type, member) \
+    list_entry((ptr)->next, type, member)
+
+#define list_last_entry(ptr, type, member) \
+    list_entry((ptr)->prev, type, member)
+
+#define rb_entry(ptr, type, member) container_of(ptr, type, member)
 
 #define list_for_each(pos, head) \
     for (pos = (head)->next; pos != (head); pos = pos->next)
@@ -142,7 +167,14 @@ static inline bool list_empty(const struct list_head *head) {
          &pos->member != (head); \
          pos = list_entry(pos->member.next, typeof(*pos), member))
 
-/* Atomic Operations */
+#define list_for_each_entry_safe(pos, n, head, member) \
+    for (pos = list_entry((head)->next, typeof(*pos), member), \
+         n = list_entry(pos->member.next, typeof(*pos), member); \
+         &pos->member != (head); \
+         pos = n, n = list_entry(n->member.next, typeof(*pos), member))
+
+/* Atomic Operations - now implemented in kernel/sync/atomic.c */
+/*
 static inline s32 atomic_read(const atomic_t *v) {
     return v->counter;
 }
@@ -166,6 +198,7 @@ static inline s32 atomic_add_return(s32 i, atomic_t *v) {
 static inline s32 atomic_cmpxchg(atomic_t *v, s32 old, s32 new) {
     return __sync_val_compare_and_swap(&v->counter, old, new);
 }
+*/
 
 /* Forward Declarations */
 struct process;
@@ -196,6 +229,7 @@ int printk(const char *fmt, ...);
 #define pr_info(fmt, ...)    printk("[INFO] " fmt, ##__VA_ARGS__)
 #define pr_err(fmt, ...)     printk("[ERROR] " fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...)   printk("[DEBUG] " fmt, ##__VA_ARGS__)
+#define pr_warn(fmt, ...)    printk("[WARN] " fmt, ##__VA_ARGS__)
 
 /* Memory */
 void *kmalloc(size_t size);
@@ -214,12 +248,33 @@ percpu_data_t *get_percpu(void);
 u32 get_cpu_id(void);
 u32 get_num_cpus(void);
 
+/* Per-CPU variables - simplified for now */
+#define DEFINE_PER_CPU(type, name) type name
+#define get_cpu_ptr(var) (&(var))
+#define put_cpu_ptr(var) ((void)0)
+
+/* Current Task */
+struct task_struct;
+struct task_struct *get_current(void);
+#define current         get_current()
 #define current_thread()    (get_percpu()->current_thread)
 #define current_process()   (get_percpu()->current_process)
 
 /* Interrupts */
 void local_irq_enable(void);
 void local_irq_disable(void);
+
+/* IPI (Inter-Processor Interrupt) */
+typedef enum ipi_type {
+    IPI_RESCHEDULE      = 0,
+    IPI_CALL_FUNC       = 1,
+    IPI_CPU_STOP        = 2,
+    IPI_CPU_HALT        = 3,
+    IPI_WAKEUP          = 4,
+    IPI_INVALIDATE_TLB  = 5,
+} ipi_type_t;
+
+void send_ipi(u32 cpu, ipi_type_t type);
 
 /* Time */
 u64 get_ticks(void);

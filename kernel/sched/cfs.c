@@ -3,8 +3,26 @@
  * kernel/sched/cfs.c
  */
 
-#include "../include/kernel.h"
 #include "sched.h"
+#include "../include/types.h"
+#include "../include/kernel.h"
+
+/* Forward declarations */
+bool vruntime_before(u64 a, u64 b);
+void rb_erase(struct rb_node *node, struct rb_root *root);
+static inline void rb_insert_color_cached(struct rb_node *node,
+                                           struct rb_root *root,
+                                           struct rb_node **leftmost);
+
+/* RB-tree link node */
+void rb_link_node(struct rb_node *node, struct rb_node *parent,
+                  struct rb_node **link)
+{
+    node->rb_parent_color = (unsigned long)parent;
+    node->rb_left = NULL;
+    node->rb_right = NULL;
+    *link = node;
+}
 
 /*===========================================================================*/
 /*                         CFS CONFIGURATION                                 */
@@ -85,7 +103,7 @@ static const unsigned long nice_to_weight[40] = {
 };
 
 /* Priority to nice conversion */
-static const int prio_to_nice[40] = {
+static const int prio_to_nice_table[40] = {
     /*  0 */  -20,
     /*  1 */  -19,
     /*  2 */  -18,
@@ -1205,28 +1223,4 @@ void rb_insert_color(struct rb_node *node, struct rb_root *root)
     }
 
     root->rb_node->rb_color = RB_BLACK;
-}
-
-/**
- * rb_insert_color_cached - Insert with leftmost caching
- * @node: Node to insert
- * @root: RB-tree root
- * @leftmost: Pointer to leftmost node cache
- */
-void rb_insert_color_cached(struct rb_node *node, struct rb_root *root,
-                            struct rb_node **leftmost)
-{
-    bool first = false;
-
-    if (!*leftmost) {
-        first = true;
-    }
-
-    rb_insert_color(node, root);
-
-    if (first) {
-        *leftmost = node;
-    } else if (*leftmost && (*leftmost)->rb_parent == node) {
-        *leftmost = node;
-    }
 }

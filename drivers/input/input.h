@@ -70,6 +70,38 @@
 #define EV_FF_STATUS                0x17
 #define EV_MAX                      0x1f
 
+/* Absolute Axes */
+#define ABS_X                       0
+#define ABS_Y                       1
+#define ABS_Z                       2
+#define ABS_RX                      3
+#define ABS_RY                      4
+#define ABS_RZ                      5
+#define ABS_MAX                     0x3f
+
+/* Relative Axes */
+#define REL_X                       0
+#define REL_Y                       1
+#define REL_Z                       2
+#define REL_RX                      3
+#define REL_RY                      4
+#define REL_RZ                      5
+#define REL_MAX                     0x0f
+
+/* LEDs */
+#define LED_NUML                    0
+#define LED_CAPSL                   1
+#define LED_SCROLLL                 2
+#define LED_COMPOSE                 3
+#define LED_KANA                    4
+#define LED_SLEEP                 5
+#define LED_SUSPEND               6
+#define LED_MUTE                  7
+#define LED_MISC                  8
+#define LED_MAIL                  9
+#define LED_CHARGING              10
+#define LED_MAX                   0x0f
+
 /*===========================================================================*/
 /*                         KEY CODES (Subset)                                */
 /*===========================================================================*/
@@ -219,7 +251,7 @@ typedef struct {
 /**
  * Input Device
  */
-typedef struct {
+typedef struct input_device {
     u32 device_id;                  /* Device ID */
     input_devinfo_t info;           /* Device Info */
     u32 type;                       /* Device Type */

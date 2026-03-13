@@ -284,21 +284,6 @@ void send_ipi_mask(u64 mask, ipi_type_t type)
 /*===========================================================================*/
 
 /**
- * scheduler_enable_all - Enable scheduler on all CPUs
- */
-void scheduler_enable_all(void)
-{
-    u32 cpu;
-    
-    for (cpu = 0; cpu < MAX_CPUS; cpu++) {
-        if (cpu_info[cpu].state == CPU_STATE_RUNNING) {
-            /* Enable scheduler on this CPU */
-            arch_scheduler_enable(cpu);
-        }
-    }
-}
-
-/**
  * scheduler_migrate_tasks - Migrate tasks from CPU
  */
 void scheduler_migrate_tasks(u32 cpu)
@@ -472,5 +457,48 @@ extern void arch_send_ipi(u32 cpu, u32 vector);
 extern void arch_scheduler_enable(u32 cpu);
 extern void arch_scheduler_migrate(u32 cpu);
 extern void arch_topology_parse(u32 cpu, cpu_topology_t *topology);
+
+/* Architecture stubs */
+void arch_smp_detect(void)
+{
+    /* Detect SMP configuration */
+}
+
+int arch_cpu_up(u32 cpu)
+{
+    (void)cpu;
+    return 0;
+}
+
+int arch_cpu_down(u32 cpu)
+{
+    (void)cpu;
+    return 0;
+}
+
+/* Architecture stubs */
+void arch_send_ipi(u32 cpu, u32 vector)
+{
+    (void)cpu;
+    (void)vector;
+    /* In real implementation: send IPI via APIC */
+}
+
+void arch_scheduler_migrate(u32 cpu)
+{
+    (void)cpu;
+    /* In real implementation: trigger scheduler on remote CPU */
+}
+
+void arch_topology_parse(u32 cpu, cpu_topology_t *topology)
+{
+    (void)cpu;
+    if (topology) {
+        topology->package_id = 0;
+        topology->core_id = cpu;
+        topology->thread_id = 0;
+        topology->numa_node = 0;
+    }
+}
 
 #endif /* CONFIG_SMP */

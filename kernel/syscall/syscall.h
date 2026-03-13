@@ -328,9 +328,7 @@ struct syscall_entry {
  * sigset_t - Signal set
  */
 #define _NSIG_WORDS   4
-typedef struct {
-    unsigned long sig[_NSIG_WORDS];
-} sigset_t;
+/* sigset_t is defined in types.h */
 
 /**
  * sigaction - Signal action structure
@@ -352,24 +350,7 @@ struct sigaction {
 #define SA_NODEFER      0x40000000
 #define SA_RESETHAND    0x80000000
 
-/**
- * siginfo_t - Signal information
- */
-struct siginfo {
-    s32 si_signo;       /* Signal number */
-    s32 si_errno;       /* Error number */
-    s32 si_code;        /* Signal code */
-    union {
-        s32 _pad[128 / sizeof(s32) - 3];
-        struct {
-            pid_t _pid;     /* Sender's PID */
-            uid_t _uid;     /* Sender's UID */
-        } _kill;
-        struct {
-            void *_addr;    /* Faulting address */
-        } _sigfault;
-    } _sifields;
-};
+/* siginfo_t is defined in types.h */
 
 /**
  * timespec - Time specification
@@ -482,6 +463,250 @@ struct utsname {
 };
 
 /*===========================================================================*/
+/*                     SYSCALL FUNCTION DECLARATIONS                         */
+/*===========================================================================*/
+
+/* Process Management Syscalls */
+s64 sys_fork(struct syscall_args *args);
+s64 sys_vfork(struct syscall_args *args);
+s64 sys_clone(struct syscall_args *args);
+s64 sys_execve(struct syscall_args *args);
+s64 sys_exit(struct syscall_args *args);
+s64 sys_exit_group(struct syscall_args *args);
+s64 sys_wait4(struct syscall_args *args);
+s64 sys_waitpid(struct syscall_args *args);
+s64 sys_getpid(struct syscall_args *args);
+s64 sys_getppid(struct syscall_args *args);
+s64 sys_gettid(struct syscall_args *args);
+s64 sys_getuid(struct syscall_args *args);
+s64 sys_geteuid(struct syscall_args *args);
+s64 sys_getgid(struct syscall_args *args);
+s64 sys_getegid(struct syscall_args *args);
+s64 sys_setuid(struct syscall_args *args);
+s64 sys_seteuid(struct syscall_args *args);
+s64 sys_setgid(struct syscall_args *args);
+s64 sys_setegid(struct syscall_args *args);
+s64 sys_setpgid(struct syscall_args *args);
+s64 sys_getpgid(struct syscall_args *args);
+s64 sys_setsid(struct syscall_args *args);
+s64 sys_getsid(struct syscall_args *args);
+s64 sys_getpgrp(struct syscall_args *args);
+s64 sys_setreuid(struct syscall_args *args);
+s64 sys_setregid(struct syscall_args *args);
+s64 sys_getgroups(struct syscall_args *args);
+s64 sys_setgroups(struct syscall_args *args);
+s64 sys_setpriority(struct syscall_args *args);
+s64 sys_getpriority(struct syscall_args *args);
+s64 sys_nice(struct syscall_args *args);
+s64 sys_prctl(struct syscall_args *args);
+s64 sys_arch_prctl(struct syscall_args *args);
+s64 sys_ptrace(struct syscall_args *args);
+
+/* Memory Management Syscalls */
+s64 sys_mmap(struct syscall_args *args);
+s64 sys_munmap(struct syscall_args *args);
+s64 sys_mprotect(struct syscall_args *args);
+s64 sys_mremap(struct syscall_args *args);
+s64 sys_msync(struct syscall_args *args);
+s64 sys_mlock(struct syscall_args *args);
+s64 sys_munlock(struct syscall_args *args);
+s64 sys_mlockall(struct syscall_args *args);
+s64 sys_munlockall(struct syscall_args *args);
+s64 sys_mincore(struct syscall_args *args);
+s64 sys_madvise(struct syscall_args *args);
+s64 sys_brk(struct syscall_args *args);
+s64 sys_sbrk(struct syscall_args *args);
+s64 sys_mmap2(struct syscall_args *args);
+s64 sys_remap_file_pages(struct syscall_args *args);
+
+/* File Operations Syscalls */
+s64 sys_open(struct syscall_args *args);
+s64 sys_openat(struct syscall_args *args);
+s64 sys_close(struct syscall_args *args);
+s64 sys_read(struct syscall_args *args);
+s64 sys_write(struct syscall_args *args);
+s64 sys_lseek(struct syscall_args *args);
+s64 sys_pread64(struct syscall_args *args);
+s64 sys_pwrite64(struct syscall_args *args);
+s64 sys_readv(struct syscall_args *args);
+s64 sys_writev(struct syscall_args *args);
+s64 sys_preadv(struct syscall_args *args);
+s64 sys_pwritev(struct syscall_args *args);
+s64 sys_dup(struct syscall_args *args);
+s64 sys_dup2(struct syscall_args *args);
+s64 sys_dup3(struct syscall_args *args);
+s64 sys_fcntl(struct syscall_args *args);
+s64 sys_ioctl(struct syscall_args *args);
+s64 sys_access(struct syscall_args *args);
+s64 sys_faccessat(struct syscall_args *args);
+s64 sys_stat(struct syscall_args *args);
+s64 sys_lstat(struct syscall_args *args);
+s64 sys_fstat(struct syscall_args *args);
+s64 sys_statx(struct syscall_args *args);
+s64 sys_getdents(struct syscall_args *args);
+s64 sys_getdents64(struct syscall_args *args);
+s64 sys_readlink(struct syscall_args *args);
+s64 sys_readlinkat(struct syscall_args *args);
+s64 sys_symlink(struct syscall_args *args);
+s64 sys_symlinkat(struct syscall_args *args);
+s64 sys_link(struct syscall_args *args);
+s64 sys_linkat(struct syscall_args *args);
+s64 sys_unlink(struct syscall_args *args);
+s64 sys_unlinkat(struct syscall_args *args);
+s64 sys_rename(struct syscall_args *args);
+s64 sys_renameat(struct syscall_args *args);
+s64 sys_mkdir(struct syscall_args *args);
+s64 sys_mkdirat(struct syscall_args *args);
+s64 sys_rmdir(struct syscall_args *args);
+s64 sys_chmod(struct syscall_args *args);
+s64 sys_fchmod(struct syscall_args *args);
+s64 sys_chmodat(struct syscall_args *args);
+s64 sys_chown(struct syscall_args *args);
+s64 sys_fchown(struct syscall_args *args);
+s64 sys_lchown(struct syscall_args *args);
+s64 sys_truncate(struct syscall_args *args);
+s64 sys_ftruncate(struct syscall_args *args);
+s64 sys_fallocate(struct syscall_args *args);
+s64 sys_fsync(struct syscall_args *args);
+s64 sys_fdatasync(struct syscall_args *args);
+s64 sys_sync(struct syscall_args *args);
+
+/* IPC Syscalls */
+s64 sys_pipe(struct syscall_args *args);
+s64 sys_pipe2(struct syscall_args *args);
+s64 sys_shmget(struct syscall_args *args);
+s64 sys_shmat(struct syscall_args *args);
+s64 sys_shmdt(struct syscall_args *args);
+s64 sys_shmctl(struct syscall_args *args);
+s64 sys_semget(struct syscall_args *args);
+s64 sys_semop(struct syscall_args *args);
+s64 sys_semctl(struct syscall_args *args);
+s64 sys_msgget(struct syscall_args *args);
+s64 sys_msgsnd(struct syscall_args *args);
+s64 sys_msgrcv(struct syscall_args *args);
+s64 sys_msgctl(struct syscall_args *args);
+s64 sys_socket(struct syscall_args *args);
+s64 sys_bind(struct syscall_args *args);
+s64 sys_connect(struct syscall_args *args);
+s64 sys_listen(struct syscall_args *args);
+s64 sys_accept(struct syscall_args *args);
+s64 sys_getsockname(struct syscall_args *args);
+s64 sys_getpeername(struct syscall_args *args);
+s64 sys_socketpair(struct syscall_args *args);
+s64 sys_send(struct syscall_args *args);
+s64 sys_recv(struct syscall_args *args);
+s64 sys_sendto(struct syscall_args *args);
+s64 sys_recvfrom(struct syscall_args *args);
+s64 sys_shutdown(struct syscall_args *args);
+s64 sys_setsockopt(struct syscall_args *args);
+s64 sys_getsockopt(struct syscall_args *args);
+s64 sys_sendmsg(struct syscall_args *args);
+s64 sys_recvmsg(struct syscall_args *args);
+
+/* Signal Syscalls */
+s64 sys_rt_sigaction(struct syscall_args *args);
+s64 sys_rt_sigprocmask(struct syscall_args *args);
+s64 sys_rt_sigpending(struct syscall_args *args);
+s64 sys_rt_sigsuspend(struct syscall_args *args);
+s64 sys_rt_sigreturn(struct syscall_args *args);
+s64 sys_rt_sigtimedwait(struct syscall_args *args);
+s64 sys_rt_sigqueueinfo(struct syscall_args *args);
+s64 sys_kill(struct syscall_args *args);
+s64 sys_tkill(struct syscall_args *args);
+s64 sys_tgkill(struct syscall_args *args);
+s64 sys_sigpending(struct syscall_args *args);
+s64 sys_sigsuspend(struct syscall_args *args);
+s64 sys_sigreturn(struct syscall_args *args);
+
+/* Time Syscalls */
+s64 sys_gettimeofday(struct syscall_args *args);
+s64 sys_settimeofday(struct syscall_args *args);
+s64 sys_getitimer(struct syscall_args *args);
+s64 sys_setitimer(struct syscall_args *args);
+s64 sys_clock_gettime(struct syscall_args *args);
+s64 sys_clock_settime(struct syscall_args *args);
+s64 sys_clock_getres(struct syscall_args *args);
+s64 sys_clock_nanosleep(struct syscall_args *args);
+s64 sys_nanosleep(struct syscall_args *args);
+s64 sys_sysinfo(struct syscall_args *args);
+
+/* Miscellaneous Syscalls */
+s64 sys_uname(struct syscall_args *args);
+s64 sys_getrlimit(struct syscall_args *args);
+s64 sys_setrlimit(struct syscall_args *args);
+s64 sys_getrusage(struct syscall_args *args);
+s64 sys_times(struct syscall_args *args);
+s64 sys_syslog(struct syscall_args *args);
+s64 sys_gettid(struct syscall_args *args);
+s64 sys_futex(struct syscall_args *args);
+s64 sys_sched_yield(struct syscall_args *args);
+s64 sys_sched_getaffinity(struct syscall_args *args);
+s64 sys_sched_setaffinity(struct syscall_args *args);
+s64 sys_sched_getscheduler(struct syscall_args *args);
+s64 sys_sched_setscheduler(struct syscall_args *args);
+s64 sys_sched_get_priority_max(struct syscall_args *args);
+s64 sys_sched_get_priority_min(struct syscall_args *args);
+s64 sys_sched_rr_get_interval(struct syscall_args *args);
+s64 sys_mbind(struct syscall_args *args);
+s64 sys_migrate_pages(struct syscall_args *args);
+s64 sys_move_pages(struct syscall_args *args);
+s64 sys_getcpu(struct syscall_args *args);
+s64 sys_epoll_create(struct syscall_args *args);
+s64 sys_epoll_create1(struct syscall_args *args);
+s64 sys_epoll_ctl(struct syscall_args *args);
+s64 sys_epoll_wait(struct syscall_args *args);
+s64 sys_epoll_pwait(struct syscall_args *args);
+s64 sys_select(struct syscall_args *args);
+s64 sys_pselect6(struct syscall_args *args);
+s64 sys_poll(struct syscall_args *args);
+s64 sys_ppoll(struct syscall_args *args);
+s64 sys_inotify_init(struct syscall_args *args);
+s64 sys_inotify_init1(struct syscall_args *args);
+s64 sys_inotify_add_watch(struct syscall_args *args);
+s64 sys_inotify_rm_watch(struct syscall_args *args);
+s64 sys_eventfd(struct syscall_args *args);
+s64 sys_eventfd2(struct syscall_args *args);
+s64 sys_signalfd(struct syscall_args *args);
+s64 sys_signalfd4(struct syscall_args *args);
+s64 sys_timerfd_create(struct syscall_args *args);
+s64 sys_timerfd_settime(struct syscall_args *args);
+s64 sys_timerfd_gettime(struct syscall_args *args);
+s64 sys_getrandom(struct syscall_args *args);
+s64 sys_memfd_create(struct syscall_args *args);
+s64 sys_copy_file_range(struct syscall_args *args);
+s64 sys_statfs(struct syscall_args *args);
+s64 sys_fstatfs(struct syscall_args *args);
+s64 sys_getxattr(struct syscall_args *args);
+s64 sys_lgetxattr(struct syscall_args *args);
+s64 sys_fgetxattr(struct syscall_args *args);
+s64 sys_listxattr(struct syscall_args *args);
+s64 sys_llistxattr(struct syscall_args *args);
+s64 sys_flistxattr(struct syscall_args *args);
+s64 sys_removexattr(struct syscall_args *args);
+s64 sys_lremovexattr(struct syscall_args *args);
+s64 sys_fremovexattr(struct syscall_args *args);
+s64 sys_setxattr(struct syscall_args *args);
+s64 sys_lsetxattr(struct syscall_args *args);
+s64 sys_fsetxattr(struct syscall_args *args);
+s64 sys_acct(struct syscall_args *args);
+s64 sys_capget(struct syscall_args *args);
+s64 sys_capset(struct syscall_args *args);
+s64 sys_personality(struct syscall_args *args);
+s64 sys_reboot(struct syscall_args *args);
+s64 sys_sethostname(struct syscall_args *args);
+s64 sys_setdomainname(struct syscall_args *args);
+s64 sys_ioperm(struct syscall_args *args);
+s64 sys_iopl(struct syscall_args *args);
+s64 sys_init_module(struct syscall_args *args);
+s64 sys_delete_module(struct syscall_args *args);
+s64 sys_quotactl(struct syscall_args *args);
+s64 sys_nfsservctl(struct syscall_args *args);
+s64 sys_lookup_dcookie(struct syscall_args *args);
+s64 sys_perf_event_open(struct syscall_args *args);
+s64 sys_seccomp(struct syscall_args *args);
+s64 sys_bpf(struct syscall_args *args);
+
+/*===========================================================================*/
 /*                         SYSCALL API                                       */
 /*===========================================================================*/
 
@@ -511,10 +736,10 @@ bool access_ok(const void *addr, size_t size);
 
 /* Architecture-specific syscall entry */
 void syscall_entry(void);
-void syscall_exit(void);
+void syscall_exit(struct syscall_args *args, s64 ret, u64 duration_ns);
 
 /* Syscall Statistics */
-void syscall_stats(void);
+void syscall_stats_print(void);
 u64 syscall_get_count(u64 nr);
 void syscall_reset_count(u64 nr);
 

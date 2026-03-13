@@ -287,10 +287,10 @@ int ipv6_send_packet(struct net_device *dev, const ipv6_addr_t *src,
                      const ipv6_addr_t *dst, const void *data, u16 len, u8 next_header)
 {
     if (!dev || !src || !dst || !data) return -1;
-    
+
     /* Allocate socket buffer */
     size_t total_len = sizeof(ipv6_hdr_t) + len;
-    struct sk_buff *skb = skb_alloc(total_len);
+    struct sk_buff *skb = dev_alloc_skb(total_len);
     if (!skb) return -ENOMEM;
     
     /* Build IPv6 header */

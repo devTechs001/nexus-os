@@ -310,22 +310,24 @@ int net_bring_down(u32 interface_id)
 /*                         WIFI MANAGEMENT                                   */
 /*===========================================================================*/
 
+/* WiFi functions now implemented in drivers/network/wifi.c */
+/*
 int wifi_scan(u32 interface_id, wifi_network_t *networks, u32 *count)
 {
     net_interface_t *iface = net_get_interface(interface_id);
     if (!iface || iface->type != NET_IFACE_WIFI) {
         return -EINVAL;
     }
-    
+
     if (!iface->is_up) {
         return -ENETDOWN;
     }
-    
+
     printk("[WIFI] Scanning for networks...\n");
-    
-    /* Mock discovered networks */
+
+    // Mock discovered networks
     u32 found = 0;
-    
+
     wifi_network_t *net = &networks[found++];
     net->ssid_len = 10;
     strcpy(net->ssid, "HomeWiFi");
@@ -340,7 +342,7 @@ int wifi_scan(u32 interface_id, wifi_network_t *networks, u32 *count)
     net->channel = 6;
     net->frequency = 2437;
     net->is_connected = false;
-    
+
     net = &networks[found++];
     net->ssid_len = 8;
     strcpy(net->ssid, "Office5G");
@@ -349,7 +351,7 @@ int wifi_scan(u32 interface_id, wifi_network_t *networks, u32 *count)
     net->channel = 36;
     net->frequency = 5180;
     net->is_connected = false;
-    
+
     net = &networks[found++];
     net->ssid_len = 6;
     strcpy(net->ssid, "Cafe");
@@ -358,10 +360,10 @@ int wifi_scan(u32 interface_id, wifi_network_t *networks, u32 *count)
     net->channel = 11;
     net->frequency = 2462;
     net->is_connected = false;
-    
+
     *count = found;
     printk("[WIFI] Found %d networks\n", found);
-    
+
     return found;
 }
 
@@ -371,16 +373,16 @@ int wifi_connect(u32 interface_id, const char *ssid, const char *password, u32 s
     if (!iface || iface->type != NET_IFACE_WIFI) {
         return -EINVAL;
     }
-    
+
     printk("[WIFI] Connecting to '%s'...\n", ssid);
-    
-    /* In real implementation, would use wpa_supplicant */
-    /* Mock connection */
+
+    // In real implementation, would use wpa_supplicant
+    // Mock connection
     iface->is_up = true;
-    iface->ip.addr = 0xC0A80164;  /* 192.168.1.100 */
+    iface->ip.addr = 0xC0A80164;  // 192.168.1.100
     iface->netmask.addr = 0xFFFFFF00;
-    iface->gateway.addr = 0xC0A80101;  /* 192.168.1.1 */
-    
+    iface->gateway.addr = 0xC0A80101;  // 192.168.1.1
+
     printk("[WIFI] Connected to '%s'\n", ssid);
     return 0;
 }
@@ -391,12 +393,13 @@ int wifi_disconnect(u32 interface_id)
     if (!iface || iface->type != NET_IFACE_WIFI) {
         return -EINVAL;
     }
-    
+
     printk("[WIFI] Disconnecting...\n");
     iface->is_up = false;
-    
+
     return 0;
 }
+*/
 
 /*===========================================================================*/
 /*                         ROUTE MANAGEMENT                                  */

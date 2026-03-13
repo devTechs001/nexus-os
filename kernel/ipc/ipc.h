@@ -7,6 +7,8 @@
 #define _NEXUS_IPC_H
 
 #include "../include/kernel.h"
+#include "../sync/sync.h"
+#include "../mm/mm.h"
 
 /*===========================================================================*/
 /*                         IPC CONSTANTS                                     */
@@ -28,6 +30,18 @@
 #define IPC_SET             1
 #define IPC_STAT            2
 #define IPC_INFO            3
+
+/* Semaphore Control Commands */
+#define GETVAL      13
+#define SETVAL      14
+#define GETALL      16
+#define SETALL      17
+#define GETNCNT     18
+#define GETZCNT     19
+#define GETPID      20
+#define GETSTAT     21
+#define SETSTAT     22
+#define SEM_INFO    23
 
 /* Pipe Constants */
 #define PIPE_BUF            4096
@@ -73,6 +87,7 @@ struct ipc_perm {
     gid_t cgid;             /* Creator GID */
     mode_t mode;            /* Permissions */
     u16 seq;                /* Sequence number */
+    struct list_head list;  /* Hash table list entry */
 };
 
 /**
@@ -212,10 +227,8 @@ struct sem {
  * sem_undo - Semaphore undo structure
  */
 struct sem_undo {
-    struct sem_undo *next;  /* Next in process list */
-    struct sem_undo *prev;  /* Previous in process list */
-    struct sem_undo *next_id; /* Next in semaphore set list */
-    struct sem_undo *prev_id; /* Previous in semaphore set list */
+    struct list_head list;      /* Next in process list */
+    struct list_head list_id;   /* Next in semaphore set list */
 
     int semid;              /* Semaphore set ID */
     s16 *semadj;            /* Adjustments */
@@ -239,6 +252,34 @@ struct sem_array {
     spinlock_t lock;        /* Protection lock */
     atomic_t refcount;      /* Reference count */
     atomic_t unused;        /* Unused count */
+};
+
+/**
+ * semid_ds - Semaphore ID data structure (Linux compatibility)
+ */
+struct semid_ds {
+    struct ipc_perm sem_perm;   /* Permissions */
+    unsigned long sem_segsz;    /* Segment size */
+    unsigned long sem_nsems;    /* Number of semaphores */
+    time_t sem_otime;           /* Last operation time */
+    time_t sem_ctime;           /* Last change time */
+    unsigned long __unused4;
+    unsigned long __unused5;
+};
+
+/**
+ * semid64_ds - 64-bit semaphore ID data structure
+ */
+struct semid64_ds {
+    struct ipc_perm sem_perm;   /* Permissions */
+    unsigned long sem_segsz;    /* Segment size */
+    unsigned long sem_nsems;    /* Number of semaphores */
+    unsigned long sem_otime;    /* Last operation time */
+    unsigned long sem_otime_high;
+    unsigned long sem_ctime;    /* Last change time */
+    unsigned long sem_ctime_high;
+    unsigned long __unused4;
+    unsigned long __unused5;
 };
 
 /**

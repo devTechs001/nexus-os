@@ -66,12 +66,16 @@ struct page {
         struct {
             struct page *first;
         };
+        struct list_head lru;       /* LRU list entry */
     };
     atomic_t refcount;
     atomic_t mapcount;
     unsigned long index;
     void *virtual;
     phys_addr_t physical;
+    struct address_space *mapping;  /* Address space mapping */
+    u32 order;                      /* Buddy allocator order */
+    u32 zone;                       /* Memory zone */
 };
 
 /* Page Flags */
@@ -106,6 +110,52 @@ struct vm_area {
     void *private;
 };
 
+/**
+ * vm_area_struct - Virtual memory area structure (Linux compatible)
+ */
+struct vm_area_struct {
+    virt_addr_t vm_start;
+    virt_addr_t vm_end;
+    struct address_space *vm_file;
+    void *vm_private_data;
+    u32 vm_flags;
+    u32 vm_page_prot;
+    struct vm_area_struct *vm_next;
+    struct rb_node rb;
+    struct list_head anon_vma_node;
+    struct mm_struct *vm_mm;
+    unsigned long vm_pgoff;
+};
+
+/**
+ * mm_struct - Memory descriptor
+ */
+struct mm_struct {
+    struct vm_area_struct *mmap;
+    struct rb_root mm_rb;
+    struct vm_area_struct *mmap_cache;
+    unsigned long pgd;
+    atomic_t mm_users;
+    atomic_t mm_count;
+    int map_count;
+    unsigned long total_vm;
+    unsigned long locked_vm;
+    spinlock_t page_table_lock;
+    struct task_struct *owner;
+};
+
+/**
+ * vm_fault - Page fault information
+ */
+struct vm_fault {
+    unsigned int flags;
+    virt_addr_t address;
+    struct vm_area_struct *vma;
+    struct page *page;
+    pte_t *pte;
+    spinlock_t *ptl;
+};
+
 /* VMA Flags */
 #define VMA_READ            0x00000001
 #define VMA_WRITE           0x00000002
@@ -129,6 +179,147 @@ struct address_space {
     u32 flags;
     spinlock_t lock;
     void *private;
+};
+
+/**
+ * fown_struct - File owner structure
+ */
+struct fown_struct {
+    rwlock_t lock;
+    pid_t pid;
+    uid_t uid;
+    int signum;
+};
+
+/**
+ * file - File structure
+ */
+struct file {
+    struct list_head f_list;
+    struct dentry *f_dentry;
+    struct vfsmount *f_vfsmnt;
+    struct address_space *f_mapping;
+    const struct file_operations *f_op;
+    unsigned int f_flags;
+    void *private_data;
+    struct fown_struct f_owner;
+    pid_t f_pid;
+    unsigned long f_version;
+    void *security;
+};
+
+/**
+ * dentry - Directory entry
+ */
+struct dentry {
+    const char *d_name;
+    struct dentry *d_parent;
+    struct inode *d_inode;
+    struct list_head d_child;
+    struct list_head d_subdirs;
+    void *d_fsdata;
+    unsigned int d_flags;
+    spinlock_t d_lock;
+};
+
+/**
+ * inode - Inode structure
+ */
+struct inode {
+    unsigned long i_ino;
+    unsigned int i_mode;
+    unsigned int i_nlink;
+    unsigned int i_uid;
+    unsigned int i_gid;
+    unsigned long i_size;
+    unsigned long i_blocks;
+    unsigned long i_atime;
+    unsigned long i_mtime;
+    unsigned long i_ctime;
+    struct address_space *i_data;
+    const struct inode_operations *i_op;
+    void *i_private;
+};
+
+/**
+ * vfsmount - Virtual filesystem mount
+ */
+struct vfsmount {
+    struct list_head mnt_hash;
+    struct vfsmount *mnt_parent;
+    struct dentry *mnt_mountpoint;
+    struct dentry *mnt_root;
+    struct super_block *mnt_sb;
+    struct list_head mnt_mounts;
+    struct list_head mnt_child;
+    int mnt_flags;
+    const char *mnt_devname;
+    struct list_head mnt_list;
+};
+
+/**
+ * super_block - Superblock structure
+ */
+struct super_block {
+    struct list_head s_list;
+    unsigned int s_dev;
+    unsigned long s_blocksize;
+    unsigned char s_blocksize_bits;
+    unsigned char s_dirt;
+    u64 s_maxbytes;
+    void *s_fs_info;
+    const struct super_operations *s_op;
+    struct dentry *s_root;
+};
+
+/**
+ * file_operations - File operations
+ */
+struct file_operations {
+    struct module *owner;
+    ssize_t (*read)(struct file *, char *, size_t, loff_t *);
+    ssize_t (*write)(struct file *, const char *, size_t, loff_t *);
+    int (*mmap)(struct file *, struct vm_area_struct *);
+    int (*open)(struct inode *, struct file *);
+    int (*release)(struct inode *, struct file *);
+    long (*unlocked_ioctl)(struct file *, unsigned int, unsigned long);
+    int (*fsync)(struct file *, loff_t, loff_t, int datasync);
+};
+
+/**
+ * inode_operations - Inode operations
+ */
+struct inode_operations {
+    struct dentry *(*lookup)(struct inode *, struct dentry *, unsigned int);
+    int (*create)(struct inode *, struct dentry *, umode_t, bool);
+    int (*mkdir)(struct inode *, struct dentry *, umode_t);
+    int (*rmdir)(struct inode *, struct dentry *);
+    int (*mknod)(struct inode *, struct dentry *, umode_t, dev_t);
+    int (*rename)(struct inode *, struct dentry *, struct inode *, struct dentry *, unsigned int);
+};
+
+/**
+ * super_operations - Superblock operations
+ */
+struct super_operations {
+    struct inode *(*alloc_inode)(struct super_block *);
+    void (*destroy_inode)(struct inode *);
+    void (*read_inode)(struct inode *);
+    int (*write_inode)(struct inode *, int);
+    void (*put_inode)(struct inode *);
+    void (*delete_inode)(struct inode *);
+};
+
+/**
+ * module - Kernel module
+ */
+struct module {
+    const char *name;
+    struct list_head list;
+    void *module_init;
+    void *module_core;
+    unsigned int init_size;
+    unsigned int core_size;
 };
 
 /*===========================================================================*/

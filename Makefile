@@ -60,6 +60,28 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(KERNEL_DIR)/core/init.c \
             $(KERNEL_DIR)/core/smp.c \
             $(KERNEL_DIR)/core/module_loader.c \
+            $(KERNEL_DIR)/sync/spinlock.c \
+            $(KERNEL_DIR)/sync/rwlock.c \
+            $(KERNEL_DIR)/sync/atomic.c \
+            $(KERNEL_DIR)/sync/waitqueue.c \
+            $(KERNEL_DIR)/ipc/pipe.c \
+            $(KERNEL_DIR)/ipc/mutex.c \
+            $(KERNEL_DIR)/ipc/semaphore.c \
+            $(KERNEL_DIR)/ipc/message_queue.c \
+            $(KERNEL_DIR)/ipc/shm.c \
+            $(KERNEL_DIR)/mm/pmm.c \
+            $(KERNEL_DIR)/mm/page_alloc.c \
+            $(KERNEL_DIR)/mm/heap.c \
+            $(KERNEL_DIR)/mm/vmm.c \
+            $(KERNEL_DIR)/mm/slab.c \
+            $(KERNEL_DIR)/sched/scheduler.c \
+            $(KERNEL_DIR)/sched/process.c \
+            $(KERNEL_DIR)/sched/thread.c \
+            $(KERNEL_DIR)/sched/cfs.c \
+            $(KERNEL_DIR)/sched/realtime.c \
+            $(KERNEL_DIR)/syscall/syscall.c \
+            $(KERNEL_DIR)/syscall/syscall_table.c \
+            $(KERNEL_DIR)/syscall/syscall_handlers.c \
             $(PLATFORM_DIR)/platform.c \
             $(NET_DIR)/ipv6/ipv6.c \
             $(NET_DIR)/firewall/firewall.c \
@@ -120,12 +142,34 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
 ASM_OBJECTS = $(BUILD_DIR)/boot.o
 C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/printk.o \
+            $(BUILD_DIR)/string.o \
             $(BUILD_DIR)/panic.o \
             $(BUILD_DIR)/init.o \
             $(BUILD_DIR)/smp.o \
             $(BUILD_DIR)/module_loader.o \
+            $(BUILD_DIR)/spinlock.o \
+            $(BUILD_DIR)/rwlock.o \
+            $(BUILD_DIR)/atomic.o \
+            $(BUILD_DIR)/waitqueue.o \
+            $(BUILD_DIR)/pipe.o \
+            $(BUILD_DIR)/mutex.o \
+            $(BUILD_DIR)/semaphore.o \
+            $(BUILD_DIR)/message_queue.o \
+            $(BUILD_DIR)/shm.o \
+            $(BUILD_DIR)/pmm.o \
+            $(BUILD_DIR)/page_alloc.o \
+            $(BUILD_DIR)/heap.o \
+            $(BUILD_DIR)/vmm.o \
+            $(BUILD_DIR)/slab.o \
+            $(BUILD_DIR)/scheduler.o \
+            $(BUILD_DIR)/process.o \
+            $(BUILD_DIR)/thread.o \
+            $(BUILD_DIR)/cfs.o \
+            $(BUILD_DIR)/realtime.o \
+            $(BUILD_DIR)/syscall.o \
+            $(BUILD_DIR)/syscall_table.o \
+            $(BUILD_DIR)/syscall_handlers.o \
             $(BUILD_DIR)/platform.o \
-            $(BUILD_DIR)/ipv6.o \
             $(BUILD_DIR)/firewall.o \
             $(BUILD_DIR)/network_manager.o \
             $(BUILD_DIR)/network_protocols.o \
@@ -147,6 +191,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/restore_points.o \
             $(BUILD_DIR)/display.o \
             $(BUILD_DIR)/display_manager.o \
+            $(BUILD_DIR)/console.o \
             $(BUILD_DIR)/input.o \
             $(BUILD_DIR)/ps2.o \
             $(BUILD_DIR)/touchscreen.o \
@@ -267,6 +312,11 @@ check-deps:
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/core
+	@mkdir -p $(BUILD_DIR)/sync
+	@mkdir -p $(BUILD_DIR)/ipc
+	@mkdir -p $(BUILD_DIR)/mm
+	@mkdir -p $(BUILD_DIR)/sched
+	@mkdir -p $(BUILD_DIR)/syscall
 	@mkdir -p $(BUILD_DIR)/platform
 	@mkdir -p $(BUILD_DIR)/net/ipv6
 	@mkdir -p $(BUILD_DIR)/net/firewall
@@ -303,6 +353,10 @@ $(BUILD_DIR)/printk.o: $(KERNEL_DIR)/core/printk.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
+$(BUILD_DIR)/string.o: $(KERNEL_DIR)/core/string.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
 $(BUILD_DIR)/panic.o: $(KERNEL_DIR)/core/panic.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
@@ -322,6 +376,14 @@ $(BUILD_DIR)/platform.o: $(PLATFORM_DIR)/platform.c | $(BUILD_DIR)
 $(BUILD_DIR)/ipv6.o: $(NET_DIR)/ipv6/ipv6.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/skbuff.o: $(NET_DIR)/core/skbuff.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(NET_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/net_device.o: $(NET_DIR)/core/net_device.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(NET_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/firewall.o: $(NET_DIR)/firewall/firewall.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
@@ -380,6 +442,99 @@ $(BUILD_DIR)/module_loader.o: $(KERNEL_DIR)/core/module_loader.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
+# Kernel sync primitives
+$(BUILD_DIR)/spinlock.o: $(KERNEL_DIR)/sync/spinlock.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/rwlock.o: $(KERNEL_DIR)/sync/rwlock.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/atomic.o: $(KERNEL_DIR)/sync/atomic.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/waitqueue.o: $(KERNEL_DIR)/sync/waitqueue.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+# Kernel IPC
+$(BUILD_DIR)/pipe.o: $(KERNEL_DIR)/ipc/pipe.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/mutex.o: $(KERNEL_DIR)/ipc/mutex.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/semaphore.o: $(KERNEL_DIR)/ipc/semaphore.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/message_queue.o: $(KERNEL_DIR)/ipc/message_queue.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/shm.o: $(KERNEL_DIR)/ipc/shm.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+# Kernel memory management
+$(BUILD_DIR)/pmm.o: $(KERNEL_DIR)/mm/pmm.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/page_alloc.o: $(KERNEL_DIR)/mm/page_alloc.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/heap.o: $(KERNEL_DIR)/mm/heap.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/vmm.o: $(KERNEL_DIR)/mm/vmm.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/slab.o: $(KERNEL_DIR)/mm/slab.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+# Kernel scheduler
+$(BUILD_DIR)/scheduler.o: $(KERNEL_DIR)/sched/scheduler.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/process.o: $(KERNEL_DIR)/sched/process.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/thread.o: $(KERNEL_DIR)/sched/thread.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/cfs.o: $(KERNEL_DIR)/sched/cfs.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/realtime.o: $(KERNEL_DIR)/sched/realtime.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+# Kernel syscalls
+$(BUILD_DIR)/syscall.o: $(KERNEL_DIR)/syscall/syscall.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/syscall_table.o: $(KERNEL_DIR)/syscall/syscall_table.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/syscall_handlers.o: $(KERNEL_DIR)/syscall/syscall_handlers.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
 $(BUILD_DIR)/network_manager.o: $(NET_DIR)/network_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
@@ -402,9 +557,13 @@ $(BUILD_DIR)/control-panel.o: $(GUI_DIR)/control-panel/control-panel.c | $(BUILD
 
 $(BUILD_DIR)/compositing_manager.o: $(GUI_DIR)/compositor/compositing_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+	@$(CC) $(CFLAGS) -mno-sse2 -msoft-float -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/display_manager.o: $(DRIVERS_DIR)/display/display_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/console.o: $(DRIVERS_DIR)/video/console.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
@@ -488,6 +647,10 @@ $(BUILD_DIR)/dsi.o: $(DRIVERS_DIR)/video/dsi.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
+$(BUILD_DIR)/interface.o: $(DRIVERS_DIR)/video/interface.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
 $(BUILD_DIR)/ethernet.o: $(DRIVERS_DIR)/network/ethernet.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
@@ -546,27 +709,44 @@ $(KERNEL_BIN): $(OBJECTS)
 $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo "  [GRUB]  Creating grub.cfg"
 	@mkdir -p $(ISO_DIR)/boot/grub
-	@echo 'set timeout=5' > $@
+	@echo 'set timeout=10' > $@
 	@echo 'set default=0' >> $@
+	@echo 'set gfxmode=1024x768' >> $@
+	@echo 'set gfxpayload=keep' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "NEXUS OS (VMware Mode - Default)" {' >> $@
+	@echo '# NEXUS OS Boot Menu' >> $@
+	@echo 'set menu_color_highlight=black/blue' >> $@
+	@echo 'set menu_color_normal=light-gray/black' >> $@
+	@echo '' >> $@
+	@echo 'menuentry "🖥️  NEXUS OS - Graphical Mode (Default)" {' >> $@
+	@echo '    set gfxpayload=1024x768x32' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "NEXUS OS (Safe Mode)" {' >> $@
-	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic' >> $@
+	@echo 'menuentry "📟  NEXUS OS - Text Mode (VGA Console)" {' >> $@
+	@echo '    set gfxpayload=text' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin vga=791' >> $@
+	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "NEXUS OS (Debug Mode)" {' >> $@
+	@echo 'menuentry "🛡️  NEXUS OS - Safe Mode" {' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic nolapic' >> $@
+	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
+	@echo '    boot' >> $@
+	@echo '}' >> $@
+	@echo '' >> $@
+	@echo 'menuentry "🐛  NEXUS OS - Debug Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin debug loglevel=7 earlyprintk=vga' >> $@
+	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "NEXUS OS (Native Mode)" {' >> $@
+	@echo 'menuentry "⚡  NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
+	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 

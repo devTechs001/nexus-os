@@ -4,6 +4,7 @@
  */
 
 #include "ipc.h"
+#include "../sched/sched.h"
 
 /*===========================================================================*/
 /*                         SHARED MEMORY CONFIGURATION                       */

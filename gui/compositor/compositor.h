@@ -235,10 +235,10 @@ typedef struct {
 /*                         FUNCTION DECLARATIONS                             */
 /*===========================================================================*/
 
-/* Compositor lifecycle */
-int compositor_init(compositor_t *comp);
+/* Compositor lifecycle - internal API (public API in gui.h) */
+/* compositor_init is declared in gui.h as int compositor_init(void) */
 int compositor_run(compositor_t *comp);
-int compositor_shutdown(compositor_t *comp);
+/* compositor_shutdown is declared in gui.h as void compositor_shutdown(void) */
 bool compositor_is_running(compositor_t *comp);
 
 /* Surface management */

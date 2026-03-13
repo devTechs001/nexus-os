@@ -29,6 +29,17 @@ extern void io_wait(void);
 /* Spinlock init stub */
 #define spin_lock_init(lock) do { (lock)->lock = 0; } while(0)
 
+/* Forward declarations for network stack (real implementations in net/) */
+extern void net_init(void);
+extern void ipv4_init(void);
+extern void ipv6_init(void);
+
+/* Network stubs */
+void net_init(void) { }
+void ipv4_init(void) { }
+void ipv6_init(void) { }
+extern void firewall_init(void);
+
 /*===========================================================================*/
 /*                         KERNEL BSS SECTION                                */
 /*===========================================================================*/
@@ -826,16 +837,18 @@ static unsigned long early_heap_offset = 0;
 
 /**
  * kmalloc - Allocate kernel memory
+ * Note: Now implemented in mm/heap.c - this early version commented out
  */
+/*
 void *kmalloc(size_t size)
 {
     void *ptr;
 
-    /* Align to 8 bytes */
+    // Align to 8 bytes
     size = (size + 7) & ~7;
 
     if (early_heap_offset + size > sizeof(early_heap)) {
-        return NULL;  /* Out of memory */
+        return NULL;  // Out of memory
     }
 
     ptr = &early_heap[early_heap_offset];
@@ -843,10 +856,13 @@ void *kmalloc(size_t size)
 
     return ptr;
 }
+*/
 
 /**
  * kzalloc - Allocate zeroed kernel memory
+ * Note: Now implemented in mm/heap.c
  */
+/*
 void *kzalloc(size_t size)
 {
     void *ptr = kmalloc(size);
@@ -855,120 +871,28 @@ void *kzalloc(size_t size)
     }
     return ptr;
 }
+*/
 
 /**
  * kfree - Free kernel memory
- * Note: Early allocator doesn't support free - memory is permanently allocated
+ * Note: Now implemented in mm/heap.c
  */
+/*
 void kfree(void *ptr)
 {
-    /* Early boot allocator - no free support */
-    /* Proper kfree will be implemented in mm/heap.c */
+    // Early boot allocator - no free support
+    // Proper kfree will be implemented in mm/heap.c
     (void)ptr;
 }
+*/
 
 /*===========================================================================*/
 /*                         STRING FUNCTIONS                                  */
+/* Note: Now in string.c - keeping weak aliases for compatibility            */
 /*===========================================================================*/
 
-/**
- * memset - Set memory to value
- */
-void *memset(void *s, int c, size_t n)
-{
-    u8 *p = (u8 *)s;
-    while (n--) {
-        *p++ = (u8)c;
-    }
-    return s;
-}
-
-/**
- * memcpy - Copy memory
- */
-void *memcpy(void *dest, const void *src, size_t n)
-{
-    u8 *d = (u8 *)dest;
-    const u8 *s = (const u8 *)src;
-    while (n--) {
-        *d++ = *s++;
-    }
-    return dest;
-}
-
-/**
- * memmove - Move memory (handles overlap)
- */
-void *memmove(void *dest, const void *src, size_t n)
-{
-    u8 *d = (u8 *)dest;
-    const u8 *s = (const u8 *)src;
-    
-    if (d < s) {
-        while (n--) {
-            *d++ = *s++;
-        }
-    } else {
-        d += n;
-        s += n;
-        while (n--) {
-            *--d = *--s;
-        }
-    }
-    return dest;
-}
-
-/**
- * memcmp - Compare memory
- */
-int memcmp(const void *s1, const void *s2, size_t n)
-{
-    const u8 *p1 = (const u8 *)s1;
-    const u8 *p2 = (const u8 *)s2;
-    
-    while (n--) {
-        if (*p1 != *p2) {
-            return *p1 - *p2;
-        }
-        p1++;
-        p2++;
-    }
-    return 0;
-}
-
-/**
- * strlen - Get string length
- */
-size_t strlen(const char *s)
-{
-    size_t len = 0;
-    while (*s++) {
-        len++;
-    }
-    return len;
-}
-
-/**
- * strcpy - Copy string
- */
-char *strcpy(char *dest, const char *src)
-{
-    char *d = dest;
-    while ((*d++ = *src++));
-    return dest;
-}
-
-/**
- * strcmp - Compare strings
- */
-int strcmp(const char *s1, const char *s2)
-{
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(u8 *)s1 - *(u8 *)s2;
-}
+/* String functions moved to kernel/core/string.c */
+/* These are now provided by string.c */
 
 /*===========================================================================*/
 /*                         PORT I/O                                          */
@@ -1056,21 +980,17 @@ u32 kernel_get_state(void)
 /*         These will be properly implemented in respective modules          */
 /*===========================================================================*/
 
-/* Memory Management stubs */
-void vmm_init(void) { }
-void heap_init(void) { }
-void slab_init(void) { }
-void pmm_init(void) { }
+/* Memory Management - now implemented in mm/*.c */
+/* void vmm_init(void) { } */
+/* void heap_init(void) { } */
+/* void slab_init(void) { } */
+/* void pmm_init(void) { } */
 
 /* Interrupt stubs */
 void interrupt_init(void) { }
 
 /* Timer stubs */
 void arch_init_timer(u64 freq) { (void)freq; }
-
-/* Scheduler stubs */
-void scheduler_init(void) { }
-void scheduler_start(void) { }
 
 /* SMP stubs */
 void arch_init_smp(void) { }
@@ -1086,8 +1006,5 @@ void arch_init_paging(void) { }
 /* CPU info */
 unsigned int arch_get_apic_id(void) { return 0; }
 
-/* Network stubs */
-void net_init(void) { printk("[NET] Network stack initialized\n"); }
-void ipv4_init(void) { printk("[IPv4] IPv4 initialized\n"); }
-void ipv6_init(void) { printk("[IPv6] IPv6 stack loaded\n"); }
-void firewall_init(void) { printk("[FIREWALL] Firewall loaded\n"); }
+/* Network stubs - real implementations in net/ */
+/* net_init, ipv4_init, ipv6_init, firewall_init are in net/ */

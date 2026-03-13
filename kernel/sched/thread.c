@@ -3,8 +3,19 @@
  * kernel/sched/thread.c
  */
 
-#include "../include/kernel.h"
 #include "sched.h"
+#include "../include/types.h"
+#include "../include/kernel.h"
+
+/* External global variables from process.c */
+extern struct list_head task_list;
+extern spinlock_t task_list_lock;
+extern atomic_t thread_count;
+extern atomic_t process_count;
+
+/* Forward declarations */
+bool signal_pending(struct task_struct *task);
+bool signal_pending_current(void);
 
 /*===========================================================================*/
 /*                         THREAD MANAGEMENT DATA                            */
@@ -843,7 +854,46 @@ void thread_stats(void)
 extern int arch_init_thread(struct task_struct *thread, struct task_struct *parent,
                             void (*fn)(void *), void *arg);
 extern void arch_setup_user_stack(struct task_struct *thread, size_t stack_size);
-extern bool signal_pending(struct task_struct *task);
+
+/* Architecture-specific implementations (stubs for now) */
+int arch_init_thread(struct task_struct *thread, struct task_struct *parent,
+                     void (*fn)(void *), void *arg)
+{
+    (void)parent;
+    (void)fn;
+    (void)arg;
+    /* Initialize architecture-specific thread state */
+    if (!thread->arch) {
+        thread->arch = kzalloc(256);  /* Allocate arch context */
+        if (!thread->arch)
+            return -ENOMEM;
+    }
+    return 0;
+}
+
+void arch_setup_user_stack(struct task_struct *thread, size_t stack_size)
+{
+    /* Setup user mode stack for user threads */
+    (void)thread;
+    (void)stack_size;
+    /* In real implementation: setup user stack, entry point, etc. */
+}
+
+/* Signal pending check */
+bool signal_pending(struct task_struct *task)
+{
+    if (!task) {
+        return false;
+    }
+    /* In real implementation: check task->signal */
+    return false;
+}
+
+/* Signal pending check for current task */
+bool signal_pending_current(void)
+{
+    return signal_pending(current);
+}
 
 /* Signal constants */
 #define SIGKILL     9

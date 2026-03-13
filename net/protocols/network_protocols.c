@@ -6,8 +6,8 @@
  * Copyright (c) 2026 NEXUS Development Team
  */
 
-#include "../kernel/include/types.h"
-#include "../kernel/include/kernel.h"
+#include "../../kernel/include/types.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         PROTOCOL CONFIGURATION                            */

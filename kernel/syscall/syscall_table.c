@@ -8,6 +8,18 @@
 
 #include "syscall.h"
 
+/* Forward declarations for missing syscalls */
+long sys_semtimedop(struct syscall_args *args);
+long sys_sched_setattr(struct syscall_args *args);
+long sys_sched_getattr(struct syscall_args *args);
+long sys_sched_setparam(struct syscall_args *args);
+long sys_sched_getparam(struct syscall_args *args);
+long sys_clock_getcpuclockid(struct syscall_args *args);
+long sys_alarm(struct syscall_args *args);
+long sys_signal(struct syscall_args *args);
+long sys_sigaction(struct syscall_args *args);
+long sys_sigprocmask(struct syscall_args *args);
+
 /*===========================================================================*/
 /*                         SYSCALL TABLE                                     */
 /*===========================================================================*/

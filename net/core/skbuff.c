@@ -145,8 +145,8 @@ static struct sk_buff *__alloc_skb_internal(u32 size, int gfp, int fclone)
 
     /* Track peak memory */
     {
-        u64 current = atomic64_read(&skbuff_cache.memory_used);
-        if (current > skbuff_cache.peak_memory) {
+        u64 current_val = atomic64_read(&skbuff_cache.memory_used);
+        if (current_val > skbuff_cache.peak_memory) {
             skbuff_cache.peak_memory = current;
         }
     }
@@ -297,12 +297,12 @@ struct sk_buff *skb_get(struct sk_buff *skb)
 }
 
 /**
- * skb_put - Put a reference to a socket buffer
- * @skb: Socket buffer
+ * kfree_skb - Free a socket buffer
+ * @skb: Socket buffer to free
  *
- * Decrements the reference count.
+ * Frees the socket buffer and releases all associated resources.
  */
-void skb_put(struct sk_buff *skb)
+void kfree_skb(struct sk_buff *skb)
 {
     free_skb(skb);
 }
