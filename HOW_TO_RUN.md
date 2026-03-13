@@ -3,11 +3,14 @@
 ## Quick Start
 
 ```bash
-# Build and run in QEMU
+# Build and run (default: VMware - see QUICKSTART.md)
 make && make run
 
-# Or manually
-qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2
+# Run in QEMU instead
+make run-qemu
+
+# Manual QEMU (use -boot d so CD-ROM boots, avoids "no bootable device")
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d -m 2G -smp 2
 ```
 
 ---
@@ -63,36 +66,41 @@ choco install qemu
 ```bash
 cd /path/to/NEXUS-OS
 
-# Build and run
+# Build and run (default: VMware)
 make run
 
-# Run with debug output
+# Run in QEMU
+make run-qemu
+
+# Run with debug output (QEMU)
 make run-debug
 ```
 
 ### Option 2: Manual QEMU Command
 
+Use `-boot d` so QEMU boots from the CD-ROM (avoids "no bootable device"):
+
 ```bash
 # Basic run
-qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d -m 2G -smp 2
 
 # With GUI display
-qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2 \
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d -m 2G -smp 2 \
     -display gtk,gl=on
 
 # With serial console
-qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2 \
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d -m 2G -smp 2 \
     -serial stdio -display none
 
 # With debugging
-qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2 \
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d -m 2G -smp 2 \
     -d int -no-reboot -no-shutdown
 ```
 
-### Option 3: VMware
+### Option 3: VMware (Default)
 
 ```bash
-# Auto-create VM and boot
+# Auto-create VM and boot (same as make run)
 make run-vmware
 
 # Or manually:

@@ -658,6 +658,26 @@ void kernel_start_scheduler(void)
 }
 
 /**
+ * kernel_main_64 - 64-bit kernel entry point (called from boot assembly)
+ * @multiboot_info: Pointer to multiboot2 info structure from bootloader
+ * @multiboot_magic: Multiboot2 magic number for validation
+ *
+ * This is the entry point called after the 32->64 bit transition.
+ * Parameters are passed in RDI and RSI per System V AMD64 ABI.
+ */
+void kernel_main_64(u64 multiboot_info, u64 multiboot_magic)
+{
+    /* Validate multiboot magic */
+    if (multiboot_magic != 0x36d76289) {
+        /* Invalid multiboot - still try to boot but warn */
+        kernel_panic("Invalid multiboot magic: 0x%X (expected 0x36d76289)",
+                     (u32)multiboot_magic);
+    }
+
+    kernel_main(multiboot_info);
+}
+
+/**
  * kernel_main - Main kernel entry point
  * @multiboot_info: Pointer to multiboot info structure from bootloader
  *

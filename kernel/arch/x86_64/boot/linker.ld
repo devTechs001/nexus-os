@@ -5,10 +5,17 @@ ENTRY(_start)
 
 SECTIONS
 {
-    . = 1M;  /* Load kernel at 1MB */
+    . = 1M;  /* Load kernel at 1MB - GRUB requires this */
 
-    /* Text section (code) - multiboot header is at start */
-    .text :
+    /* Multiboot2 header MUST be first (within first 32KB) */
+    .multiboot : ALIGN(8)
+    {
+        *(.multiboot)
+        KEEP(*(.multiboot))
+    }
+
+    /* Text section (code) */
+    .text : ALIGN(4K)
     {
         *(.text)
         *(.text.*)
@@ -47,5 +54,6 @@ SECTIONS
         *(.comment)
         *(.note.*)
         *(.eh_frame)
+        *(.ARM.attributes)
     }
 }

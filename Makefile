@@ -731,32 +731,27 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo 'menuentry "🖥️  NEXUS OS - Graphical Mode (Default)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
-	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "📟  NEXUS OS - Text Mode (VGA Console)" {' >> $@
 	@echo '    set gfxpayload=text' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin vga=791' >> $@
-	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "🛡️  NEXUS OS - Safe Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic nolapic' >> $@
-	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "🐛  NEXUS OS - Debug Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin debug loglevel=7 earlyprintk=vga' >> $@
-	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "⚡  NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
-	@echo '    module2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '    boot' >> $@
 	@echo '}' >> $@
 
@@ -782,8 +777,8 @@ iso: clean $(KERNEL_ISO)
 
 # Run in QEMU
 run: $(KERNEL_ISO)
-	@echo "  [QEMU]  Starting NEXUS OS in VMware mode..."
-	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) \
+	@echo "  [QEMU]  Starting NEXUS OS..."
+	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
 		-serial stdio \
@@ -793,7 +788,7 @@ run: $(KERNEL_ISO)
 # Run in QEMU with VMware emulation
 run-vmware: $(KERNEL_ISO)
 	@echo "  [QEMU]  Starting NEXUS OS (VMware emulation)..."
-	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) \
+	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
 		-serial stdio \
@@ -805,13 +800,19 @@ run-vmware: $(KERNEL_ISO)
 # Run with debug
 run-debug: $(KERNEL_ISO)
 	@echo "  [QEMU]  Starting NEXUS OS (debug mode)..."
-	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -m 2G -smp 2 \
+	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d -m 2G -smp 2 \
 		-serial stdio -d int -no-reboot -no-shutdown
 
 # Run in VMware (auto-create and boot)
 run-vm: $(KERNEL_ISO)
 	@echo "  [VMWARE] Auto-creating and launching VMware..."
 	@$(PROJECT_DIR)/tools/auto-vm-boot.sh
+
+# Run in QEMU with CD-only boot (use if "no bootable device" with make run)
+run-cd: $(KERNEL_ISO)
+	@echo "  [QEMU]  Starting NEXUS OS (boot from CD only)..."
+	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot order=dc -net none \
+		-m 2G -smp 2 -serial stdio -display sdl -name "NEXUS OS"
 
 # Run in VMware Player
 run-vmware-player: $(KERNEL_ISO)
@@ -836,34 +837,11 @@ help:
 	@echo "Targets:"
 	@echo "  make          - Build kernel (default)"
 	@echo "  make run      - Build and run in QEMU"
-	@echo "  make run-vmware - Auto-create VM and launch VMware (DEFAULT)"
-	@echo "  make run-vmware-player - Run in VMware Player"
+	@echo "  make run-vmware - QEMU with VMware device emulation"
+	@echo "  make run-vm   - Auto-create VM and launch VMware"
 	@echo "  make run-debug - Debug mode"
+	@echo "  make run-cd   - QEMU, boot from CD only (if run shows no bootable device)"
 	@echo "  make clean    - Remove build files"
 	@echo ""
-	@echo "VMware Auto-Boot:"
-	@echo "  make run-vmware automatically:"
-	@echo "    1. Creates VMware VM configuration"
-	@echo "    2. Creates virtual disk"
-	@echo "    3. Launches VMware with NEXUS OS ISO"
-	@echo "    4. Boots into VMware Mode (default)"
-	@echo ""
-	@echo "  The VM is created in: $$HOME/vmware-vm/NEXUS-OS/"
-	@echo "  Subsequent runs reuse the existing VM."
-	@echo ""
-	@echo "Virtualization Modes:"
-	@echo "  - VMware (DEFAULT) - Auto-detected at boot"
-	@echo "  - VirtualBox"
-	@echo "  - QEMU/KVM"
-	@echo "  - Hyper-V"
-	@echo "  - Native (bare metal)"
-	@echo ""
-	@echo "Requirements:"
-	@echo "  - GCC (with multilib)"
-	@echo "  - NASM"
-	@echo "  - GRUB (grub-pc-bin, grub-common)"
-	@echo "  - QEMU (for testing)"
-	@echo "  - VMware Workstation/Player (for VMware mode)"
-	@echo ""
 
-.PHONY: all clean run run-vmware run-debug run-vmware-player help
+.PHONY: all clean run run-vmware run-vm run-cd run-debug run-vmware-player help

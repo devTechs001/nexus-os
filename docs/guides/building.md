@@ -597,13 +597,12 @@ make
 
 #### "No bootable device"
 
-**Solution**: Verify QEMU command:
+**Solution**: Boot from CD-ROM with `-boot d` (see HOW_TO_RUN.md):
 ```bash
-qemu-system-x86_64 \
-    -kernel build/kernel/nexus.elf \
-    -m 2048 \
-    -serial stdio
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d \
+    -m 2G -smp 2 -serial stdio
 ```
+Or use the Makefile: `make run-qemu` (uses `-boot d`).
 
 ### Performance Issues
 

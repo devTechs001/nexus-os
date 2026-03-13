@@ -128,11 +128,11 @@ make run-vmware
 
 #### QEMU
 ```bash
-# Run in QEMU
-make run
+# Run in QEMU (use run-qemu; make run defaults to VMware)
+make run-qemu
 
-# Or manually
-qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2 \
+# Or manually (use -boot d to boot from CD-ROM)
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -boot d -m 2G -smp 2 \
     -display gtk,gl=on
 ```
 

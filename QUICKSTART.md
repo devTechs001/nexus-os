@@ -226,9 +226,10 @@ make run-vmware
 | Command | Description |
 |---------|-------------|
 | `make` | Build kernel and ISO |
-| `make run` | Run in QEMU |
-| `make run-vmware` | Auto-create and launch VMware |
-| `make run-debug` | Run with debug output |
+| `make run` | Run in VMware (default) |
+| `make run-vmware` | Same as make run (auto-create and launch VMware) |
+| `make run-qemu` | Run in QEMU (use when VMware not available) |
+| `make run-debug` | Run in QEMU with debug output |
 | `make clean` | Remove build files |
 | `./tools/auto-vm-boot.sh --clean` | Clean VM boot |
 | `./tools/auto-vm-boot.sh --recreate` | Recreate VM config |
