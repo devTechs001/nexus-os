@@ -17,6 +17,8 @@ PLATFORM_DIR = platform
 NET_DIR = net
 GUI_DIR = gui
 SYSTEM_DIR = system
+DRIVERS_DIR = drivers
+SECURITY_DIR = security
 BUILD_DIR = build
 ISO_DIR = $(BUILD_DIR)/iso
 
@@ -51,12 +53,26 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(KERNEL_DIR)/core/panic.c \
             $(KERNEL_DIR)/core/init.c \
             $(KERNEL_DIR)/core/smp.c \
+            $(KERNEL_DIR)/core/module_loader.c \
             $(PLATFORM_DIR)/platform.c \
             $(NET_DIR)/ipv6/ipv6.c \
             $(NET_DIR)/firewall/firewall.c \
+            $(NET_DIR)/network_manager.c \
             $(GUI_DIR)/desktop/desktop.c \
+            $(GUI_DIR)/desktop/desktop_grid.c \
+            $(GUI_DIR)/compositor/compositing_manager.c \
             $(GUI_DIR)/app-store/app-store.c \
-            $(SYSTEM_DIR)/registry/registry.c
+            $(SYSTEM_DIR)/registry/registry.c \
+            $(DRIVERS_DIR)/display/display.c \
+            $(DRIVERS_DIR)/display/display_manager.c \
+            $(DRIVERS_DIR)/input/input.c \
+            $(DRIVERS_DIR)/audio/audio.c \
+            $(DRIVERS_DIR)/audio/mixer.c \
+            $(DRIVERS_DIR)/audio/bluetooth_audio.c \
+            $(DRIVERS_DIR)/gpu/gpu.c \
+            $(DRIVERS_DIR)/gpu/gpu_scheduler.c \
+            $(DRIVERS_DIR)/usb/usb_manager.c \
+            $(SECURITY_DIR)/encryption/disk_encryption.c
 
 # Object files
 ASM_OBJECTS = $(BUILD_DIR)/boot.o
@@ -65,8 +81,26 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/panic.o \
             $(BUILD_DIR)/init.o \
             $(BUILD_DIR)/smp.o \
+            $(BUILD_DIR)/module_loader.o \
             $(BUILD_DIR)/platform.o \
-            $(BUILD_DIR)/registry.o
+            $(BUILD_DIR)/ipv6.o \
+            $(BUILD_DIR)/firewall.o \
+            $(BUILD_DIR)/network_manager.o \
+            $(BUILD_DIR)/desktop.o \
+            $(BUILD_DIR)/desktop_grid.o \
+            $(BUILD_DIR)/compositing_manager.o \
+            $(BUILD_DIR)/app-store.o \
+            $(BUILD_DIR)/registry.o \
+            $(BUILD_DIR)/display.o \
+            $(BUILD_DIR)/display_manager.o \
+            $(BUILD_DIR)/input.o \
+            $(BUILD_DIR)/audio.o \
+            $(BUILD_DIR)/mixer.o \
+            $(BUILD_DIR)/bluetooth_audio.o \
+            $(BUILD_DIR)/gpu.o \
+            $(BUILD_DIR)/gpu_scheduler.o \
+            $(BUILD_DIR)/usb_manager.o \
+            $(BUILD_DIR)/disk_encryption.o
 
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
@@ -159,8 +193,15 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/net/ipv6
 	@mkdir -p $(BUILD_DIR)/net/firewall
 	@mkdir -p $(BUILD_DIR)/gui/desktop
+	@mkdir -p $(BUILD_DIR)/gui/compositor
 	@mkdir -p $(BUILD_DIR)/gui/app-store
 	@mkdir -p $(BUILD_DIR)/system/registry
+	@mkdir -p $(BUILD_DIR)/drivers/display
+	@mkdir -p $(BUILD_DIR)/drivers/input
+	@mkdir -p $(BUILD_DIR)/drivers/audio
+	@mkdir -p $(BUILD_DIR)/drivers/gpu
+	@mkdir -p $(BUILD_DIR)/drivers/usb
+	@mkdir -p $(BUILD_DIR)/security/encryption
 	@mkdir -p $(ISO_DIR)/boot/grub
 
 # Assemble boot code
@@ -210,6 +251,63 @@ $(BUILD_DIR)/app-store.o: $(GUI_DIR)/app-store/app-store.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/registry.o: $(SYSTEM_DIR)/registry/registry.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+# Driver object files
+$(BUILD_DIR)/display.o: $(DRIVERS_DIR)/display/display.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/input.o: $(DRIVERS_DIR)/input/input.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/audio.o: $(DRIVERS_DIR)/audio/audio.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/gpu.o: $(DRIVERS_DIR)/gpu/gpu.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/module_loader.o: $(KERNEL_DIR)/core/module_loader.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/network_manager.o: $(NET_DIR)/network_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/desktop_grid.o: $(GUI_DIR)/desktop/desktop_grid.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/compositing_manager.o: $(GUI_DIR)/compositor/compositing_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/display_manager.o: $(DRIVERS_DIR)/display/display_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/mixer.o: $(DRIVERS_DIR)/audio/mixer.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/bluetooth_audio.o: $(DRIVERS_DIR)/audio/bluetooth_audio.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/gpu_scheduler.o: $(DRIVERS_DIR)/gpu/gpu_scheduler.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/usb_manager.o: $(DRIVERS_DIR)/usb/usb_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/disk_encryption.o: $(SECURITY_DIR)/encryption/disk_encryption.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
