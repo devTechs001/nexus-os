@@ -87,6 +87,9 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(DRIVERS_DIR)/gpu/virtio_gpu.c \
             $(DRIVERS_DIR)/graphics/framebuffer/fb.c \
             $(DRIVERS_DIR)/usb/usb_manager.c \
+            $(DRIVERS_DIR)/network/ethernet.c \
+            $(DRIVERS_DIR)/pci/pci.c \
+            $(DRIVERS_DIR)/sensors/sensor_hub.c \
             $(DRIVERS_DIR)/video/vga.c \
             $(DRIVERS_DIR)/video/interface.c \
             $(DRIVERS_DIR)/video/dsi.c \
@@ -133,6 +136,9 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/virtio_gpu.o \
             $(BUILD_DIR)/fb.o \
             $(BUILD_DIR)/usb_manager.o \
+            $(BUILD_DIR)/ethernet.o \
+            $(BUILD_DIR)/pci.o \
+            $(BUILD_DIR)/sensor_hub.o \
             $(BUILD_DIR)/vga.o \
             $(BUILD_DIR)/interface.o \
             $(BUILD_DIR)/dsi.o \
@@ -417,6 +423,18 @@ $(BUILD_DIR)/vga.o: $(DRIVERS_DIR)/video/vga.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/dsi.o: $(DRIVERS_DIR)/video/dsi.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/ethernet.o: $(DRIVERS_DIR)/network/ethernet.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/pci.o: $(DRIVERS_DIR)/pci/pci.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/sensor_hub.o: $(DRIVERS_DIR)/sensors/sensor_hub.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
