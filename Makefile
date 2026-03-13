@@ -84,9 +84,12 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(DRIVERS_DIR)/gpu/gpu.c \
             $(DRIVERS_DIR)/gpu/gpu_scheduler.c \
             $(DRIVERS_DIR)/gpu/opengl.c \
+            $(DRIVERS_DIR)/gpu/virtio_gpu.c \
+            $(DRIVERS_DIR)/graphics/framebuffer/fb.c \
             $(DRIVERS_DIR)/usb/usb_manager.c \
             $(DRIVERS_DIR)/video/vga.c \
             $(DRIVERS_DIR)/video/interface.c \
+            $(DRIVERS_DIR)/video/dsi.c \
             $(SECURITY_DIR)/encryption/disk_encryption.c \
             $(AI_ML_DIR)/inference/inference_engine.c \
             $(HAL_DIR)/power/power_manager.c \
@@ -127,9 +130,12 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/gpu.o \
             $(BUILD_DIR)/gpu_scheduler.o \
             $(BUILD_DIR)/opengl.o \
+            $(BUILD_DIR)/virtio_gpu.o \
+            $(BUILD_DIR)/fb.o \
             $(BUILD_DIR)/usb_manager.o \
             $(BUILD_DIR)/vga.o \
             $(BUILD_DIR)/interface.o \
+            $(BUILD_DIR)/dsi.o \
             $(BUILD_DIR)/disk_encryption.o \
             $(BUILD_DIR)/inference_engine.o \
             $(BUILD_DIR)/power_manager.o \
@@ -410,7 +416,15 @@ $(BUILD_DIR)/vga.o: $(DRIVERS_DIR)/video/vga.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
-$(BUILD_DIR)/interface.o: $(DRIVERS_DIR)/video/interface.c | $(BUILD_DIR)
+$(BUILD_DIR)/dsi.o: $(DRIVERS_DIR)/video/dsi.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/virtio_gpu.o: $(DRIVERS_DIR)/gpu/virtio_gpu.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/fb.o: $(DRIVERS_DIR)/graphics/framebuffer/fb.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
