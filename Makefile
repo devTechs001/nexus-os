@@ -19,6 +19,12 @@ GUI_DIR = gui
 SYSTEM_DIR = system
 DRIVERS_DIR = drivers
 SECURITY_DIR = security
+AI_ML_DIR = ai_ml
+HAL_DIR = hal
+IOT_DIR = iot
+VIRT_DIR = virt
+FS_DIR = fs
+MOBILE_DIR = mobile
 BUILD_DIR = build
 ISO_DIR = $(BUILD_DIR)/iso
 
@@ -58,6 +64,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(NET_DIR)/ipv6/ipv6.c \
             $(NET_DIR)/firewall/firewall.c \
             $(NET_DIR)/network_manager.c \
+            $(NET_DIR)/protocols/network_protocols.c \
             $(GUI_DIR)/desktop/desktop.c \
             $(GUI_DIR)/desktop/desktop_grid.c \
             $(GUI_DIR)/compositor/compositing_manager.c \
@@ -72,7 +79,13 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(DRIVERS_DIR)/gpu/gpu.c \
             $(DRIVERS_DIR)/gpu/gpu_scheduler.c \
             $(DRIVERS_DIR)/usb/usb_manager.c \
-            $(SECURITY_DIR)/encryption/disk_encryption.c
+            $(SECURITY_DIR)/encryption/disk_encryption.c \
+            $(AI_ML_DIR)/inference/inference_engine.c \
+            $(HAL_DIR)/power/power_manager.c \
+            $(IOT_DIR)/protocols/iot_protocols.c \
+            $(VIRT_DIR)/containers/container_runtime.c \
+            $(FS_DIR)/procfs/procfs.c \
+            $(MOBILE_DIR)/telephony/telephony_manager.c
 
 # Object files
 ASM_OBJECTS = $(BUILD_DIR)/boot.o
@@ -86,6 +99,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/ipv6.o \
             $(BUILD_DIR)/firewall.o \
             $(BUILD_DIR)/network_manager.o \
+            $(BUILD_DIR)/network_protocols.o \
             $(BUILD_DIR)/desktop.o \
             $(BUILD_DIR)/desktop_grid.o \
             $(BUILD_DIR)/compositing_manager.o \
@@ -100,7 +114,13 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/gpu.o \
             $(BUILD_DIR)/gpu_scheduler.o \
             $(BUILD_DIR)/usb_manager.o \
-            $(BUILD_DIR)/disk_encryption.o
+            $(BUILD_DIR)/disk_encryption.o \
+            $(BUILD_DIR)/inference_engine.o \
+            $(BUILD_DIR)/power_manager.o \
+            $(BUILD_DIR)/iot_protocols.o \
+            $(BUILD_DIR)/container_runtime.o \
+            $(BUILD_DIR)/procfs.o \
+            $(BUILD_DIR)/telephony_manager.o
 
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
@@ -192,6 +212,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/platform
 	@mkdir -p $(BUILD_DIR)/net/ipv6
 	@mkdir -p $(BUILD_DIR)/net/firewall
+	@mkdir -p $(BUILD_DIR)/net/protocols
 	@mkdir -p $(BUILD_DIR)/gui/desktop
 	@mkdir -p $(BUILD_DIR)/gui/compositor
 	@mkdir -p $(BUILD_DIR)/gui/app-store
@@ -202,6 +223,12 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/drivers/gpu
 	@mkdir -p $(BUILD_DIR)/drivers/usb
 	@mkdir -p $(BUILD_DIR)/security/encryption
+	@mkdir -p $(BUILD_DIR)/ai_ml/inference
+	@mkdir -p $(BUILD_DIR)/hal/power
+	@mkdir -p $(BUILD_DIR)/iot/protocols
+	@mkdir -p $(BUILD_DIR)/virt/containers
+	@mkdir -p $(BUILD_DIR)/fs/procfs
+	@mkdir -p $(BUILD_DIR)/mobile/telephony
 	@mkdir -p $(ISO_DIR)/boot/grub
 
 # Assemble boot code
@@ -308,6 +335,34 @@ $(BUILD_DIR)/usb_manager.o: $(DRIVERS_DIR)/usb/usb_manager.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/disk_encryption.o: $(SECURITY_DIR)/encryption/disk_encryption.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/inference_engine.o: $(AI_ML_DIR)/inference/inference_engine.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/power_manager.o: $(HAL_DIR)/power/power_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/iot_protocols.o: $(IOT_DIR)/protocols/iot_protocols.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/container_runtime.o: $(VIRT_DIR)/containers/container_runtime.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/procfs.o: $(FS_DIR)/procfs/procfs.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/telephony_manager.o: $(MOBILE_DIR)/telephony/telephony_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/network_protocols.o: $(NET_DIR)/protocols/network_protocols.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
