@@ -88,6 +88,9 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(DRIVERS_DIR)/graphics/framebuffer/fb.c \
             $(DRIVERS_DIR)/usb/usb_manager.c \
             $(DRIVERS_DIR)/network/ethernet.c \
+            $(DRIVERS_DIR)/network/wifi.c \
+            $(DRIVERS_DIR)/bluetooth/bluetooth.c \
+            $(DRIVERS_DIR)/rtc/rtc.c \
             $(DRIVERS_DIR)/pci/pci.c \
             $(DRIVERS_DIR)/sensors/sensor_hub.c \
             $(DRIVERS_DIR)/video/vga.c \
@@ -137,6 +140,9 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/fb.o \
             $(BUILD_DIR)/usb_manager.o \
             $(BUILD_DIR)/ethernet.o \
+            $(BUILD_DIR)/wifi.o \
+            $(BUILD_DIR)/bluetooth.o \
+            $(BUILD_DIR)/rtc.o \
             $(BUILD_DIR)/pci.o \
             $(BUILD_DIR)/sensor_hub.o \
             $(BUILD_DIR)/vga.o \
@@ -427,6 +433,18 @@ $(BUILD_DIR)/dsi.o: $(DRIVERS_DIR)/video/dsi.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/ethernet.o: $(DRIVERS_DIR)/network/ethernet.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/wifi.o: $(DRIVERS_DIR)/network/wifi.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/bluetooth.o: $(DRIVERS_DIR)/bluetooth/bluetooth.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/rtc.o: $(DRIVERS_DIR)/rtc/rtc.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
