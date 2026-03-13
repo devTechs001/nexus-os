@@ -90,6 +90,10 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(DRIVERS_DIR)/network/ethernet.c \
             $(DRIVERS_DIR)/network/wifi.c \
             $(DRIVERS_DIR)/bluetooth/bluetooth.c \
+            $(DRIVERS_DIR)/biometrics/biometrics.c \
+            $(DRIVERS_DIR)/media/camera.c \
+            $(DRIVERS_DIR)/serial/serial.c \
+            $(DRIVERS_DIR)/watchdog/watchdog.c \
             $(DRIVERS_DIR)/rtc/rtc.c \
             $(DRIVERS_DIR)/pci/pci.c \
             $(DRIVERS_DIR)/sensors/sensor_hub.c \
@@ -142,6 +146,10 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/ethernet.o \
             $(BUILD_DIR)/wifi.o \
             $(BUILD_DIR)/bluetooth.o \
+            $(BUILD_DIR)/biometrics.o \
+            $(BUILD_DIR)/camera.o \
+            $(BUILD_DIR)/serial.o \
+            $(BUILD_DIR)/watchdog.o \
             $(BUILD_DIR)/rtc.o \
             $(BUILD_DIR)/pci.o \
             $(BUILD_DIR)/sensor_hub.o \
@@ -441,6 +449,22 @@ $(BUILD_DIR)/wifi.o: $(DRIVERS_DIR)/network/wifi.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/bluetooth.o: $(DRIVERS_DIR)/bluetooth/bluetooth.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/biometrics.o: $(DRIVERS_DIR)/biometrics/biometrics.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/camera.o: $(DRIVERS_DIR)/media/camera.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/serial.o: $(DRIVERS_DIR)/serial/serial.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/watchdog.o: $(DRIVERS_DIR)/watchdog/watchdog.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
