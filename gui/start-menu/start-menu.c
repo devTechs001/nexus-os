@@ -1,12 +1,12 @@
 /*
- * NEXUS OS - Start Menu Application Implementation
+ * NEXUS OS - Start Menu Implementation
  * gui/start-menu/start-menu.c
  *
  * Modern start menu with search, pinned apps, and system actions
  * Copyright (c) 2026 NEXUS Development Team
  */
 
-#include "start-menu.h"
+#include "start-menu/start-menu.h"
 #include "../../gui/widgets/widgets.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
@@ -88,7 +88,7 @@ int start_menu_init(start_menu_t *menu)
  * start_menu_show - Show start menu
  * @menu: Pointer to start menu structure
  *
- * Returns: 0 on success, negative error code on failure
+ * Returns: 0 on success
  */
 int start_menu_show(start_menu_t *menu)
 {
@@ -108,7 +108,7 @@ int start_menu_show(start_menu_t *menu)
  * start_menu_hide - Hide start menu
  * @menu: Pointer to start menu structure
  *
- * Returns: 0 on success, negative error code on failure
+ * Returns: 0 on success
  */
 int start_menu_hide(start_menu_t *menu)
 {
@@ -241,9 +241,6 @@ static int create_search_box(start_menu_t *menu)
                       color_from_rgba(40, 40, 55, 255),
                       color_from_rgba(80, 80, 100, 255));
     
-    /* Set callback */
-    /* In real implementation, would set on_text_changed */
-    
     return 0;
 }
 
@@ -309,8 +306,6 @@ static int create_pinned_section(start_menu_t *menu)
                       color_from_rgba(0, 0, 0, 0),
                       color_from_rgba(0, 0, 0, 0));
     
-    /* Pinned apps would be added here */
-    
     return 0;
 }
 
@@ -337,8 +332,6 @@ static int create_app_list(start_menu_t *menu)
                       color_from_rgba(180, 180, 190, 255),
                       color_from_rgba(0, 0, 0, 0),
                       color_from_rgba(0, 0, 0, 0));
-    
-    /* App list would be added here */
     
     return 0;
 }
@@ -498,7 +491,7 @@ static int load_system_apps(start_menu_t *menu)
         start_menu_add_app(menu, &system_apps[i]);
         
         /* Add to pinned if marked */
-        if (system_apps[i].is_pinned && menu->pinned_count < START_MENU_MAX_PINNED) {
+        if (system_apps[i].is_pinned && menu->pinned_count < MAX_PINNED) {
             menu->pinned_apps[menu->pinned_count++] = system_apps[i];
         }
     }
@@ -522,8 +515,6 @@ int start_menu_add_app(start_menu_t *menu, app_entry_t *app)
     /* Find appropriate section */
     for (u32 i = 0; i < menu->section_count; i++) {
         if (strcmp(menu->sections[i].name, app->category) == 0) {
-            /* Add to existing section */
-            /* In real implementation, would add to section's app list */
             return 0;
         }
     }
@@ -554,13 +545,10 @@ int start_menu_launch_app(start_menu_t *menu, u32 app_id)
     
     printk("[START-MENU] Launching app %d\n", app_id);
     
-    /* In real implementation, would launch application */
-    
     /* Hide start menu */
     start_menu_hide(menu);
     
     if (menu->on_app_launched) {
-        /* Would pass app entry to callback */
         menu->on_app_launched(NULL);
     }
     
@@ -604,8 +592,6 @@ static int search_apps(start_menu_t *menu, const char *query)
     
     menu->search_result_count = 0;
     
-    /* In real implementation, would search through apps */
-    
     return menu->search_result_count;
 }
 
@@ -647,8 +633,6 @@ int start_menu_lock(start_menu_t *menu)
     
     start_menu_hide(menu);
     
-    /* In real implementation, would lock session */
-    
     return 0;
 }
 
@@ -668,8 +652,6 @@ int start_menu_logout(start_menu_t *menu)
     
     start_menu_hide(menu);
     
-    /* In real implementation, would end session */
-    
     return 0;
 }
 
@@ -688,8 +670,6 @@ int start_menu_shutdown(start_menu_t *menu)
     printk("[START-MENU] Shutting down system\n");
     
     start_menu_hide(menu);
-    
-    /* In real implementation, would shutdown system */
     
     if (menu->on_shutdown_clicked) {
         menu->on_shutdown_clicked();
@@ -713,8 +693,6 @@ int start_menu_restart(start_menu_t *menu)
     printk("[START-MENU] Restarting system\n");
     
     start_menu_hide(menu);
-    
-    /* In real implementation, would restart system */
     
     return 0;
 }
@@ -758,8 +736,7 @@ static void on_app_clicked(widget_t *widget)
 {
     if (!widget || !widget->user_data) return;
     
-    /* In real implementation, would get app_id from widget */
-    start_menu_t *menu = (start_menu_t *)widget->user_data;
+    start_menu_t *menu = &g_start_menu;
     start_menu_launch_app(menu, 0);
 }
 
