@@ -68,17 +68,25 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(GUI_DIR)/desktop/desktop.c \
             $(GUI_DIR)/desktop/desktop_grid.c \
             $(GUI_DIR)/compositor/compositing_manager.c \
+            $(GUI_DIR)/control-center/control-center.c \
+            $(GUI_DIR)/file-manager/file-manager.c \
+            $(GUI_DIR)/system-settings/system-settings.c \
             $(GUI_DIR)/app-store/app-store.c \
             $(SYSTEM_DIR)/registry/registry.c \
             $(DRIVERS_DIR)/display/display.c \
             $(DRIVERS_DIR)/display/display_manager.c \
             $(DRIVERS_DIR)/input/input.c \
+            $(DRIVERS_DIR)/input/keyboard/ps2.c \
+            $(DRIVERS_DIR)/input/touchscreen/touchscreen.c \
             $(DRIVERS_DIR)/audio/audio.c \
             $(DRIVERS_DIR)/audio/mixer.c \
             $(DRIVERS_DIR)/audio/bluetooth_audio.c \
             $(DRIVERS_DIR)/gpu/gpu.c \
             $(DRIVERS_DIR)/gpu/gpu_scheduler.c \
+            $(DRIVERS_DIR)/gpu/opengl.c \
             $(DRIVERS_DIR)/usb/usb_manager.c \
+            $(DRIVERS_DIR)/video/vga.c \
+            $(DRIVERS_DIR)/video/interface.c \
             $(SECURITY_DIR)/encryption/disk_encryption.c \
             $(AI_ML_DIR)/inference/inference_engine.c \
             $(HAL_DIR)/power/power_manager.c \
@@ -103,17 +111,25 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/desktop.o \
             $(BUILD_DIR)/desktop_grid.o \
             $(BUILD_DIR)/compositing_manager.o \
+            $(BUILD_DIR)/control-center.o \
+            $(BUILD_DIR)/file-manager.o \
+            $(BUILD_DIR)/system-settings.o \
             $(BUILD_DIR)/app-store.o \
             $(BUILD_DIR)/registry.o \
             $(BUILD_DIR)/display.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/input.o \
+            $(BUILD_DIR)/ps2.o \
+            $(BUILD_DIR)/touchscreen.o \
             $(BUILD_DIR)/audio.o \
             $(BUILD_DIR)/mixer.o \
             $(BUILD_DIR)/bluetooth_audio.o \
             $(BUILD_DIR)/gpu.o \
             $(BUILD_DIR)/gpu_scheduler.o \
+            $(BUILD_DIR)/opengl.o \
             $(BUILD_DIR)/usb_manager.o \
+            $(BUILD_DIR)/vga.o \
+            $(BUILD_DIR)/interface.o \
             $(BUILD_DIR)/disk_encryption.o \
             $(BUILD_DIR)/inference_engine.o \
             $(BUILD_DIR)/power_manager.o \
@@ -363,6 +379,38 @@ $(BUILD_DIR)/telephony_manager.o: $(MOBILE_DIR)/telephony/telephony_manager.c | 
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/network_protocols.o: $(NET_DIR)/protocols/network_protocols.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/control-center.o: $(GUI_DIR)/control-center/control-center.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/file-manager.o: $(GUI_DIR)/file-manager/file-manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/system-settings.o: $(GUI_DIR)/system-settings/system-settings.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/ps2.o: $(DRIVERS_DIR)/input/keyboard/ps2.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/touchscreen.o: $(DRIVERS_DIR)/input/touchscreen/touchscreen.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/opengl.o: $(DRIVERS_DIR)/gpu/opengl.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/vga.o: $(DRIVERS_DIR)/video/vga.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/interface.o: $(DRIVERS_DIR)/video/interface.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
