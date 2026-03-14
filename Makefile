@@ -99,12 +99,14 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(GUI_DIR)/system-settings/system-settings.c \
             $(GUI_DIR)/app-store/app-store.c \
             $(GUI_DIR)/virtualization/virt_manager_gui.c \
+            $(GUI_DIR)/virtualization/vm_manager_enhanced.c \
             $(SYSTEM_DIR)/registry/registry.c \
             $(SYSTEM_DIR)/optimizer/booster.c \
             $(SYSTEM_DIR)/thermal/cpu_cooler.c \
             $(SYSTEM_DIR)/cleanup/cache_cleaner.c \
             $(SYSTEM_DIR)/storage/storage_sense.c \
             $(SYSTEM_DIR)/restore/restore_points.c \
+            $(APPS_DIR)/terminal/terminal_features.c \
             $(DRIVERS_DIR)/display/display.c \
             $(DRIVERS_DIR)/display/display_manager.c \
             $(DRIVERS_DIR)/input/input.c \
@@ -191,12 +193,14 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/system-settings.o \
             $(BUILD_DIR)/app-store.o \
             $(BUILD_DIR)/virt_manager_gui.o \
+            $(BUILD_DIR)/vm_manager_enhanced.o \
             $(BUILD_DIR)/registry.o \
             $(BUILD_DIR)/booster.o \
             $(BUILD_DIR)/cpu_cooler.o \
             $(BUILD_DIR)/cache_cleaner.o \
             $(BUILD_DIR)/storage_sense.o \
             $(BUILD_DIR)/restore_points.o \
+            $(BUILD_DIR)/terminal_features.o \
             $(BUILD_DIR)/display.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/console.o \
@@ -422,6 +426,10 @@ $(BUILD_DIR)/virt_manager_gui.o: $(GUI_DIR)/virtualization/virt_manager_gui.c | 
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
+$(BUILD_DIR)/vm_manager_enhanced.o: $(GUI_DIR)/virtualization/vm_manager_enhanced.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
 $(BUILD_DIR)/registry.o: $(SYSTEM_DIR)/registry/registry.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
@@ -601,6 +609,10 @@ $(BUILD_DIR)/terminal.o: $(APPS_DIR)/terminal/terminal.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/terminal_enhanced.o: $(APPS_DIR)/terminal/terminal_enhanced.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/terminal_features.o: $(APPS_DIR)/terminal/terminal_features.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
