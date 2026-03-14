@@ -1,340 +1,218 @@
-# NEXUS-OS GUI Framework
+# NEXUS OS - GUI System Documentation
 
-Modern, cross-platform user interfaces for NEXUS-OS built with Qt6/QML.
+## Overview
 
-## 🖥️ GUI Applications
+NEXUS OS features a modern, enterprise-grade graphical user interface with glassmorphic effects, comprehensive display settings, and professional iconography.
 
-### 1. Boot Manager (`gui/boot-manager/`)
-Interactive boot configuration with virtualization mode selection.
+## Components
 
-**Features:**
-- 🎯 Virtualization mode selector (7 modes)
-- 🔐 Secure boot configuration
-- ⚡ Fast boot options
-- 🖥️ Hardware resource allocation
-- 🔒 Security profile selection
-- 💡 Smart recommendations
+### 1. Display Settings (`gui/display/`)
 
-**Screenshot Preview:**
-```
-╔══════════════════════════════════════════════════════════╗
-║           NEXUS-OS Boot Configuration                    ║
-╠══════════════════════════════════════════════════════════╣
-║  ⚡ Virtualization Mode                                  ║
-║  ┌────────────────────────────────────────────────────┐ ║
-║  │ 🔷 Light Virtualization (Default)                  │ ◉║
-║  │    Process isolation, balanced security/performance │ ║
-║  │    Overhead: <1%  Security: Medium                 │ ║
-║  └────────────────────────────────────────────────────┘ ║
-║  ┌────────────────────────────────────────────────────┐ ║
-║  │ 🖥️ Full Virtualization                             │ ○║
-║  │    Complete hardware virtualization, enterprise    │ ║
-║  │    Overhead: 2-5%  Security: High                  │ ║
-║  └────────────────────────────────────────────────────┘ ║
-║                                                          ║
-║  🔧 Boot Options                                         ║
-║  🔒 Secure Boot        [✓]                               ║
-║  ⚡ Fast Boot          [✓]                               ║
-║  📝 Verbose Boot       [ ]                               ║
-╚══════════════════════════════════════════════════════════╝
-```
+**File:** `display_settings.c`
 
-### 2. VM Manager (`gui/vm-manager/`)
-Complete virtual machine management dashboard.
+Features:
+- Resolution settings (1920x1080, 2560x1440, 4K)
+- Refresh rate configuration
+- Color depth settings
+- DPI and scaling
+- HDR support
+- Night light mode
+- Color temperature control
 
-**Features:**
-- 📋 VM list with filtering and search
-- 📊 Real-time resource monitoring (CPU, Memory)
-- 🎮 Console access
-- 📸 Snapshot management
-- 🔄 VM lifecycle control (Start, Stop, Pause, Resume)
-- 📤 Export/Import VMs
-- 🔗 Live migration
-- 📈 Performance charts
+### 2. Background System
 
-**Dashboard Layout:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│  🖥️ NEXUS VM Manager          [4 Running]  [➕ Create VM]   │
-├──────────────┬──────────────────────────────────────────────┤
-│  Search      │  ┌────────────────────────────────────┐     │
-│  ┌────────┐  │  │ 🖥️ Development Environment         │     │
-│  │🔍      │  │  │ ▶ Running  │  4 vCPU  │  4 GB     │     │
-│  └────────┘  │  │ CPU: ████████░░ 23%               │     │
-│              │  │ MEM: ██████████ 67%               │     │
-│  [All]       │  └────────────────────────────────────┘     │
-│  [Running]   │  ┌────────────────────────────────────┐     │
-│  [Stopped]   │  │ 🖥️ Production Server                │     │
-│  [Paused]    │  │ ▶ Running  │  8 vCPU  │  16 GB    │     │
-│              │  │ CPU: ████████████ 45%              │     │
-│              │  │ MEM: ████████████████ 82%          │     │
-│              │  └────────────────────────────────────┘     │
-├──────────────┼──────────────────────────────────────────────┤
-│  Selected VM │  📊 CPU Usage    📈 Memory Usage            │
-│  ┌────────┐  │  ┌──────────┐    ┌──────────┐              │
-│  │   DE   │  │  │  Chart   │    │  Chart   │              │
-│  │ Dev VM │  │  │          │    │          │              │
-│  └────────┘  │  └──────────┘    └──────────┘              │
-│              │  ⚙️ VM Configuration                        │
-│  [Start]     │  💻 4 vCPUs  📦 4 GB  💾 64 GB  🌐 192.168 │
-│  [Console]   │  🔷 Process   🖥️ NEXUS   📅 2024-01-15    │
-└──────────────┴──────────────────────────────────────────────┘
-```
+**8 Background Presets:**
 
-### 3. System Settings (`gui/system-settings/`)
-Comprehensive system configuration.
+**Solid Colors:**
+- Midnight Blue (#1E3A5F)
+- Dark Gray (#2C3E50)
+- Pure Black (#000000)
 
-**Modules:**
-- General Settings
-- Display & Appearance
-- Network Configuration
-- Security Settings
-- User Accounts
-- Update Management
-- Backup & Restore
+**Gradients:**
+- Sunset (Horizontal: Red → Orange → Gold)
+- Ocean (Vertical: Deep Blue → Turquoise)
+- Aurora (Radial: Green → Cyan → Blue)
+- NEXUS Brand (Vertical: Navy → Blue → Sky)
 
-### 4. Control Center (`gui/control-center/`)
-System monitoring and quick settings.
+**Special:**
+- Glassmorphic (Frosted glass effect)
 
-**Features:**
-- 📊 System dashboard
-- 🔋 Power management
-- 📶 Network status
-- 💾 Storage management
-- 🔔 Notifications
-- ⚡ Quick toggles
+### 3. Glassmorphic Effects
 
-## 🏗️ Architecture
+| Property | Range | Default |
+|----------|-------|---------|
+| Blur Radius | 0-50px | 20px |
+| Transparency | 0-100% | 70% |
+| Border Color | Any | White |
+| Border Width | 0-5px | 1px |
+| Corner Radius | 0-24px | 12px |
+| Noise Amount | 0-20% | 5% |
+| Tint | Color + Opacity | Optional |
+| Shadow | Blur, Offset, Color | Enabled |
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Qt6/QML Application                       │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │   C++       │  │   C++       │  │   C++       │        │
-│  │  Backend    │  │  Backend    │  │  Backend    │        │
-│  │  (Model)    │  │ (Controller)│  │ (Manager)   │        │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        │
-│         │                │                │                 │
-│         └────────────────┼────────────────┘                 │
-│                          │                                  │
-│                  ┌───────▼────────┐                         │
-│                  │  QML Context   │                         │
-│                  └───────┬────────┘                         │
-├──────────────────────────┼──────────────────────────────────┤
-│                   ┌──────▼──────┐                           │
-│                   │  QML/UI     │                           │
-│                   │  Frontend   │                           │
-│                   └─────────────┘                           │
-└─────────────────────────────────────────────────────────────┘
-```
+### 4. Panel System
 
-## 🛠️ Build Instructions
+**Top Panel:**
+- Height: 28px
+- Widgets: Start menu, Search, Tasks, System tray (network, sound, battery, clock)
+- Glassmorphic styling
+- Auto-hide option
 
-### Prerequisites
+**Bottom Dock:**
+- Height: 64px
+- 12 widget slots
+- App launcher icons
+- Glassmorphic styling
 
-```bash
-# Ubuntu/Debian
-sudo apt-get install qt6-base-dev qt6-declarative-dev \
-                     qt6-quick-controls2-dev qt6-charts-dev \
-                     qml6-module-qtquick-controls \
-                     qml6-module-qtquick-layouts \
-                     qml6-module-qtcharts
+**Side Panels:**
+- Left Panel (64px, optional)
+- Right Panel (320px, optional)
+- Both with auto-hide
 
-# Arch Linux
-sudo pacman -S qt6-base qt6-declarative qt6-quickcontrols2 \
-               qt6-charts
+### 5. Icon Library (`gui/icons/`)
 
-# macOS
-brew install qt@6
-```
+**Total Icons:** 70+
 
-### Build
+**Categories:**
 
-```bash
-cd NEXUS-OS/gui
-mkdir build && cd build
+**Network (16):**
+- WiFi (full, medium, low, off)
+- Ethernet
+- Network status (connected, disconnected, error)
+- Bluetooth (on, off)
+- Server, Cloud (upload, download)
+- Router, Firewall, VPN
 
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DCMAKE_PREFIX_PATH=/path/to/qt6
+**System (11):**
+- CPU, Memory, Storage, GPU
+- Battery (full, medium, low)
+- Temperature, Fan
 
-make -j$(nproc)
+**Display (5):**
+- Display, Brightness, Resolution
+- Night light, HDR
 
-# Install
-sudo make install
-```
+**Desktop (7):**
+- Desktop, Wallpaper, Theme
+- Effects, Glassmorphic
+- Panel, Dock
 
-### Run Applications
+**Application (8):**
+- Terminal, Settings, Files, Browser
+- VM, Container, Update, Security
 
-```bash
-# Boot Manager
-./nexus-boot-manager
+**System Info (7):**
+- Info, Version, Build
+- Kernel, Architecture
+- Owner, Install date
 
-# VM Manager
-./nexus-vm-manager
+**Utility (6):**
+- Search, Tasks, Spacer
+- Trash, Minimize all, Show desktop
 
-# System Settings
-./nexus-settings
+### 6. Desktop Environment (`gui/desktop-environment/`)
 
-# Control Center
-./nexus-control-center
+**File:** `desktop-env.c` (2012 lines)
+
+Features:
+- Icon management with grid layout
+- Panel creation and management
+- Start menu
+- Search functionality
+- System tray
+- Notifications
+- Theme support
+- Animation support
+
+### 7. Login Screen (`gui/login/`)
+
+**File:** `login-screen.c` (1866 lines)
+
+Features:
+- User selection with avatars
+- Password/PIN/Biometric authentication
+- Session type selector
+- Accessibility menu
+- Power options
+- Clock and date display
+- 2FA support
+
+### 8. Onboarding Wizard (`gui/onboarding/`)
+
+**File:** `onboarding-wizard.c` (1675 lines)
+
+**12 Steps:**
+1. Welcome
+2. Theme Selection
+3. Desktop Layout
+4. Taskbar Position
+5. Start Menu Style
+6. Window Management
+7. File Associations
+8. App Permissions
+9. Keyboard Shortcuts
+10. Touchpad Gestures
+11. Notifications
+12. Complete
+
+## Usage
+
+### Display Settings
+
+```c
+// Initialize display settings
+display_settings_init();
+
+// Set background
+display_set_background("Sunset");
+
+// Apply glassmorphic effects
+display_apply_glassmorphic(&glass_settings);
+
+// Show display settings
+display_show_settings();
 ```
 
-## 📱 Platform Support
+### Icon Usage
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| Linux Desktop | ✅ Full | Primary target |
-| Windows | 🔄 Partial | Testing required |
-| macOS | 🔄 Partial | Testing required |
-| Android | 📋 Planned | Touch optimization |
-| iOS | 📋 Planned | Touch optimization |
+```c
+// Get icon
+const char *icon = icon_get("wifi-full");
 
-## 🎨 Design System
+// Render icon
+icon_render("cpu", x, y, size);
 
-### Color Palette
-
-```cpp
-// Dark Theme (Default)
-Background:    #0d1117
-Surface:       #161b22
-Border:        #30363d
-Primary:       #58a6ff
-Accent:        #e94560
-Success:       #2ea043
-Warning:       #d29922
-Error:         #f85149
-Text:          #e6edf3
-Text Muted:    #8b949e
+// List all icons
+icon_list_all();
 ```
 
-### Material Design
+### OS Information
 
-```qml
-Material.theme: Material.Dark
-Material.primary: "#58a6ff"
-Material.accent: "#e94560"
+```c
+// Get OS version
+const char *version = display_get_os_version();
+
+// Get full OS info
+char buffer[512];
+display_get_os_info(buffer, 512);
+
+// Show system info
+display_show_system_info();
 ```
 
-## 📦 Components
+## Color Theme
 
-### Boot Manager Components
+**Primary Colors:**
+- Primary: #3498DB (Blue)
+- Success: #2ECC71 (Green)
+- Warning: #F39C12 (Orange)
+- Error: #E74C3C (Red)
+- Purple: #9B59B6
+- Gray: #95A5A6
+- Dark: #2C3E50
 
-| Component | Description |
-|-----------|-------------|
-| `BootConfigModel` | Boot configuration data model |
-| `VirtModeManager` | Virtualization mode management |
-| `Main.qml` | Boot configuration UI |
+## References
 
-### VM Manager Components
-
-| Component | Description |
-|-----------|-------------|
-| `VMModel` | VM list data model |
-| `VMController` | VM lifecycle controller |
-| `Main.qml` | VM management dashboard |
-
-## 🔌 Integration
-
-### With Hypervisor
-
-```cpp
-#include <nexus/hypervisor.h>
-
-// Get hypervisor instance
-auto& hypervisor = NexusOS::NEXUSHypervisor::instance();
-
-// Initialize
-hypervisor.initialize(NexusOS::VirtMode::LIGHT);
-
-// Create VM
-NexusOS::VMConfig config;
-config.name = "MyVM";
-auto vm = hypervisor.createVM(config);
-vm->start();
-```
-
-### With QML
-
-```qml
-// Expose to QML
-engine.rootContext()->setContextProperty("vmController", &controller);
-
-// Use in QML
-Button {
-    onClicked: vmController.startVM(selectedVM)
-}
-```
-
-## 📖 API Reference
-
-### BootConfigModel
-
-```qml
-// Properties
-bootConfig.selectedVirtMode      // int
-bootConfig.selectedVirtModeName  // string
-bootConfig.secureBoot            // bool
-bootConfig.fastBoot              // bool
-bootConfig.cpuCount              // int
-bootConfig.memorySize            // int
-
-// Methods
-bootConfig.getVirtModes()        // Returns available modes
-bootConfig.applyConfig()         // Apply configuration
-bootConfig.resetToDefaults()     // Reset to defaults
-bootConfig.validateConfig()      // Validate current config
-```
-
-### VMModel
-
-```qml
-// Properties
-vmModel.totalCount    // int - Total VMs
-vmModel.runningCount  // int - Running VMs
-
-// Methods
-vmModel.getAllVMs()           // Returns all VMs
-vmModel.getVM(id)             // Get specific VM
-vmModel.addVM(config)         // Add new VM
-vmModel.removeVM(id)          // Remove VM
-vmModel.filterByStatus(s)     // Filter by status
-```
-
-### VMController
-
-```qml
-// Methods
-vmController.createVM(config)     // Create new VM
-vmController.startVM(id)          // Start VM
-vmController.stopVM(id)           // Stop VM
-vmController.pauseVM(id)          // Pause VM
-vmController.resumeVM(id)         // Resume VM
-vmController.deleteVM(id)         // Delete VM
-vmController.openConsole(id)      // Open console
-vmController.createSnapshot(id, name)  // Create snapshot
-```
-
-## 🧪 Testing
-
-```bash
-# Run tests
-ctest --output-on-failure
-
-# Run with QML profiler
-qmlprofiler ./nexus-vm-manager
-```
-
-## 📝 License
-
-Proprietary (NEXUS-OS Core)
-
-## 🤝 Contributing
-
-See `CONTRIBUTING.md` for guidelines.
-
-## 📧 Support
-
-- Documentation: `docs/`
-- Issues: GitHub Issues
-- Email: nexus-gui@darkhat.dev
+- [GUI README](../README.md)
+- [Display Settings API](display/display_settings.c)
+- [Icon Library](icons/icon_library.c)

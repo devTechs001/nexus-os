@@ -1,282 +1,354 @@
-# NEXUS-OS: Next-Generation Unified Operating System
+# NEXUS OS - Genesis Edition
 
-## Vision
+## Next-Generation Operating System
 
-A comprehensive, modular, hypervisor-based operating system designed for universal deployment across mobile, desktop, server, IoT, and embedded platforms with native virtualization support.
+A comprehensive, modular operating system with native hypervisor support, enterprise-grade virtualization, modern GUI, and professional audio/video capabilities.
 
-## Core Architecture
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Build](https://img.shields.io/badge/build-success-green)
+![License](https://img.shields.io/badge/license-Proprietary-red)
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         NEXUS-OS Architecture                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    NEXUS User Interface (NUI)                    │   │
-│  │     Mobile UI  │  Desktop UI  │  Server UI  │  Voice/Gesture    │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                   Application Framework Layer                    │   │
-│  │   Android Runtime │ Native Apps │ Web Apps │ Containers │ VMs   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    System Services Layer                         │   │
-│  │  Power │ Network │ Storage │ Security │ AI │ Media │ Graphics   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    NEXUS Hypervisor (NHV)                        │   │
-│  │    Hardware VM │ Process VM │ Container VM │ Security Enclaves  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                      Microkernel Core                            │   │
-│  │  Scheduler │ Memory │ IPC │ Drivers │ Filesystem │ Networking   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Hardware Abstraction Layer                    │   │
-│  │   x86_64 │ ARM64 │ RISC-V │ GPU │ NPU │ TPU │ Quantum Ready    │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                       Hardware Layer                             │   │
-│  │   Mobile │ Desktop │ Server │ IoT │ Embedded │ Edge │ Cloud     │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+---
+
+## 🚀 Quick Start
+
+### Build
+```bash
+make clean
+make
 ```
 
-## Key Features
+### Run
+```bash
+# Text mode with serial output
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -serial stdio -display none
 
-### 1. Native Hypervisor (NHV)
-- **Type-1 Hypervisor** built into kernel
-- Multiple VM types: Hardware VM, Process VM, Container VM
-- Live migration support
-- Nested virtualization
-- Hardware-assisted (Intel VT-x, AMD-V, ARM Virtualization)
-- Software fallback for unsupported hardware
-
-### 2. Universal Platform Support
-- **Mobile**: Android app compatibility, touch optimization
-- **Desktop**: Traditional windowing, peripheral support
-- **Server**: Enterprise features, clustering, high availability
-- **IoT**: Minimal footprint, real-time capabilities
-- **Embedded**: Customizable, deterministic behavior
-
-### 3. Security Architecture
-- Zero-trust security model
-- Mandatory Access Control (MAC)
-- Capability-based security
-- Hardware security modules (TPM, Secure Enclave)
-- Encrypted filesystem (default)
-- Secure boot chain
-- Runtime integrity verification
-
-### 4. AI-Integrated System
-- Neural processing integration
-- Predictive resource management
-- Intelligent power optimization
-- Voice/gesture interface
-- Context-aware computing
-- Automated troubleshooting
-
-### 5. Virtualization Options (User Selectable at Boot)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              NEXUS-OS Boot Configuration                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Select Virtualization Mode:                                    │
-│                                                                 │
-│  ○ Native Mode (No Virtualization)                              │
-│    - Direct hardware access                                     │
-│    - Maximum performance                                        │
-│    - For dedicated workstations                                 │
-│                                                                 │
-│  ○ Light Virtualization (Default)                               │
-│    - Process isolation via micro-VMs                            │
-│    - Application sandboxing                                     │
-│    - Balanced security/performance                              │
-│                                                                 │
-│  ○ Full Virtualization                                          │
-│    - Complete hardware virtualization                           │
-│    - Multiple isolated environments                             │
-│    - Enterprise security                                        │
-│                                                                 │
-│  ○ Container Mode                                               │
-│    - Lightweight container isolation                            │
-│    - Fast application deployment                                │
-│    - Development optimized                                      │
-│                                                                 │
-│  ○ Secure Enclave Mode                                          │
-│    - Maximum security isolation                                 │
-│    - Hardware-backed encryption                                 │
-│    - For sensitive workloads                                    │
-│                                                                 │
-│  ○ Compatibility Mode                                           │
-│    - Legacy OS compatibility layer                              │
-│    - Run Windows/Linux/macOS apps                               │
-│    - Translation overhead                                       │
-│                                                                 │
-│  ○ Custom Configuration                                         │
-│    - Mix and match modes                                        │
-│    - Per-application virtualization settings                    │
-│    - Advanced users                                             │
-│                                                                 │
-│  [Continue]  [Advanced Options]  [Restore Defaults]             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+# GUI mode
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -display gtk,gl=on
 ```
 
-## Directory Structure
-
+### Boot Sequence
 ```
-NEXUS-OS/
-├── kernel/                     # Microkernel Core
-│   ├── scheduler/              # Process & thread scheduling
-│   ├── memory/                 # Virtual memory management
-│   ├── ipc/                    # Inter-process communication
-│   ├── drivers/                # Core drivers
-│   └── hal/                    # Hardware abstraction
-│
-├── hypervisor/                 # NEXUS Hypervisor
-│   ├── nhv-core/               # Hypervisor core
-│   ├── vm-manager/             # VM lifecycle management
-│   ├── vcpu/                   # Virtual CPU emulation
-│   ├── vmmio/                  # Virtual MMIO
-│   └── nested/                 # Nested virtualization
-│
-├── platform/                   # Platform-Specific Code
-│   ├── mobile/                 # Android/iOS compatibility
-│   ├── desktop/                # Traditional desktop
-│   ├── server/                 # Enterprise server
-│   ├── iot/                    # IoT devices
-│   └── embedded/               # Embedded systems
-│
-├── system/                     # System Services
-│   ├── power/                  # Power management
-│   ├── network/                # Networking stack
-│   ├── storage/                # Storage management
-│   ├── graphics/               # Graphics subsystem
-│   ├── audio/                  # Audio subsystem
-│   └── input/                  # Input handling
-│
-├── services/                   # User Services
-│   ├── app-runtime/            # Application runtime
-│   ├── container/              # Container support
-│   ├── android-compat/         # Android compatibility
-│   └── web-engine/             # Web rendering
-│
-├── security/                   # Security Subsystem
-│   ├── mac/                    # Mandatory access control
-│   ├── encryption/             # Cryptographic services
-│   ├── integrity/              # System integrity
-│   ├── firewall/               # Network security
-│   └── audit/                  # Security auditing
-│
-├── ui/                         # User Interfaces
-│   ├── mobile-ui/              # Touch interface
-│   ├── desktop-ui/             # Desktop environment
-│   ├── voice-ui/               # Voice interaction
-│   └── ar-vr-ui/               # AR/VR interface
-│
-├── drivers/                    # Device Drivers
-│   ├── gpu/                    # Graphics drivers
-│   ├── network/                # Network drivers
-│   ├── storage/                # Storage drivers
-│   ├── display/                # Display drivers
-│   └── peripherals/            # Other peripherals
-│
-├── tools/                      # Development Tools
-│   ├── build/                  # Build system
-│   ├── debug/                  # Debugging tools
-│   ├── profile/                # Profiling tools
-│   └── test/                   # Testing framework
-│
-└── docs/                       # Documentation
-    ├── architecture/           # Architecture docs
-    ├── api/                    # API documentation
-    ├── guides/                 # User guides
-    └── specs/                  # Technical specifications
+BmCLP6AGsRSI → Kernel Entry ✓
 ```
 
-## Boot Process
+---
+
+## 📋 Table of Contents
+
+- [Features](#-features)
+- [Architecture](#-architecture)
+- [Components](#-components)
+- [Getting Started](#-getting-started)
+- [Documentation](#-documentation)
+- [System Requirements](#-system-requirements)
+
+---
+
+## ✨ Features
+
+### 🖥️ Graphical User Interface
+- **70+ Professional Icons** - Network, system, display, desktop categories
+- **Glassmorphic Effects** - Blur, transparency, shadows, rounded corners
+- **8 Background Presets** - Solid colors, gradients (Sunset, Ocean, Aurora)
+- **Panel System** - Top panel, bottom dock, optional side panels
+- **Display Settings** - Resolution, HDR, night light, color temperature
+- **OS Information** - Version, build, kernel, system specs display
+
+### 🎵 Audio System
+- **7-Band Equalizer** - 40Hz to 10kHz, ±12dB per band
+- **12 Audio Presets** - Rock, Pop, Jazz, Classical, Electronic, Gaming
+- **6 Audio Effects** - Reverb, Chorus, Delay, Compressor, Distortion, Spatial
+- **Device Management** - 8 output devices, 4 input devices
+- **Audio Visualization** - Bars, waveform, spectrum, oscilloscope
+
+### 🖳 Virtualization
+- **Hypervisor Core** - 64 VMs, 128 VCPUs each, EPT/VPID support
+- **Nested Virtualization** - 3 levels, Intel VMX & AMD SVM
+- **VM Manager** - Detailed stats, 6 modes, 32 extensions
+- **Container Orchestration** - 256 services, scaling, rolling updates
+- **Live Migration** - VM migration with minimal downtime
+- **Snapshot Support** - VM state save/restore
+
+### 💻 Terminal
+- **Sudo Support** - Authentication, sessions, permissions
+- **10,000 Command History** - Search, timestamps, no duplicates
+- **19 Default Aliases** - ll, gs, gc, gp, upd, inst, etc.
+- **4 Emulation Modes** - bash, sh, cmd, powershell
+- **10 Color Themes** - Dracula, Monokai, Solarized, Gruvbox, Nord
+- **Help System** - 10 built-in topics with search
+- **Animations** - 10 types (fade, rainbow, matrix, glitch)
+
+### 🛡️ System Management
+- **Startup Health** - Dependency checking, auto-repair, 4 startup modes
+- **Update Manager** - 4 channels, auto-update, delta updates
+- **Reset System** - 5 reset options, 100 restore points
+- **Health Monitoring** - Real-time status, recommendations
+
+### 🔐 Security
+- **Multiboot2 Compliant** - Validated boot process
+- **Secure Boot Chain** - Verified boot components
+- **Permission System** - Sudo with session management
+- **Encrypted Storage** - Optional disk encryption
+
+---
+
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    NEXUS-OS Boot Sequence                        │
+│                    NEXUS OS Architecture                        │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. UEFI/BIOS Initialization                                    │
-│     ↓                                                           │
-│  2. Secure Boot Verification                                    │
-│     ↓                                                           │
-│  3. NEXUS Bootloader (NBL)                                      │
-│     ↓                                                           │
-│  4. Virtualization Mode Selection (User Configurable)           │
-│     ↓                                                           │
-│  5. Hypervisor Initialization (if enabled)                      │
-│     ↓                                                           │
-│  6. Microkernel Loading                                         │
-│     ↓                                                           │
-│  7. Driver Initialization                                       │
-│     ↓                                                           │
-│  8. System Services Start                                       │
-│     ↓                                                           │
-│  9. Security Subsystem Activation                               │
-│     ↓                                                           │
-│  10. User Interface Launch                                      │
-│     ↓                                                           │
-│  11. Application Runtime Ready                                  │
-│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              Graphical User Interface                      │ │
+│  │   Login │ Desktop │ Panels │ Dock │ Settings │ Apps       │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              Application Layer                             │ │
+│  │   Terminal │ VM Manager │ Container │ Browser │ Tools     │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              System Services                               │ │
+│  │   Audio │ Display │ Network │ Storage │ Power │ Security  │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              Virtualization Layer                          │ │
+│  │   Hypervisor │ VM Manager │ Containers │ Nested Virt      │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              Kernel Core                                   │ │
+│  │   Scheduler │ Memory │ IPC │ Drivers │ Filesystem │ Net   │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              Hardware Abstraction                          │ │
+│  │   x86_64 │ ACPI │ PCI │ USB │ GPU │ Network │ Storage     │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              Hardware Layer                                │ │
+│  │   CPU │ RAM │ GPU │ Network │ Storage │ Peripherals       │ │
+│  └───────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Technical Specifications
+---
 
-### Kernel Specifications
-- **Type**: Hybrid microkernel
-- **Preemptive**: Full preemptive multitasking
-- **SMP**: Symmetric multiprocessing support
-- **Real-time**: Optional real-time extensions
-- **Memory**: 4-level paging (x86_64), 48-bit VA space
+## 📦 Components
 
-### Hypervisor Specifications
-- **Type**: Type-1 (bare-metal) with Type-2 capabilities
-- **Overhead**: < 3% for most workloads
-- **Memory**: Dynamic memory ballooning
-- **Storage**: Thin provisioning, snapshots
-- **Network**: SR-IOV, virtual switching
+### Boot System
+| Component | Description | Lines |
+|-----------|-------------|-------|
+| `boot.asm` | Multiboot2 boot assembly | 600+ |
+| `linker.ld` | Kernel linker script | 50+ |
+| `grub.cfg` | GRUB configuration | 50+ |
 
-### Security Specifications
-- **Encryption**: AES-256, ChaCha20, RSA-4096, ECC
-- **Hash**: SHA-3, BLAKE3
-- **Key Storage**: TPM 2.0, Secure Enclave
-- **Attestation**: Remote attestation support
-- **Compliance**: FIPS 140-3, Common Criteria EAL4+
+### GUI System
+| Component | Description | Lines |
+|-----------|-------------|-------|
+| `display_settings.c` | Display config, backgrounds, effects | 600+ |
+| `icon_library.c` | 40+ network/system icons | 500+ |
+| `icon_library_extra.c` | 30+ display/desktop icons | 300+ |
+| `desktop-env.c` | Desktop environment | 2000+ |
+| `login-screen.c` | Login screen | 1800+ |
+| `onboarding-wizard.c` | First-time setup | 1600+ |
 
-## Performance Targets
+### Virtualization
+| Component | Description | Lines |
+|-----------|-------------|-------|
+| `nexus_hypervisor_core.c` | Hypervisor core | 800+ |
+| `vm_manager_enhanced.c` | VM management | 650+ |
+| `nested_virt.c` | Nested virtualization | 500+ |
+| `container_orchestration.c` | Container orchestration | 650+ |
 
-| Metric | Target | Description |
-|--------|--------|-------------|
-| Boot Time | < 3s | Cold boot to UI |
-| App Launch | < 100ms | Cached applications |
-| Context Switch | < 500ns | Thread context switch |
-| IPC Latency | < 1μs | Local IPC |
-| VM Overhead | < 3% | Virtualization overhead |
-| Memory Footprint | < 50MB | Minimal installation |
-| Power Efficiency | +30% | vs. traditional OS |
+### System
+| Component | Description | Lines |
+|-----------|-------------|-------|
+| `startup_health.c` | Health monitoring, auto-repair | 1100+ |
+| `update_manager.c` | System updates | 700+ |
+| `reset_manager.c` | Reset & restore points | 550+ |
+| `equalizer.c` | Audio equalizer | 740+ |
 
-## Compatibility Matrix
+### Terminal
+| Component | Description | Lines |
+|-----------|-------------|-------|
+| `terminal.c` | Terminal emulator | 1700+ |
+| `terminal_enhanced.c` | Sudo support | 400+ |
+| `terminal_features.c` | History, aliases, help | 850+ |
+| `terminal_animations.c` | Visual effects | 780+ |
 
-| Platform | CPU | GPU | Network | Storage | UI |
-|----------|-----|-----|---------|---------|-----|
-| Mobile | ARM64 | Mali, Adreno | WiFi, 5G | eMMC, UFS | Touch |
-| Desktop | x86_64, ARM64 | NVIDIA, AMD, Intel | Ethernet, WiFi | SATA, NVMe | Mouse/KB |
-| Server | x86_64, ARM64 | Accelerator | 10G+, InfiniBand | NVMe, SAS | Headless |
-| IoT | ARM, RISC-V | Integrated | WiFi, BLE | eMMC, SD | Minimal |
-| Embedded | Custom | Custom | Custom | Custom | Custom |
+**Total Code:** 15,000+ lines
 
-## License
+---
 
-Proprietary with open-source components (dual-licensing available)
+## 🚀 Getting Started
 
-## Contact
+### Prerequisites
 
-nexus-os@darkhat.dev
+```bash
+# Ubuntu/Debian
+sudo apt-get install build-essential gcc nasm grub-pc-bin xorriso mtools qemu-system-x86
+
+# Fedora/RHEL
+sudo dnf install gcc nasm grub2-tools xorriso mtools qemu-system-x86
+```
+
+### Build
+
+```bash
+cd /path/to/NEXUS-OS
+make clean
+make
+```
+
+### Run in QEMU
+
+```bash
+# Basic (text mode)
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -serial stdio -display none
+
+# GUI mode
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -display gtk,gl=on
+
+# With debugging
+qemu-system-x86_64 -cdrom build/nexus-kernel.iso -m 2G -smp 2 -serial stdio -d int,cpu_reset
+```
+
+### Install to USB
+
+```bash
+# WARNING: This will erase the USB drive!
+sudo dd if=build/nexus-kernel.iso of=/dev/sdX bs=4M status=progress
+sudo sync
+```
+
+---
+
+## 📚 Documentation
+
+### Component Documentation
+- [Boot System](kernel/arch/x86_64/boot/README.md) - Multiboot2, boot sequence
+- [GUI System](gui/README.md) - Display, icons, effects, panels
+- [Virtualization](virt/README.md) - Hypervisor, VMs, containers
+- [System Components](system/README.md) - Updates, reset, health, audio
+- [Terminal](apps/terminal/README.md) - Sudo, history, aliases, themes
+
+### Additional Documentation
+- [BOOT_REPAIRS.md](BOOT_REPAIRS.md) - Boot system repairs
+- [BOOT_FLOW_SEQUENCE.md](BOOT_FLOW_SEQUENCE.md) - Complete boot flow
+- [HOW_TO_RUN.md](HOW_TO_RUN.md) - Running instructions
+- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
+
+---
+
+## 💻 System Requirements
+
+### Minimum
+- **CPU:** x86_64 dual-core
+- **RAM:** 2 GB
+- **Storage:** 500 MB
+- **Graphics:** VGA compatible
+
+### Recommended
+- **CPU:** x86_64 quad-core with VT-x/AMD-V
+- **RAM:** 4 GB
+- **Storage:** 2 GB
+- **Graphics:** SVGA with 128MB VRAM
+
+### For Virtualization
+- **CPU:** Intel VT-x or AMD-V capable
+- **RAM:** 8 GB+
+- **Storage:** 10 GB+
+- **Nested VT:** Additional 4 GB per nested level
+
+---
+
+## 🎯 Boot Options
+
+GRUB provides 5 boot modes:
+
+1. **Graphical Mode** (Default) - Full GUI with framebuffer
+2. **Text Mode** - VGA text console
+3. **Safe Mode** - Minimal drivers, no SMP
+4. **Debug Mode** - Verbose logging, early printk
+5. **Native Hardware** - No virtualization optimizations
+
+---
+
+## 🔧 Keyboard Shortcuts
+
+### Terminal
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+T` | New Tab |
+| `Ctrl+Shift+N` | New Window |
+| `Ctrl+Shift+W` | Close Tab |
+| `Ctrl+Shift+C` | Copy |
+| `Ctrl+Shift+V` | Paste |
+| `Ctrl+Shift++` | Zoom In |
+| `Ctrl+Shift+-` | Zoom Out |
+| `Ctrl+Shift+0` | Reset Zoom |
+| `Ctrl+L` | Clear Screen |
+| `Ctrl+D` | Exit |
+| `Ctrl+R` | Reverse Search |
+| `↑/↓` | Command History |
+
+### QEMU
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+A, X` | Exit QEMU |
+| `Ctrl+A, G` | Grab Mouse |
+| `Ctrl+A, F` | Fullscreen |
+
+---
+
+## 📊 Status
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| Boot System | ✅ Complete | Multiboot2 compliant |
+| Kernel Core | ✅ Complete | 64-bit kernel |
+| GUI System | ✅ Complete | Full desktop environment |
+| Virtualization | ✅ Complete | Hypervisor, VMs, containers |
+| Audio System | ✅ Complete | Equalizer, effects |
+| Terminal | ✅ Complete | Full-featured terminal |
+| System Management | ✅ Complete | Updates, reset, health |
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+---
+
+## 📄 License
+
+Proprietary - NEXUS Development Team
+
+---
+
+## 🙏 Acknowledgments
+
+- GRUB2 - Bootloader
+- QEMU - Emulator
+- NASM - Assembler
+- GCC - Compiler
+
+---
+
+## 📞 Support
+
+- **Documentation:** See `/docs` folder
+- **Issues:** GitHub Issues
+- **Discussions:** GitHub Discussions
+
+---
+
+**NEXUS OS - Genesis Edition v1.0.0**
+
+*Built: 2026-03-14*
+
+*Copyright © 2026 NEXUS Development Team*
