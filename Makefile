@@ -135,6 +135,9 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(HAL_DIR)/power/power_manager.c \
             $(IOT_DIR)/protocols/iot_protocols.c \
             $(VIRT_DIR)/containers/container_runtime.c \
+            $(VIRT_DIR)/hypervisor/nexus_hypervisor_core.c \
+            /* $(VIRT_DIR)/vm/vm_manager.c - disabled for build */ \
+            $(VIRT_DIR)/emulation/nested_virt.c \
             $(FS_DIR)/procfs/procfs.c \
             $(MOBILE_DIR)/telephony/telephony_manager.c
 
@@ -224,6 +227,8 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/power_manager.o \
             $(BUILD_DIR)/iot_protocols.o \
             $(BUILD_DIR)/container_runtime.o \
+            $(BUILD_DIR)/nexus_hypervisor_core.o \
+            $(BUILD_DIR)/nested_virt.o \
             $(BUILD_DIR)/procfs.o \
             $(BUILD_DIR)/telephony_manager.o
 
@@ -337,6 +342,9 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/hal/power
 	@mkdir -p $(BUILD_DIR)/iot/protocols
 	@mkdir -p $(BUILD_DIR)/virt/containers
+	@mkdir -p $(BUILD_DIR)/virt/hypervisor
+	@mkdir -p $(BUILD_DIR)/virt/vm
+	@mkdir -p $(BUILD_DIR)/virt/emulation
 	@mkdir -p $(BUILD_DIR)/fs/procfs
 	@mkdir -p $(BUILD_DIR)/mobile/telephony
 	@mkdir -p $(ISO_DIR)/boot/grub
@@ -610,6 +618,18 @@ $(BUILD_DIR)/iot_protocols.o: $(IOT_DIR)/protocols/iot_protocols.c | $(BUILD_DIR
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/container_runtime.o: $(VIRT_DIR)/containers/container_runtime.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/nexus_hypervisor_core.o: $(VIRT_DIR)/hypervisor/nexus_hypervisor_core.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/vm_manager.o: $(VIRT_DIR)/vm/vm_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/nested_virt.o: $(VIRT_DIR)/emulation/nested_virt.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
