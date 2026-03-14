@@ -106,6 +106,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(SYSTEM_DIR)/cleanup/cache_cleaner.c \
             $(SYSTEM_DIR)/storage/storage_sense.c \
             $(SYSTEM_DIR)/restore/restore_points.c \
+            $(SYSTEM_DIR)/startup/startup_health.c \
             $(APPS_DIR)/terminal/terminal_features.c \
             $(APPS_DIR)/terminal/terminal_animations.c \
             $(DRIVERS_DIR)/display/display.c \
@@ -201,6 +202,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/cache_cleaner.o \
             $(BUILD_DIR)/storage_sense.o \
             $(BUILD_DIR)/restore_points.o \
+            $(BUILD_DIR)/startup_health.o \
             $(BUILD_DIR)/terminal_features.o \
             $(BUILD_DIR)/terminal_animations.o \
             $(BUILD_DIR)/display.o \
@@ -345,6 +347,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/gui/virtualization
 	@mkdir -p $(BUILD_DIR)/apps/terminal
 	@mkdir -p $(BUILD_DIR)/system/registry
+	@mkdir -p $(BUILD_DIR)/system/startup
 	@mkdir -p $(BUILD_DIR)/drivers/display
 	@mkdir -p $(BUILD_DIR)/drivers/input
 	@mkdir -p $(BUILD_DIR)/drivers/audio
@@ -453,6 +456,10 @@ $(BUILD_DIR)/storage_sense.o: $(SYSTEM_DIR)/storage/storage_sense.c | $(BUILD_DI
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/restore_points.o: $(SYSTEM_DIR)/restore/restore_points.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/startup_health.o: $(SYSTEM_DIR)/startup/startup_health.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
