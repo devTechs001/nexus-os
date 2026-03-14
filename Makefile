@@ -25,6 +25,7 @@ IOT_DIR = iot
 VIRT_DIR = virt
 FS_DIR = fs
 MOBILE_DIR = mobile
+APPS_DIR = apps
 BUILD_DIR = build
 ISO_DIR = $(BUILD_DIR)/iso
 
@@ -336,6 +337,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/gui/compositor
 	@mkdir -p $(BUILD_DIR)/gui/app-store
 	@mkdir -p $(BUILD_DIR)/gui/virtualization
+	@mkdir -p $(BUILD_DIR)/apps/terminal
 	@mkdir -p $(BUILD_DIR)/system/registry
 	@mkdir -p $(BUILD_DIR)/drivers/display
 	@mkdir -p $(BUILD_DIR)/drivers/input
@@ -593,6 +595,14 @@ $(BUILD_DIR)/console.o: $(DRIVERS_DIR)/video/console.c | $(BUILD_DIR)
 $(BUILD_DIR)/splash.o: $(DRIVERS_DIR)/video/splash.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/terminal.o: $(APPS_DIR)/terminal/terminal.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/terminal_enhanced.o: $(APPS_DIR)/terminal/terminal_enhanced.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/mixer.o: $(DRIVERS_DIR)/audio/mixer.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
