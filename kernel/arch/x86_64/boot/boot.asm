@@ -101,6 +101,13 @@ _start:
     ; CLI - Disable interrupts immediately
     cli
 
+    ; EARLY VGA DEBUG - Write to VGA buffer to confirm we're executing
+    ; This happens BEFORE anything else to verify CPU entry
+    mov edi, 0xB8000
+    mov byte [edi], 'X'        ; Stage X: We entered _start!
+    mov byte [edi+2], '0'      ; Stage 0: Initial
+    mov byte [edi+4], 'K'      ; K: Kernel starting
+
     ; Initialize serial port (115200 baud, 8N1)
     ; Note: This uses push/pop so must be after stack is available
     ; For early debug, we use raw serial output without init

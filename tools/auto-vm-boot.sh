@@ -11,6 +11,9 @@ VM_DIR="$HOME/vmware-vm/NEXUS-OS"
 VMX_FILE="$VM_DIR/NEXUS-OS.vmx"
 VMLOG_FILE="$VM_DIR/boot.log"
 
+# Ensure VM dir exists before any log() call
+mkdir -p "$VM_DIR"
+
 # Configuration
 VM_NAME="NEXUS-OS"
 VM_MEMORY="2048"
