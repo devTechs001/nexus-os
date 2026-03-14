@@ -778,24 +778,29 @@ iso: clean $(KERNEL_ISO)
 # Run in QEMU
 run: $(KERNEL_ISO)
 	@echo "  [QEMU]  Starting NEXUS OS..."
+	@echo "  [INFO]  Press Ctrl+A then X to exit"
 	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
-		-serial stdio \
-		-display sdl \
-		-name "NEXUS OS"
+		-serial file:qemu_run.log \
+		-display gtk \
+		-name "NEXUS OS" \
+		-no-reboot
 
 # Run in QEMU with VMware emulation
 run-vmware: $(KERNEL_ISO)
 	@echo "  [QEMU]  Starting NEXUS OS (VMware emulation)..."
+	@echo "  [INFO]  Press Ctrl+A then X to exit"
 	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
-		-serial stdio \
+		-serial file:qemu_vmware.log \
 		-machine vmport=on \
 		-device vmxnet3,netdev=net0 \
 		-netdev user,id=net0 \
-		-name "NEXUS OS (VMware Mode)"
+		-name "NEXUS OS (VMware Mode)" \
+		-display gtk \
+		-no-reboot
 
 # Run with debug
 run-debug: $(KERNEL_ISO)
