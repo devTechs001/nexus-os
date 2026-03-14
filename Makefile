@@ -213,6 +213,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/console.o \
             $(BUILD_DIR)/splash.o \
+            $(BUILD_DIR)/icon_library.o \
             $(BUILD_DIR)/input.o \
             $(BUILD_DIR)/ps2.o \
             $(BUILD_DIR)/touchscreen.o \
@@ -348,6 +349,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/gui/desktop
 	@mkdir -p $(BUILD_DIR)/gui/compositor
 	@mkdir -p $(BUILD_DIR)/gui/app-store
+	@mkdir -p $(BUILD_DIR)/gui/icons
 	@mkdir -p $(BUILD_DIR)/gui/virtualization
 	@mkdir -p $(BUILD_DIR)/apps/terminal
 	@mkdir -p $(BUILD_DIR)/system/registry
@@ -626,6 +628,10 @@ $(BUILD_DIR)/console.o: $(DRIVERS_DIR)/video/console.c | $(BUILD_DIR)
 $(BUILD_DIR)/splash.o: $(DRIVERS_DIR)/video/splash.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/icon_library.o: $(GUI_DIR)/icons/icon_library.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/terminal.o: $(APPS_DIR)/terminal/terminal.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
