@@ -36,6 +36,10 @@ section .multiboot
         dd 8                      ; Size (8 bytes total)
     mboot2_header_end:
 
+; Switch to text section for code
+section .text
+    align 8
+
     ; 32-bit Entry point (called by GRUB)
     global _start
     global _start_kernel
@@ -108,35 +112,71 @@ _start:
     mov byte [edi+2], '0'      ; Stage 0: Initial
     mov byte [edi+4], 'K'      ; K: Kernel starting
 
-    ; Initialize serial port (115200 baud, 8N1)
-    ; Note: This uses push/pop so must be after stack is available
-    ; For early debug, we use raw serial output without init
+    ; EARLY SERIAL INIT (115200 baud, 8N1) - No stack needed
+    ; This must happen BEFORE any push/pop instructions
+    ; COM1: 0x3F8
+    mov dx, 0x3f8 + 1      ; Interrupt Enable Register
+    mov al, 0x00
+    out dx, al
 
-    ; Early serial debug - output 'B' to confirm 32-bit entry
-    ; Serial port COM1: 0x3F8
-    SERIAL_PUT_RAW 'B'
+    mov dx, 0x3f8 + 3      ; Line Control Register
+    mov al, 0x80           ; Enable DLAB
+    out dx, al
 
-    ; Save multiboot2 info pointer (EBX = magic, ECX = address)
-    ; According to Multiboot2 spec: EAX = magic, EBX = pointer to multiboot info
-    mov [multiboot_magic], eax
+    mov dx, 0x3f8          ; Divisor Latch Low
+    mov al, 0x01           ; 115200 baud
+    out dx, al
+
+    mov dx, 0x3f8 + 1      ; Divisor Latch High
+    mov al, 0x00
+    out dx, al
+
+    mov dx, 0x3f8 + 3      ; Line Control Register
+    mov al, 0x03           ; 8 bits, no parity, 1 stop
+    out dx, al
+
+    mov dx, 0x3f8 + 2      ; FIFO Control Register
+    mov al, 0xC7           ; Enable FIFO
+    out dx, al
+
+    mov dx, 0x3f8 + 1      ; Interrupt Enable Register
+    mov al, 0x00
+    out dx, al
+
+    ; Output 'B' to serial - Boot entry confirmed
+    mov dx, 0x3f8
+    mov al, 'B'
+    out dx, al
+    ; Wait for transmit
+.wait_b:
+    mov dx, 0x3f8 + 5
+    in al, dx
+    test al, 0x20
+    jz .wait_b
+
+    ; Save multiboot2 info pointer (EBX = pointer to multiboot info)
     mov [multiboot_info], ebx
 
-    ; Verify multiboot magic
+    ; Verify multiboot magic (EAX should be 0x36d76289)
     cmp eax, 0x36d76289
     jne .invalid_multiboot
 
-    ; Clear BSS section (required for uninitialized globals)
+    ; Clear BSS section
     mov edi, __bss_start
     mov ecx, __bss_end
     sub ecx, edi
     xor eax, eax
     rep stosb
 
-    ; Now we can use the full serial init (stack is available)
-    SERIAL_INIT
-
-    ; Serial debug - output 'C' for BSS cleared
-    SERIAL_PUT_RAW 'C'
+    ; Output 'C' - BSS cleared
+    mov dx, 0x3f8
+    mov al, 'C'
+    out dx, al
+.wait_c:
+    mov dx, 0x3f8 + 5
+    in al, dx
+    test al, 0x20
+    jz .wait_c
 
     ; Check for CPUID support
     pushfd
