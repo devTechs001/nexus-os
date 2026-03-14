@@ -97,6 +97,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(GUI_DIR)/file-manager/file-manager.c \
             $(GUI_DIR)/system-settings/system-settings.c \
             $(GUI_DIR)/app-store/app-store.c \
+            $(GUI_DIR)/virtualization/virt_manager_gui.c \
             $(SYSTEM_DIR)/registry/registry.c \
             $(SYSTEM_DIR)/optimizer/booster.c \
             $(SYSTEM_DIR)/thermal/cpu_cooler.c \
@@ -135,6 +136,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(HAL_DIR)/power/power_manager.c \
             $(IOT_DIR)/protocols/iot_protocols.c \
             $(VIRT_DIR)/containers/container_runtime.c \
+            $(VIRT_DIR)/containers/container_orchestration.c \
             $(VIRT_DIR)/hypervisor/nexus_hypervisor_core.c \
             /* $(VIRT_DIR)/vm/vm_manager.c - disabled for build */ \
             $(VIRT_DIR)/emulation/nested_virt.c \
@@ -187,6 +189,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/file-manager.o \
             $(BUILD_DIR)/system-settings.o \
             $(BUILD_DIR)/app-store.o \
+            $(BUILD_DIR)/virt_manager_gui.o \
             $(BUILD_DIR)/registry.o \
             $(BUILD_DIR)/booster.o \
             $(BUILD_DIR)/cpu_cooler.o \
@@ -227,6 +230,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/power_manager.o \
             $(BUILD_DIR)/iot_protocols.o \
             $(BUILD_DIR)/container_runtime.o \
+            $(BUILD_DIR)/container_orchestration.o \
             $(BUILD_DIR)/nexus_hypervisor_core.o \
             $(BUILD_DIR)/nested_virt.o \
             $(BUILD_DIR)/procfs.o \
@@ -331,6 +335,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/gui/desktop
 	@mkdir -p $(BUILD_DIR)/gui/compositor
 	@mkdir -p $(BUILD_DIR)/gui/app-store
+	@mkdir -p $(BUILD_DIR)/gui/virtualization
 	@mkdir -p $(BUILD_DIR)/system/registry
 	@mkdir -p $(BUILD_DIR)/drivers/display
 	@mkdir -p $(BUILD_DIR)/drivers/input
@@ -408,6 +413,10 @@ $(BUILD_DIR)/desktop.o: $(GUI_DIR)/desktop/desktop.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/app-store.o: $(GUI_DIR)/app-store/app-store.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/virt_manager_gui.o: $(GUI_DIR)/virtualization/virt_manager_gui.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
@@ -618,6 +627,10 @@ $(BUILD_DIR)/iot_protocols.o: $(IOT_DIR)/protocols/iot_protocols.c | $(BUILD_DIR
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/container_runtime.o: $(VIRT_DIR)/containers/container_runtime.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/container_orchestration.o: $(VIRT_DIR)/containers/container_orchestration.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
