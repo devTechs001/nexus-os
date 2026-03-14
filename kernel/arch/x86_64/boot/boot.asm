@@ -10,7 +10,7 @@ section .multiboot
 
     ; Multiboot2 header - MUST be first in .text section (within first 32KB)
     MBOOT2_MAGIC equ 0xE85250D6
-    MBOOT2_ARCH equ 0x00000000  ; i386 (32-bit protected mode) - GRUB loads in 32-bit
+    MBOOT2_ARCH equ 0x00000001  ; x86-64 (NOT i386!)
     MBOOT2_HEADER_LEN equ mboot2_header_end - mboot2_header
     MBOOT2_CHECKSUM equ -(MBOOT2_MAGIC + MBOOT2_ARCH + MBOOT2_HEADER_LEN)
 
