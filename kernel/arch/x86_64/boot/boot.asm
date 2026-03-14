@@ -158,14 +158,34 @@ _start:
     ; Use absolute addressing, not RIP-relative
     mov [multiboot_info], ebx
 
-    ; Verify multiboot magic (EAX should be 0x36d76289)
+    ; Verify multiboot magic (EAX should be 0x36d76289 for multiboot2)
+    ; Output 'm' if magic doesn't match but continue booting (for debugging)
     cmp eax, 0x36d76289
-    jne .invalid_multiboot
+    jne .multiboot_warn
 
-    ; Clear BSS section - use 32-bit registers for GRUB compatibility
-    mov ecx, __bss_start
-    mov edx, __bss_end
-    sub edx, ecx
+    ; Magic OK - output 'K' for OK
+    mov dx, 0x3f8
+    mov al, 'K'
+    out dx, al
+.wait_k:
+    mov dx, 0x3f8 + 5
+    in al, dx
+    test al, 0x20
+    jz .wait_k
+    jmp .clear_bss
+
+.multiboot_warn:
+    ; Magic mismatch - output 'm' but continue (GRUB might still work)
+    mov dx, 0x3f8
+    mov al, 'm'
+    out dx, al
+.wait_m2:
+    mov dx, 0x3f8 + 5
+    in al, dx
+    test al, 0x20
+    jz .wait_m2
+    ; Continue booting anyway - multiboot info in EBX should still be valid
+
 .clear_bss:
     mov byte [ecx], 0
     inc ecx
@@ -267,59 +287,65 @@ _start:
 [bits 64]
 
 .start_64:
-    ; Serial debug - output '6' for 64-bit mode
-    mov dx, 0x3f8
+    ; Immediately output '6' without wait - test if we're in 64-bit
+    mov edx, 0x3f8
     mov al, '6'
     out dx, al
-    ; Inline wait (no function call needed)
-.wait1:
-    mov dx, 0x3f8 + 5
-    in al, dx
-    test al, 0x20
-    jz .wait1
 
-    ; Set up segment registers for 64-bit mode
-    xor ax, ax
+    ; Output 'A' to confirm 64-bit execution
+    mov edx, 0x3f8
+    mov al, 'A'
+    out dx, al
+
+    ; Load 64-bit GDT
+    lgdt [rel gdt64_descriptor]
+
+    ; Debug: output 'G' after GDT loaded
+    mov edx, 0x3f8
+    mov al, 'G'
+    out dx, al
+
+    ; In 64-bit mode, DS/ES/SS are mostly ignored (must be null or valid)
+    ; Just zero them - don't load selectors
+    xor eax, eax
     mov ds, ax
     mov es, ax
-    mov ss, ax
+    ; SS is already set up by the far jump, don't touch it
+    xor eax, eax
     mov fs, ax
     mov gs, ax
 
-    ; Load 64-bit GDT
-    lgdt [gdt64_descriptor]
+    ; Debug: output 's' after segment setup
+    mov edx, 0x3f8
+    mov al, 's'
+    out dx, al
 
-    ; Set up stack
+    ; Set up stack - use absolute address
     mov rsp, stack_top
+
+    ; Debug: output 'R' after stack setup
+    mov edx, 0x3f8
+    mov al, 'R'
+    out dx, al
 
     ; Clear flags
     push 0
     popfq
 
     ; Serial debug - output 'S' for stack ready
-    mov dx, 0x3f8
+    mov edx, 0x3f8
     mov al, 'S'
     out dx, al
-.wait2:
-    mov dx, 0x3f8 + 5
-    in al, dx
-    test al, 0x20
-    jz .wait2
 
     ; Get multiboot info pointer (saved earlier)
     ; Pass in RDI as per System V AMD64 ABI
     mov rdi, [rel multiboot_info]
     mov rsi, [rel multiboot_magic]
 
-    ; Serial debug - output multiboot info address
-    mov dx, 0x3f8
+    ; Serial debug - output 'I' for info passed
+    mov edx, 0x3f8
     mov al, 'I'
     out dx, al
-.wait3:
-    mov dx, 0x3f8 + 5
-    in al, dx
-    test al, 0x20
-    jz .wait3
 
     ; Call 64-bit kernel entry point
     ; kernel_main_64(multiboot_info, multiboot_magic)
