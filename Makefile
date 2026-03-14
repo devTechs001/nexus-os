@@ -107,6 +107,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(SYSTEM_DIR)/storage/storage_sense.c \
             $(SYSTEM_DIR)/restore/restore_points.c \
             $(APPS_DIR)/terminal/terminal_features.c \
+            $(APPS_DIR)/terminal/terminal_animations.c \
             $(DRIVERS_DIR)/display/display.c \
             $(DRIVERS_DIR)/display/display_manager.c \
             $(DRIVERS_DIR)/input/input.c \
@@ -201,6 +202,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/storage_sense.o \
             $(BUILD_DIR)/restore_points.o \
             $(BUILD_DIR)/terminal_features.o \
+            $(BUILD_DIR)/terminal_animations.o \
             $(BUILD_DIR)/display.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/console.o \
@@ -613,6 +615,10 @@ $(BUILD_DIR)/terminal_enhanced.o: $(APPS_DIR)/terminal/terminal_enhanced.c | $(B
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/terminal_features.o: $(APPS_DIR)/terminal/terminal_features.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/terminal_animations.o: $(APPS_DIR)/terminal/terminal_animations.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
