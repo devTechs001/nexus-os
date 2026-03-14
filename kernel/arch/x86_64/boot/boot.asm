@@ -3,32 +3,39 @@
 ; NASM assembly - Multiboot2 boot with 32->64 bit transition
 
 [bits 32]
-[default rel]
+; NOTE: Do NOT use [default rel] - it causes RIP-relative addressing which breaks 32-bit boot
 
 section .multiboot
     align 8
 
     ; Multiboot2 header - MUST be first in .text section (within first 32KB)
-    MBOOT2_MAGIC equ 0xE85250D6
-    MBOOT2_ARCH equ 0x00000001  ; x86-64 (NOT i386!)
-    MBOOT2_HEADER_LEN equ mboot2_header_end - mboot2_header
-    MBOOT2_CHECKSUM equ -(MBOOT2_MAGIC + MBOOT2_ARCH + MBOOT2_HEADER_LEN)
+    ; Using raw bytes to avoid NASM 3.01 calculation bugs
 
     ; Multiboot2 header (must come BEFORE any code)
+    ; IMPROVED: Proper 8-byte alignment, correct checksum, framebuffer request
     align 8
     mboot2_header:
-        dd MBOOT2_MAGIC           ; Magic number (0xE85250D6)
-        dd MBOOT2_ARCH            ; Architecture (0 = i386)
-        dd MBOOT2_HEADER_LEN      ; Header length
-        dd MBOOT2_CHECKSUM        ; Checksum
+        ; Magic number: 0xE85250D6 (little-endian)
+        db 0xD6, 0x50, 0x52, 0xE8
+        ; Architecture: 0 (i386 protected mode)
+        db 0x00, 0x00, 0x00, 0x00
+        ; Header length: 48 bytes (0x30) - includes framebuffer tag + end tag + padding
+        db 0x30, 0x00, 0x00, 0x00
+        ; Checksum: 0x17ADAEFA (little-endian)
+        ; Verified: 0xE85250D6 + 0 + 48 + 0x17ADAEFA = 0x100000000 (wraps to 0)
+        db 0xFA, 0xAE, 0xAD, 0x17
 
         ; Framebuffer tag (request graphics mode) - Type 5
+        ; IMPROVED: Request framebuffer for graphical output
         dw 5                      ; Type (5 = framebuffer)
         dw 0                      ; Flags (0 = optional)
         dd 20                     ; Size (20 bytes total)
         dd 0                      ; Width (0 = any)
         dd 0                      ; Height (0 = any)
         dd 0                      ; Depth (0 = any/default)
+
+        ; 4 bytes padding for 8-byte alignment of end tag
+        db 0, 0, 0, 0
 
         ; End tag (must be 8-byte aligned) - Type 0
         dw 0                      ; Type (0 = end)
@@ -105,13 +112,6 @@ _start:
     ; CLI - Disable interrupts immediately
     cli
 
-    ; EARLY VGA DEBUG - Write to VGA buffer to confirm we're executing
-    ; This happens BEFORE anything else to verify CPU entry
-    mov edi, 0xB8000
-    mov byte [edi], 'X'        ; Stage X: We entered _start!
-    mov byte [edi+2], '0'      ; Stage 0: Initial
-    mov byte [edi+4], 'K'      ; K: Kernel starting
-
     ; EARLY SERIAL INIT (115200 baud, 8N1) - No stack needed
     ; This must happen BEFORE any push/pop instructions
     ; COM1: 0x3F8
@@ -155,18 +155,22 @@ _start:
     jz .wait_b
 
     ; Save multiboot2 info pointer (EBX = pointer to multiboot info)
+    ; Use absolute addressing, not RIP-relative
     mov [multiboot_info], ebx
 
     ; Verify multiboot magic (EAX should be 0x36d76289)
     cmp eax, 0x36d76289
     jne .invalid_multiboot
 
-    ; Clear BSS section
-    mov edi, __bss_start
-    mov ecx, __bss_end
-    sub ecx, edi
-    xor eax, eax
-    rep stosb
+    ; Clear BSS section - use 32-bit registers for GRUB compatibility
+    mov ecx, __bss_start
+    mov edx, __bss_end
+    sub edx, ecx
+.clear_bss:
+    mov byte [ecx], 0
+    inc ecx
+    dec edx
+    jnz .clear_bss
 
     ; Output 'C' - BSS cleared
     mov dx, 0x3f8
@@ -246,9 +250,16 @@ _start:
     mov dx, 0x3f8
     mov al, 'M'
     out dx, al
-    call serial_wait_xmit
-    mov edi, .multiboot_error
-    call kernel_panic
+.wait_m:
+    mov dx, 0x3f8 + 5
+    in al, dx
+    test al, 0x20
+    jz .wait_m
+    ; Halt on multiboot error
+.halt_m:
+    cli
+    hlt
+    jmp .halt_m
 
 .multiboot_error:
     db "Error: Invalid multiboot magic!", 0
@@ -324,9 +335,16 @@ _start:
     mov dx, 0x3f8
     mov al, 'X'
     out dx, al
-
-    mov edi, .error_msg
-    call kernel_panic
+.wait_x:
+    mov dx, 0x3f8 + 5
+    in al, dx
+    test al, 0x20
+    jz .wait_x
+    ; Halt on long mode error
+.halt_x:
+    cli
+    hlt
+    jmp .halt_x
 
 .error_msg:
     db "Error: x86_64 long mode not supported!", 0
@@ -554,14 +572,20 @@ gdt64_descriptor:
     dq gdt64_start
 
 ; ============================================================================
-; Storage for multiboot info
+; Storage for multiboot info (in .data to avoid BSS zeroing)
+; ============================================================================
+section .data
+    align 16
+    multiboot_info:
+        dq 0
+    multiboot_magic:
+        dd 0
+
+; ============================================================================
+; Kernel stack (in .bss)
 ; ============================================================================
 section .bss
     align 16
-    multiboot_info:
-        resq 1
-    multiboot_magic:
-        resd 1
     stack_bottom:
         resb 65536
     stack_top:

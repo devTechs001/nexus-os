@@ -7,16 +7,11 @@ SECTIONS
 {
     . = 1M;  /* Load kernel at 1MB - GRUB requires this */
 
-    /* Multiboot2 header MUST be first (within first 32KB) */
-    .multiboot : ALIGN(8)
+    /* Text section (code) - multiboot header MUST be first */
+    .text : ALIGN(4K)
     {
         *(.multiboot)
         KEEP(*(.multiboot))
-    }
-
-    /* Text section (code) */
-    .text : ALIGN(4K)
-    {
         *(.text)
         *(.text.*)
     }
