@@ -111,6 +111,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(SYSTEM_DIR)/reset/reset_manager.c \
             $(SYSTEM_DIR)/audio/equalizer.c \
             $(SYSTEM_DIR)/logging/log_manager.c \
+            $(SYSTEM_DIR)/feedback/feedback_manager.c \
             $(APPS_DIR)/terminal/terminal_features.c \
             $(APPS_DIR)/terminal/terminal_animations.c \
             $(DRIVERS_DIR)/display/display.c \
@@ -211,6 +212,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/reset_manager.o \
             $(BUILD_DIR)/equalizer.o \
             $(BUILD_DIR)/log_manager.o \
+            $(BUILD_DIR)/feedback_manager.o \
             $(BUILD_DIR)/terminal_features.o \
             $(BUILD_DIR)/terminal_animations.o \
             $(BUILD_DIR)/display.o \
@@ -365,6 +367,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)/system/reset
 	@mkdir -p $(BUILD_DIR)/system/audio
 	@mkdir -p $(BUILD_DIR)/system/logging
+	@mkdir -p $(BUILD_DIR)/system/feedback
 	@mkdir -p $(BUILD_DIR)/drivers/display
 	@mkdir -p $(BUILD_DIR)/drivers/input
 	@mkdir -p $(BUILD_DIR)/drivers/audio
@@ -493,6 +496,10 @@ $(BUILD_DIR)/equalizer.o: $(SYSTEM_DIR)/audio/equalizer.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
 $(BUILD_DIR)/log_manager.o: $(SYSTEM_DIR)/logging/log_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
+
+$(BUILD_DIR)/feedback_manager.o: $(SYSTEM_DIR)/feedback/feedback_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [WARN] Compilation warnings"; }
 
