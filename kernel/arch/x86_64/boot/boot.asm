@@ -380,13 +380,13 @@ _start:
 ; ============================================================================
 [bits 64]
 
-global arch_get_cpu_id
-arch_get_cpu_id:
-    mov eax, 1
-    cpuid
-    mov eax, ebx
-    shr eax, 24
-    ret
+; global arch_get_cpu_id
+; arch_get_cpu_id:
+;     mov eax, 1
+;     cpuid
+;     mov eax, ebx
+;     shr eax, 24
+;     ret
 
 global arch_get_ticks
 arch_get_ticks:
@@ -421,14 +421,6 @@ arch_shutdown:
     ret
 
 ; arch_init_gdt, arch_init_idt, arch_init_paging, arch_init_smp are defined in kernel.c as stubs
-
-global arch_late_init
-arch_late_init:
-    ret
-
-global arch_early_init
-arch_early_init:
-    ret
 
 global arch_halt_cpu
 arch_halt_cpu:
@@ -530,10 +522,10 @@ pdpt_table:
     times 511 dq 0
 
 pd_table:
-    ; Identity map first 512 pages (2MB)
+    ; Identity map first 512 entries (1GB using 2MB pages)
     %assign i 0
     %rep 512
-    dq (i * 0x1000) + 0x83  ; Present + Read/Write + 2MB page
+    dq (i * 0x200000) + 0x83  ; Present + Read/Write + 2MB page
     %assign i i+1
     %endrep
 

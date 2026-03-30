@@ -54,27 +54,27 @@ typedef struct {
 
 static boot_entry_t boot_entries[BOOT_MENU_ENTRIES] = {
     {
-        .title = "NEXUS OS (VMware Mode)",
-        .description = "Optimized for VMware - Default selection",
-        .kernel_params = "",
+        .title = "NEXUS OS (Normal)",
+        .description = "Standard boot with all features enabled",
+        .kernel_params = "root=/dev/sda2 quiet splash loglevel=3",
         .is_default = true
     },
     {
         .title = "NEXUS OS (Safe Mode)",
-        .description = "Minimal drivers, no SMP - For troubleshooting",
-        .kernel_params = "nomodeset nosmp noapic",
+        .description = "Minimal drivers for troubleshooting",
+        .kernel_params = "root=/dev/sda2 nomodeset single",
         .is_default = false
     },
     {
-        .title = "NEXUS OS (Debug Mode)",
-        .description = "Verbose logging - For developers",
-        .kernel_params = "debug loglevel=7 earlyprintk=vga",
+        .title = "NEXUS OS (Debug)",
+        .description = "Verbose logging for developers",
+        .kernel_params = "root=/dev/sda2 debug loglevel=7 earlyprintk",
         .is_default = false
     },
     {
-        .title = "NEXUS OS (Native Mode)",
-        .description = "Bare metal - No virtualization",
-        .kernel_params = "virt=native",
+        .title = "Memory Test",
+        .description = "Extended memory testing with Memtest86+",
+        .kernel_params = "",
         .is_default = false
     }
 };
@@ -196,6 +196,29 @@ static u8 read_key(void)
     return read_port(0x60);
 }
 
+static void boot_selected_entry(u32 index)
+{
+    if (index >= BOOT_MENU_ENTRIES) {
+        return;
+    }
+
+    boot_entry_t *entry = &boot_entries[index];
+
+    vga_clear(0x07);
+
+    vga_print(0, 10, "Booting NEXUS OS...", 0x07);
+    vga_print(0, 12, entry->title, 0x07);
+    vga_print(0, 14, "Kernel: ", 0x07);
+    vga_print(8, 14, "/boot/nexus.elf", 0x07);
+    vga_print(0, 16, "Command line: ", 0x07);
+    vga_print(14, 16, entry->kernel_params, 0x07);
+
+    for (volatile u32 i = 0; i < 50000000; i++);
+
+    vga_print(0, 20, "Press any key to return to menu...", 0x08);
+    read_key();
+}
+
 static void handle_input(void)
 {
     if (keyboard_available()) {
@@ -215,15 +238,12 @@ static void handle_input(void)
                 }
                 break;
             case 0x1C:  /* Enter */
-                boot_state.running = false;
+                boot_selected_entry(boot_state.current_entry);
+                draw_boot_menu();
                 break;
         }
     }
 }
-
-/*===========================================================================*/
-/*                         BOOT FUNCTION                                     */
-/*===========================================================================*/
 
 void graphical_boot_menu(void)
 {

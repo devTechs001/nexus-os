@@ -95,7 +95,98 @@ int strcmp(const char *s1, const char *s2)
 }
 
 /**
- * strncmp - Compare at most n characters of two strings
+ * strspn - Get length of a prefix substring
+ */
+size_t strspn(const char *s, const char *accept)
+{
+    const char *p;
+    const char *a;
+    size_t count = 0;
+
+    for (p = s; *p != '\0'; p++) {
+        for (a = accept; *a != '\0'; a++) {
+            if (*p == *a)
+                break;
+        }
+        if (*a == '\0')
+            return count;
+        count++;
+    }
+    return count;
+}
+
+/**
+ * strcspn - Get length of a prefix substring until match
+ */
+size_t strcspn(const char *s, const char *reject)
+{
+    const char *p;
+    const char *r;
+    size_t count = 0;
+
+    for (p = s; *p != '\0'; p++) {
+        for (r = reject; *r != '\0'; r++) {
+            if (*p == *r)
+                return count;
+        }
+        count++;
+    }
+    return count;
+}
+
+/* Forward Declarations */
+char *strpbrk(const char *s, const char *accept);
+
+/**
+ * strtok_r - Thread-safe string tokenization
+ */
+char *strtok_r(char *str, const char *delim, char **saveptr)
+{
+    char *token;
+
+    if (str == NULL)
+        str = *saveptr;
+
+    /* Skip leading delimiters */
+    str += strspn(str, delim);
+    if (*str == '\0') {
+        *saveptr = str;
+        return NULL;
+    }
+
+    /* Find end of token */
+    token = str;
+    str = strpbrk(token, delim);
+    if (str == NULL) {
+        /* This is the last token */
+        *saveptr = token + strlen(token);
+    } else {
+        /* Terminate the token and set saveptr for next call */
+        *str = '\0';
+        *saveptr = str + 1;
+    }
+
+    return token;
+}
+
+/**
+ * strpbrk - Search a string for any of a set of characters
+ */
+char *strpbrk(const char *s, const char *accept)
+{
+    while (*s != '\0') {
+        const char *a = accept;
+        while (*a != '\0') {
+            if (*s == *a++)
+                return (char *)s;
+        }
+        s++;
+    }
+    return NULL;
+}
+
+/**
+ * strncmp - Compare two strings up to n characters
  * @s1: First string
  * @s2: Second string
  * @n: Maximum number of characters to compare
@@ -461,6 +552,86 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list args)
 }
 
 /**
+ * strtoul - Convert string to unsigned long
+ */
+unsigned long strtoul(const char *nptr, char **endptr, int base)
+{
+    const char *s = nptr;
+    unsigned long acc;
+    int c;
+    unsigned long any;
+
+    do {
+        c = *s++;
+    } while (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+
+    if (base == 0) {
+        if (c == '0') {
+            if (*s == 'x' || *s == 'X') {
+                base = 16;
+                s++;
+            } else {
+                base = 8;
+            }
+        } else {
+            base = 10;
+        }
+    } else if (base == 16) {
+        if (c == '0' && (*s == 'x' || *s == 'X')) {
+            s++;
+        }
+    }
+
+    acc = 0;
+    any = 0;
+    for (;; c = *s++) {
+        if (c >= '0' && c <= '9')
+            c -= '0';
+        else if (c >= 'A' && c <= 'Z')
+            c -= 'A' - 10;
+        else if (c >= 'a' && c <= 'z')
+            c -= 'a' - 10;
+        else
+            break;
+        if (c >= base)
+            break;
+        acc *= base;
+        acc += c;
+        any = 1;
+    }
+
+    if (endptr != NULL)
+        *endptr = (char *)(any ? s - 1 : nptr);
+    return acc;
+}
+
+/**
+ * crypto_memcmp - Constant-time memory comparison
+ */
+int crypto_memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *p1 = a;
+    const unsigned char *p2 = b;
+    int res = 0;
+    for (size_t i = 0; i < n; i++) {
+        res |= p1[i] ^ p2[i];
+    }
+    return res;
+}
+
+/**
+ * crypto_memzero - Securely zero memory
+ */
+void crypto_memzero(void *s, size_t n)
+{
+    unsigned char *p = s;
+    while (n--) {
+        *p++ = 0;
+        __asm__ __volatile__("" : : "g"(p) : "memory");
+    }
+}
+
+/**
  * snprintf - Format string output
  * @buf: Output buffer
  * @size: Buffer size
@@ -497,4 +668,21 @@ int sprintf(char *buf, const char *fmt, ...)
     va_end(args);
 
     return ret;
+}
+
+/**
+ * kstrdup - Duplicate string in kernel memory
+ * @s: String to duplicate
+ *
+ * Returns: Pointer to new string, or NULL on failure
+ */
+char *kstrdup(const char *s)
+{
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+    char *new = kmalloc(len);
+    if (new) {
+        memcpy(new, s, len);
+    }
+    return new;
 }

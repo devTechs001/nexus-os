@@ -155,9 +155,15 @@ int vprintk(const char *fmt, __builtin_va_list args)
 
     *str = '\0';
 
-    /* Output via VGA console */
-    extern void console_write(const char *str, u32 len);
-    console_write(printk_buffer, len);
+    /* Output to serial port - simple loop */
+    {
+        const char *p = printk_buffer;
+        while (*p) {
+            /* Simple outb without waiting */
+            __asm__ __volatile__("outb %b0, $0x3F8" :: "a"(*p));
+            p++;
+        }
+    }
 
     return len;
 }

@@ -246,10 +246,14 @@ static inline void rb_insert_color_cached(struct rb_node *node,
 /*===========================================================================*/
 
 /**
- * cfs_rq_init - Initialize CFS run queue
+ * cfs_rq_init - Initialize CFS (Completely Fair Scheduler) run queue
  * @cfs_rq: CFS run queue to initialize
  * @rq: Parent run queue
+ * 
+ * Initializes all fields of the CFS run queue including the red-black tree,
+ * timing statistics, and load tracking.
  */
+__attribute__((used))
 static void cfs_rq_init(struct cfs_rq *cfs_rq, struct rq *rq)
 {
     cfs_rq->tasks_timeline = RB_ROOT;

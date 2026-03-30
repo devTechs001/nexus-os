@@ -170,12 +170,24 @@ static inline u32 virtio_gpu_read_reg(u32 reg)
     return 0;
 }
 
+/**
+ * virtio_gpu_notify_queue - Notify host about new virtqueue descriptors
+ * @queue: Queue index to notify
+ */
+__attribute__((used))
 static void virtio_gpu_notify_queue(u32 queue)
 {
     /* Notify host about new descriptors */
     virtio_gpu_write_reg(g_virtio_gpu.queue_notify, queue);
 }
 
+/**
+ * virtio_gpu_add_descriptor - Add descriptor to virtqueue
+ * @buf: Buffer address
+ * @len: Buffer length
+ * @flags: Descriptor flags
+ */
+__attribute__((used))
 static void virtio_gpu_add_descriptor(void *buf, u32 len, u32 flags)
 {
     /* Add descriptor to virtqueue */
@@ -186,6 +198,14 @@ static void virtio_gpu_add_descriptor(void *buf, u32 len, u32 flags)
 /*                         GPU COMMANDS                                      */
 /*===========================================================================*/
 
+/**
+ * virtio_gpu_query_display_info - Query display information from host
+ * 
+ * Requests display configuration from the host GPU.
+ * Populates the displays array with resolution and status.
+ * Returns 0 on success.
+ */
+__attribute__((used))
 static int virtio_gpu_query_display_info(void)
 {
     printk("[VIRTIO-GPU] Getting display info...\n");

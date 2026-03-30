@@ -183,6 +183,19 @@ typedef struct cpu_info {
     s32 tj_max;
 } cpu_info_t;
 
+/**
+ * struct cpu_stats - CPU statistics structure
+ */
+struct cpu_stats {
+    u64 idle_time;
+    u64 active_time;
+    u64 boot_time;
+    u64 last_schedule;
+    u64 total_interrupts;
+    u64 total_context_switches;
+    u32 load_average;
+};
+
 /* CPU Functions */
 void cpu_init(void);
 void cpu_early_init(void);
@@ -288,6 +301,13 @@ u64 numa_get_node_memory(int node);
 #define IRQF_PER_CPU            0x00000100
 #define IRQF_NO_SUSPEND         0x00000200
 
+/* Interrupt Return Type */
+typedef enum {
+    IRQ_NONE = 0,
+    IRQ_HANDLED = 1,
+    IRQ_WAKE_THREAD = 2,
+} irqreturn_t;
+
 /* Interrupt Handler */
 typedef irqreturn_t (*irq_handler_t)(int irq, void *dev_id);
 
@@ -312,6 +332,20 @@ typedef struct irq_desc {
     
     char name[32];
 } irq_desc_t;
+
+/**
+ * irq_stats - Interrupt statistics
+ */
+struct irq_stats {
+    u32 count;
+    u32 unhandled;
+    u64 last_irq_time;
+    u64 total_handler_time;
+    u64 max_handler_time;
+    u32 action_count;
+    u32 affinity;
+    char name[32];
+};
 
 /* Interrupt Functions */
 void interrupt_init(void);

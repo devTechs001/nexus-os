@@ -11,7 +11,7 @@
 /*                         VFS GLOBAL STATE                                  */
 /*===========================================================================*/
 
-static struct vfs_global vfs_global = {
+struct vfs_global vfs_global = {
     .initialized = false,
     .init_count = 0,
     .magic = VFS_MAGIC,
@@ -56,37 +56,6 @@ u64 vfs_hash_string(const char *str, u64 len)
     }
 
     return hash;
-}
-
-/**
- * vfs_inode_hash - Get hash bucket for inode
- * @sb: Superblock
- * @ino: Inode number
- *
- * Returns: Hash bucket index
- */
-static inline u32 vfs_inode_hash(dev_t dev, u64 ino)
-{
-    u64 hash = ino ^ (u64)dev;
-    return (u32)(hash & (VFS_INODE_HASH_SIZE - 1));
-}
-
-/**
- * vfs_dentry_hash - Get hash bucket for dentry
- * @parent: Parent dentry
- * @name: Entry name
- *
- * Returns: Hash bucket index
- */
-static inline u32 vfs_dentry_hash(struct vfs_dentry *parent, const char *name)
-{
-    u64 hash = vfs_hash_string(name, 0);
-
-    if (parent) {
-        hash ^= (u64)(uintptr)parent;
-    }
-
-    return (u32)(hash & (VFS_DENTRY_HASH_SIZE - 1));
 }
 
 /*===========================================================================*/
@@ -166,23 +135,21 @@ static s32 vfs_init_early(void)
  * vfs_init - Initialize VFS subsystem
  *
  * Main VFS initialization function. Called during kernel initialization.
- *
- * Returns: VFS_OK on success, error code on failure
  */
 s32 vfs_init(void)
 {
     s32 ret;
 
     /* Check if already initialized */
-    spin_lock(&vfs_global.lock);
+    spinlock_lock(&vfs_global.lock);
 
     if (vfs_global.init_count > 0) {
         vfs_global.init_count++;
-        spin_unlock(&vfs_global.lock);
+        spinlock_unlock(&vfs_global.lock);
         return VFS_OK;
     }
 
-    spin_unlock(&vfs_global.lock);
+    spinlock_unlock(&vfs_global.lock);
 
     pr_info("Initializing Virtual File System...\n");
 
@@ -614,7 +581,7 @@ s32 vfs_path_split(const char *path, char **dir, char **base)
  */
 s32 vfs_path_lookup(const char *path, u32 flags, struct vfs_dentry **dentry)
 {
-    struct vfs_dentry *current;
+    struct vfs_dentry *curr;
     struct vfs_dentry *parent;
     struct vfs_dentry *child;
     char *path_copy;
@@ -639,19 +606,19 @@ s32 vfs_path_lookup(const char *path, u32 flags, struct vfs_dentry **dentry)
             return VFS_ENOENT;
         }
         vfs_d_get(root_dentry);
-        current = root_dentry;
+        curr = root_dentry;
     } else {
         if (!vfs_global.pwd) {
             return VFS_ENOENT;
         }
         vfs_d_get(vfs_global.pwd);
-        current = vfs_global.pwd;
+        curr = vfs_global.pwd;
     }
 
     /* Make a copy of path for tokenization */
     path_copy = (char *)kmalloc(strlen(path) + 1);
     if (!path_copy) {
-        vfs_d_put(current);
+        vfs_d_put(curr);
         return VFS_ENOMEM;
     }
     strcpy(path_copy, path);
@@ -667,7 +634,7 @@ s32 vfs_path_lookup(const char *path, u32 flags, struct vfs_dentry **dentry)
     token = strtok_r(component, "/", &saveptr);
 
     while (token) {
-        parent = current;
+        parent = curr;
 
         /* Lookup component in parent */
         ret = vfs_lookup(token, parent, &child);
@@ -678,27 +645,27 @@ s32 vfs_path_lookup(const char *path, u32 flags, struct vfs_dentry **dentry)
         }
 
         vfs_d_put(parent);
-        current = child;
+        curr = child;
 
         /* Handle symlinks if not NOFOLLOW */
-        if (!(flags & VFS_FO_NOFOLLOW) && current->d_inode &&
-            (current->d_inode->type == VFS_TYPE_SYMLINK)) {
+        if (!(flags & VFS_FO_NOFOLLOW) && curr->d_inode &&
+            (curr->d_inode->type == VFS_TYPE_SYMLINK)) {
             /* TODO: Implement symlink resolution */
         }
 
         /* Handle mount points */
-        if (current->d_mount) {
-            struct vfs_dentry *mount_root = current->d_mount->mnt_root;
+        if (curr->d_mount) {
+            struct vfs_dentry *mount_root = curr->d_mount->mnt_root;
             vfs_d_get(mount_root);
-            vfs_d_put(current);
-            current = mount_root;
+            vfs_d_put(curr);
+            curr = mount_root;
         }
 
         token = strtok_r(NULL, "/", &saveptr);
     }
 
     kfree(path_copy);
-    *dentry = current;
+    *dentry = curr;
 
     return VFS_OK;
 }

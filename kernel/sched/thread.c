@@ -396,8 +396,10 @@ void *tls_get_value(u32 key)
  * tls_cleanup - Clean up TLS for exiting thread
  * @task: Task exiting
  *
- * Calls destructors for all TLS keys that have values set.
+ * Calls destructors for all TLS keys that have values set,
+ * then frees the TLS array. This is called during thread exit.
  */
+__attribute__((used))
 static void tls_cleanup(struct task_struct *task)
 {
     u32 key;

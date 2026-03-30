@@ -361,6 +361,54 @@ int nvme_init(void)
 }
 
 /**
+ * nvme_delete_io_queues - Delete all I/O queues
+ */
+int nvme_delete_io_queues(nvme_device_t *dev)
+{
+    if (!dev || !dev->io_queues) return -EINVAL;
+
+    for (u32 i = 0; i < dev->num_io_queues; i++) {
+        if (dev->io_queues[i].is_initialized) {
+            /* In this implementation, we just mark as not initialized */
+            /* Real driver would send Delete I/O Queue admin command */
+            dev->io_queues[i].is_initialized = false;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * nvme_delete_admin_queues - Delete admin queues
+ * @dev: NVMe device
+ *
+ * Returns: 0 on success
+ */
+int nvme_delete_admin_queues(nvme_device_t *dev)
+{
+    if (!dev) {
+        return -EINVAL;
+    }
+    
+    if (dev->admin_sq.sq) {
+        nvme_free_contiguous(dev->admin_sq.sq, dev->admin_sq.sq_phys,
+                            dev->admin_sq.size * sizeof(nvme_command_t));
+        dev->admin_sq.sq = NULL;
+    }
+    
+    if (dev->admin_cq.cq) {
+        nvme_free_contiguous(dev->admin_cq.cq, dev->admin_cq.cq_phys,
+                            dev->admin_cq.size * sizeof(nvme_completion_t));
+        dev->admin_cq.cq = NULL;
+    }
+    
+    dev->admin_sq.is_initialized = false;
+    dev->admin_cq.is_initialized = false;
+    
+    return 0;
+}
+
+/**
  * nvme_shutdown - Shutdown NVMe driver
  *
  * Returns: 0 on success
@@ -900,34 +948,6 @@ int nvme_create_admin_queues(nvme_device_t *dev)
 
 /**
  * nvme_delete_admin_queues - Delete admin queues
- * @dev: NVMe device
- *
- * Returns: 0 on success
- */
-int nvme_delete_admin_queues(nvme_device_t *dev)
-{
-    if (!dev) {
-        return -EINVAL;
-    }
-    
-    if (dev->admin_sq.sq) {
-        nvme_free_contiguous(dev->admin_sq.sq, dev->admin_sq.sq_phys,
-                            dev->admin_sq.size * sizeof(nvme_command_t));
-        dev->admin_sq.sq = NULL;
-    }
-    
-    if (dev->admin_cq.cq) {
-        nvme_free_contiguous(dev->admin_cq.cq, dev->admin_cq.cq_phys,
-                            dev->admin_cq.size * sizeof(nvme_completion_t));
-        dev->admin_cq.cq = NULL;
-    }
-    
-    dev->admin_sq.is_initialized = false;
-    dev->admin_cq.is_initialized = false;
-    
-    return 0;
-}
-
 /*===========================================================================*/
 /*                         NAMESPACE OPERATIONS                              */
 /*===========================================================================*/

@@ -147,7 +147,7 @@ static struct sk_buff *__alloc_skb_internal(u32 size, int gfp, int fclone)
     {
         u64 current_val = atomic64_read(&skbuff_cache.memory_used);
         if (current_val > skbuff_cache.peak_memory) {
-            skbuff_cache.peak_memory = current;
+            skbuff_cache.peak_memory = current_val;
         }
     }
 
@@ -278,6 +278,11 @@ void kfree_skb(struct sk_buff *skb)
     free_skb(skb);
 }
 
+void dev_kfree_skb(struct sk_buff *skb)
+{
+    free_skb(skb);
+}
+
 /*===========================================================================*/
 /*                         SKBUFF REFERENCE COUNTING                         */
 /*===========================================================================*/
@@ -294,17 +299,6 @@ struct sk_buff *skb_get(struct sk_buff *skb)
         atomic_inc(&skb->users);
     }
     return skb;
-}
-
-/**
- * kfree_skb - Free a socket buffer
- * @skb: Socket buffer to free
- *
- * Frees the socket buffer and releases all associated resources.
- */
-void kfree_skb(struct sk_buff *skb)
-{
-    free_skb(skb);
 }
 
 /**
@@ -378,7 +372,7 @@ struct sk_buff *skb_copy(const struct sk_buff *skb)
     }
 
     /* Allocate new skbuff with same size */
-    size = skb->end - skb->head;
+    size = skb->end;
     new = alloc_skb(size - SKBUFF_HEADROOM - SKBUFF_TAILROOM);
     if (!new) {
         return NULL;
@@ -464,7 +458,14 @@ u8 *skb_pull(struct sk_buff *skb, u32 len)
  *
  * Returns: Pointer to start of added data
  */
-u8 *__skb_put(struct sk_buff *skb, u32 len)
+/**
+ * __skb_put - Add data to the end of a socket buffer (internal)
+ * @skb: Socket buffer
+ * @len: Length of data to add
+ *
+ * Returns: Pointer to start of added data
+ */
+static u8 *__skb_put(struct sk_buff *skb, u32 len)
 {
     u8 *tmp;
 
@@ -485,18 +486,32 @@ u8 *__skb_put(struct sk_buff *skb, u32 len)
 }
 
 /**
+ * skb_put - Add data to the end of a socket buffer
+ * @skb: Socket buffer
+ * @len: Length of data to add
+ *
+ * Returns: Pointer to start of added data
+ */
+u8 *skb_put(struct sk_buff *skb, u32 len)
+{
+    return __skb_put(skb, len);
+}
+
+/**
  * skb_reserve - Reserve space at the start of a socket buffer
  * @skb: Socket buffer
  * @len: Length to reserve
  */
-void skb_reserve(struct sk_buff *skb, u32 len)
+u8 *skb_reserve(struct sk_buff *skb, u32 len)
 {
     if (!skb) {
-        return;
+        return NULL;
     }
 
     skb->tail += len;
     skb->data += len;
+
+    return skb->data;
 }
 
 /**
@@ -579,7 +594,7 @@ void skb_queue_head(struct sk_buff_head *list, struct sk_buff *skb)
         return;
     }
 
-    spin_lock_irqsave(&list->lock, &flags);
+    spin_lock_irqsave(&list->lock, flags);
 
     skb->next = list->next;
     skb->prev = NULL;
@@ -609,7 +624,7 @@ void skb_queue_tail(struct sk_buff_head *list, struct sk_buff *skb)
         return;
     }
 
-    spin_lock_irqsave(&list->lock, &flags);
+    spin_lock_irqsave(&list->lock, flags);
 
     skb->next = NULL;
     skb->prev = list->last;
@@ -641,7 +656,7 @@ struct sk_buff *skb_dequeue(struct sk_buff_head *list)
         return NULL;
     }
 
-    spin_lock_irqsave(&list->lock, &flags);
+    spin_lock_irqsave(&list->lock, flags);
 
     skb = list->next;
     if (skb) {
@@ -677,7 +692,7 @@ struct sk_buff *skb_peek(struct sk_buff_head *list)
         return NULL;
     }
 
-    spin_lock_irqsave(&list->lock, &flags);
+    spin_lock_irqsave(&list->lock, flags);
     skb = list->next;
     spin_unlock_irqrestore(&list->lock, flags);
 
@@ -699,7 +714,7 @@ struct sk_buff *skb_dequeue_tail(struct sk_buff_head *list)
         return NULL;
     }
 
-    spin_lock_irqsave(&list->lock, &flags);
+    spin_lock_irqsave(&list->lock, flags);
 
     skb = list->last;
     if (skb) {

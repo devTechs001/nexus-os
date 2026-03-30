@@ -200,6 +200,41 @@ static inline s32 atomic_cmpxchg(atomic_t *v, s32 old, s32 new) {
 }
 */
 
+/* Low-level I/O functions */
+static inline void vga_outb(u16 port, u8 value) {
+    __asm__ __volatile__("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline u8 vga_inb(u16 port) {
+    u8 value;
+    __asm__ __volatile__("inb %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static inline void vga_outw(u16 port, u16 value) {
+    __asm__ __volatile__("outw %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline u16 vga_inw(u16 port) {
+    u16 value;
+    __asm__ __volatile__("inw %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static inline void vga_outl(u16 port, u32 value) {
+    __asm__ __volatile__("outl %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline u32 vga_inl(u16 port) {
+    u32 value;
+    __asm__ __volatile__("inl %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static inline void cpu_relax(void) {
+    __asm__ __volatile__("pause" ::: "memory");
+}
+
 /* Forward Declarations */
 struct process;
 struct thread;
@@ -227,9 +262,12 @@ void kernel_panic(const char *fmt, ...) __noreturn;
 int printk(const char *fmt, ...);
 
 #define pr_info(fmt, ...)    printk("[INFO] " fmt, ##__VA_ARGS__)
-#define pr_err(fmt, ...)     printk("[ERROR] " fmt, ##__VA_ARGS__)
-#define pr_debug(fmt, ...)   printk("[DEBUG] " fmt, ##__VA_ARGS__)
 #define pr_warn(fmt, ...)    printk("[WARN] " fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...)     printk("[ERR ] " fmt, ##__VA_ARGS__)
+#define pr_debug(fmt, ...)   printk("[DEBUG] " fmt, ##__VA_ARGS__)
+#define pr_emerg(fmt, ...)   printk("[EMERG] " fmt, ##__VA_ARGS__)
+#define pr_alert(fmt, ...)   printk("[ALERT] " fmt, ##__VA_ARGS__)
+#define pr_crit(fmt, ...)    printk("[CRIT ] " fmt, ##__VA_ARGS__)
 
 /* Memory */
 void *kmalloc(size_t size);
@@ -238,10 +276,23 @@ void kfree(void *ptr);
 
 /* String */
 size_t strlen(const char *s);
+size_t strnlen(const char *s, size_t max);
 char *strcpy(char *dest, const char *src);
+char *strncpy(char *dest, const char *src, size_t n);
 int strcmp(const char *s1, const char *s2);
+int strncmp(const char *s1, const char *s2, size_t n);
+char *strchr(const char *s, int c);
+char *strrchr(const char *s, int c);
+char *strstr(const char *haystack, const char *needle);
+char *strcat(char *dest, const char *src);
+char *strncat(char *dest, const char *src, size_t n);
+char *kstrdup(const char *s);
+char *strtok_r(char *str, const char *delim, char **saveptr);
+int snprintf(char *str, size_t size, const char *fmt, ...);
 void *memcpy(void *dest, const void *src, size_t n);
 void *memset(void *s, int c, size_t n);
+void *memmove(void *dest, const void *src, size_t n);
+int memcmp(const void *s1, const void *s2, size_t n);
 
 /* Per-CPU */
 percpu_data_t *get_percpu(void);
@@ -303,8 +354,30 @@ typedef enum ipi_type {
 void send_ipi(u32 cpu, ipi_type_t type);
 
 /* Time */
+u64 arch_get_ticks(void);
 u64 get_ticks(void);
 u64 get_time_ms(void);
 void delay_ms(u64 ms);
+
+/* Spinlock functions (implemented in sync/spinlock.c) */
+void spinlock_init(spinlock_t *lock);
+void spinlock_lock(spinlock_t *lock);
+void spinlock_unlock(spinlock_t *lock);
+bool spinlock_trylock(spinlock_t *lock);
+void spinlock_lock_irqsave(spinlock_t *lock, u64 *flags);
+void spinlock_unlock_irqrestore(spinlock_t *lock, u64 flags);
+void spinlock_lock_irq(spinlock_t *lock);
+void spinlock_unlock_irq(spinlock_t *lock);
+
+/* Spinlock compatibility macros */
+#define spin_lock_init(lock)            spinlock_init(lock)
+#define spin_lock(lock)                 spinlock_lock(lock)
+#define spin_unlock(lock)               spinlock_unlock(lock)
+#define spin_trylock(lock)              spinlock_trylock(lock)
+#define spin_lock_irq(lock)             spinlock_lock_irq(lock)
+#define spin_unlock_irq(lock)           spinlock_unlock_irq(lock)
+#define spin_lock_irqsave(lock, flags)  spinlock_lock_irqsave(lock, &(flags))
+#define spin_unlock_irqrestore(lock, f) spinlock_unlock_irqrestore(lock, f)
+#define spin_is_locked(lock)            spinlock_is_locked(lock)
 
 #endif /* _NEXUS_KERNEL_H */

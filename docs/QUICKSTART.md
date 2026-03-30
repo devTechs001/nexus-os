@@ -53,19 +53,56 @@ Output:
 ### 2. Run in VMware (RECOMMENDED)
 
 ```bash
-make run-vmware
+make run-vm
 ```
 
 **What happens:**
 - Creates VM at `~/vmware-vm/NEXUS-OS/`
-- Configures 2GB RAM, 2 CPUs
+- Configures 2GB RAM, 2 CPUs (default)
 - Attaches NEXUS OS ISO
 - Launches VMware automatically
 - Boots with VMware Mode (default)
 
 **Subsequent runs** reuse the existing VM.
 
-### 3. Run in QEMU
+### 3. VMware Presets
+
+NEXUS OS supports different VM configurations:
+
+```bash
+# Minimal - 1 CPU, 1GB RAM
+make run-vm-minimal
+
+# Standard - 2 CPUs, 2GB RAM (default)
+make run-vm
+
+# Performance - 4 CPUs, 4GB RAM
+make run-vm-performance
+```
+
+### 4. VMware VM Management
+
+```bash
+# Start VM
+make vm-start
+
+# Stop VM
+make vm-stop
+
+# Reset VM
+make vm-reset
+
+# List running VMs
+make vm-list
+
+# Delete VM
+make vm-delete
+
+# Rebuild VM with new ISO
+make vm-rebuild
+```
+
+### 5. Run in QEMU
 
 ```bash
 make run

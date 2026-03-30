@@ -191,8 +191,13 @@ static void free_page_table(u64 *pt)
 /*===========================================================================*/
 
 /**
- * vmm_get_pml4 - Get pointer to PML4 entry
+ * vmm_get_pml4 - Get pointer to PML4 entry for virtual address
+ * @vaddr: Virtual address to get PML4 entry for
+ * 
+ * Returns pointer to PML4 entry, or NULL if address is invalid.
+ * This is the first level of the x86_64 page table hierarchy.
  */
+__attribute__((used))
 static u64 *vmm_get_pml4(virt_addr_t vaddr)
 {
     u64 idx = get_pml4_index(vaddr);
@@ -269,8 +274,14 @@ static u64 *vmm_get_pd(u64 *pdpte, bool create)
 }
 
 /**
- * vmm_get_pt - Get pointer to PT entry
+ * vmm_get_pt - Get pointer to page table entry
+ * @pde: Page directory entry
+ * @create: Whether to create if not present
+ * 
+ * Returns pointer to page table, allocating a new one if needed.
+ * This is the fourth level of the x86_64 page table hierarchy.
  */
+__attribute__((used))
 static u64 *vmm_get_pt(u64 *pde, bool create)
 {
     u64 *pt;

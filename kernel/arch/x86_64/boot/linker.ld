@@ -21,6 +21,16 @@ SECTIONS
     {
         *(.rodata)
         *(.rodata.*)
+
+        /* Initcall sections */
+        . = ALIGN(8);
+        __initcall_start = .;
+        *(.initcall_0)
+        *(.initcall_1)
+        *(.initcall_2)
+        *(.initcall_3)
+        *(.initcall_4)
+        __initcall_end = .;
     }
 
     /* Initialized data */

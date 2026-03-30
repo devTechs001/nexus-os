@@ -10,6 +10,7 @@
 #include "../widgets/widgets.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
+#include "../../kernel/sched/sched.h"
 
 /*===========================================================================*/
 /*                         GLOBAL ONBOARDING WIZARD INSTANCE                 */
@@ -866,15 +867,15 @@ int onboarding_wizard_goto_page(onboarding_wizard_t *wizard, u32 page_id)
         return -EINVAL;
     }
     
-    onboarding_page_t *current = &wizard->pages[wizard->current_page];
+    onboarding_page_t *curr_page = &wizard->pages[wizard->current_page];
     onboarding_page_t *next = &wizard->pages[page_id];
     
     printk("[ONBOARD] Navigating to page %d: %s\n", page_id, next->title);
     
     /* Call on_leave for current page */
-    if (current && current->on_leave) {
-        current->page_times[wizard->current_page] = get_time_ms();
-        if (!current->on_leave(current)) {
+    if (curr_page && curr_page->on_leave) {
+        wizard->page_times[wizard->current_page] = get_time_ms();
+        if (!curr_page->on_leave(curr_page)) {
             printk("[ONBOARD] Page %d on_leave returned false\n", wizard->current_page);
         }
     }
@@ -925,11 +926,11 @@ int onboarding_wizard_next_page(onboarding_wizard_t *wizard)
 {
     if (!wizard) return -EINVAL;
     
-    onboarding_page_t *current = &wizard->pages[wizard->current_page];
+    onboarding_page_t *curr_page = &wizard->pages[wizard->current_page];
     
     /* Call on_next handler */
-    if (current->on_next) {
-        if (!current->on_next(current)) {
+    if (curr_page->on_next) {
+        if (!curr_page->on_next(curr_page)) {
             return -1;
         }
     }
@@ -952,11 +953,11 @@ int onboarding_wizard_previous_page(onboarding_wizard_t *wizard)
 {
     if (!wizard) return -EINVAL;
     
-    onboarding_page_t *current = &wizard->pages[wizard->current_page];
+    onboarding_page_t *curr_page = &wizard->pages[wizard->current_page];
     
     /* Call on_back handler */
-    if (current->on_back) {
-        if (!current->on_back(current)) {
+    if (curr_page->on_back) {
+        if (!curr_page->on_back(curr_page)) {
             printk("[ONBOARD] Page %d on_back returned false\n", wizard->current_page);
         }
     }

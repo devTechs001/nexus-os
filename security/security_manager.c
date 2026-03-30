@@ -1705,6 +1705,69 @@ void security_dump_contexts(void)
 }
 
 /**
+ * security_policy_register - Register a security policy
+ * @policy: Policy to register
+ *
+ * Returns: Policy ID on success, error code on failure
+ */
+s32 security_policy_register(security_policy_t *policy)
+{
+    u32 i;
+
+    if (!policy) return -EINVAL;
+
+    spin_lock(&policy_table_lock);
+
+    for (i = 0; i < SECURITY_MAX_POLICIES; i++) {
+        if (security_policy_table[i] == NULL) {
+            policy->id = i;
+            security_policy_table[i] = policy;
+            g_security_manager.policy_count++;
+            spin_unlock(&policy_table_lock);
+            return (s32)i;
+        }
+    }
+
+    spin_unlock(&policy_table_lock);
+    return -ENOMEM;
+}
+
+/**
+ * security_policy_unregister - Unregister a security policy
+ * @policy_id: ID of the policy to unregister
+ *
+ * Returns: OK on success, error code on failure
+ */
+s32 security_policy_unregister(u32 policy_id)
+{
+    if (policy_id >= SECURITY_MAX_POLICIES) return -EINVAL;
+
+    spin_lock(&policy_table_lock);
+
+    if (security_policy_table[policy_id] != NULL) {
+        security_policy_table[policy_id] = NULL;
+        g_security_manager.policy_count--;
+        spin_unlock(&policy_table_lock);
+        return OK;
+    }
+
+    spin_unlock(&policy_table_lock);
+    return -ENOENT;
+}
+
+/**
+ * security_policy_get - Get a security policy by ID
+ * @policy_id: ID of the policy to get
+ *
+ * Returns: Policy pointer or NULL if not found
+ */
+security_policy_t *security_policy_get(u32 policy_id)
+{
+    if (policy_id >= SECURITY_MAX_POLICIES) return NULL;
+    return security_policy_table[policy_id];
+}
+
+/**
  * security_dump_policies - Dump all security policies
  */
 void security_dump_policies(void)

@@ -7,6 +7,10 @@
 
 #include "../include/kernel.h"
 
+/* Forward declarations */
+typedef void (*initcall_t)(void);
+static void do_initcalls(void);
+
 /*===========================================================================*/
 /*                         INITIALIZATION LEVELS                             */
 /*===========================================================================*/
@@ -38,32 +42,127 @@ static init_level_t current_init_level = INIT_LEVEL_EARLY;
 /*===========================================================================*/
 
 /* External initialization functions */
-extern void mm_init(void);
+extern void pmm_init(void);
+extern void vmm_init(void);
+extern void heap_init(void);
+extern void heap_early_init(void);
+extern void slab_init(void);
 extern void scheduler_init(void);
 extern void process_init(void);
 extern void ipc_init(void);
+extern void sync_init(void);
 extern void vfs_init(void);
+extern void storage_init(void);
 extern void network_init(void);
-extern void security_init(void);
+extern int protocol_init(void);
+extern int inference_init(void);
+extern int iot_init(void);
+extern int container_init(void);
+extern int telephony_init(void);
+extern void security_core_init(void);
+extern void power_init(void);
+extern int hypervisor_init(void);
+extern void syscall_init(void);
+extern void graphics_init(void);
+extern void acpi_init(void);
+extern void interrupt_init(void);
+extern void percpu_init(void);
+extern void pmm_early_init(void);
+extern void console_init(void);
+extern void driver_early_init(void);
+extern void driver_late_init(void);
+extern int input_init(void);
 
 /* Architecture-specific initialization */
 extern void arch_early_init(void);
 extern void arch_late_init(void);
 extern void arch_init_cpus(void);
+extern void arch_init_gdt(void);
+extern void arch_init_idt(void);
+extern void arch_init_paging(void);
+extern void arch_init_timer(u64 freq);
+extern void arch_init_smp(void);
+extern void arch_enable_interrupts(void);
 
-/* Driver initialization */
-extern void driver_early_init(void);
-extern void driver_late_init(void);
+extern void create_init_process(void);
+
+/**
+ * init_process_start - Start the first userspace process (init)
+ */
+void init_process_start(void)
+{
+    pr_info("Starting init process (PID 1)...\n");
+    create_init_process();
+}
+
+extern struct task_struct *task_create(const char *name, void (*fn)(void *), void *arg);
+extern void task_wake_up(struct task_struct *task);
+
+static void service_manager_thread(void *arg)
+{
+    (void)arg;
+    pr_info("Service Manager started.\n");
+    while (1) {
+        /* Service management loop */
+        delay_ms(1000);
+    }
+}
+
+/**
+ * service_manager_start - Start the system service manager
+ */
+void service_manager_start(void)
+{
+    pr_info("Starting service manager...\n");
+    struct task_struct *sm = task_create("servicemanager", service_manager_thread, NULL);
+    if (sm) {
+        task_wake_up(sm);
+    }
+}
+
+/* GUI and Userspace */
+typedef struct login_screen login_screen_t;
+typedef struct onboarding_wizard onboarding_wizard_t;
+
+/* Use real instances from GUI modules if they exist, otherwise null stubs */
+extern int gui_framework_init(void);
+extern int desktop_init_global(void);
+extern login_screen_t *login_screen_get_instance(void);
+extern int login_screen_init(login_screen_t *screen);
+extern int login_screen_run(login_screen_t *screen);
+extern onboarding_wizard_t *onboarding_wizard_get_instance(void);
+extern int onboarding_wizard_init(onboarding_wizard_t *wizard);
+extern int onboarding_wizard_run(onboarding_wizard_t *wizard);
+
+/* Initcall sections */
+extern initcall_t __initcall_start[], __initcall_end[];
 
 /*===========================================================================*/
 /*                     KERNEL INITIALIZATION                                 */
 /*===========================================================================*/
 
+/* Kernel state access */
+extern struct {
+    const char *version;
+    const char *codename;
+    u64 boot_time;
+    volatile u32 state;
+    u64 mem_total;
+    u64 mem_used;
+    u32 cpu_count;
+    bool smp_enabled;
+    bool virt_enabled;
+    bool is_vmware;
+    bool is_virtualbox;
+    bool is_qemu;
+    bool is_hyperv;
+    char virt_mode[16];
+} kernel_state;
+
+extern void detect_virtualization(void);
+
 /**
  * kernel_init_early - Early kernel initialization
- * 
- * Called immediately after bootloader handoff. Sets up minimal
- * environment needed for further initialization.
  */
 void kernel_init_early(void)
 {
@@ -71,14 +170,33 @@ void kernel_init_early(void)
     
     pr_info("Early kernel initialization...\n");
     
-    /* Architecture-specific early init */
+    /* 1. Architecture-specific early init */
     arch_early_init();
     
-    /* Initialize console output */
-    printk_init();
+    /* 2. Initialize console output */
+    console_init();
     
-    /* Initialize kernel memory */
-    mm_early_init();
+    /* 3. Initialize early kernel memory */
+    pmm_early_init();
+
+    /* 4. Detect virtualization environment EARLY */
+    detect_virtualization();
+
+    /* 5. Basic CPU structures */
+    pr_info("  Initializing GDT & IDT...\n");
+    arch_init_gdt();
+    arch_init_idt();
+
+    /* 6. Print virtualization status */
+    if (kernel_state.is_vmware) {
+        pr_info("[VM] VMware environment detected\n");
+    } else if (kernel_state.is_virtualbox) {
+        pr_info("[VM] VirtualBox environment detected\n");
+    } else if (kernel_state.is_qemu) {
+        pr_info("[VM] QEMU environment detected\n");
+    } else {
+        pr_info("[OK] Running on bare metal (%s mode)\n", kernel_state.virt_mode);
+    }
     
     current_init_level = INIT_LEVEL_CPU;
 }
@@ -90,14 +208,23 @@ void kernel_init_cpus(void)
 {
     pr_info("Initializing CPU subsystems...\n");
     
-    /* Initialize boot CPU */
+    /* 1. Initialize boot CPU */
     arch_init_cpus();
     
-    /* Initialize per-CPU data */
+    /* 2. Initialize per-CPU data */
     percpu_init();
     
-    /* Initialize interrupt controllers */
+    /* 3. Initialize interrupt controllers */
     interrupt_init();
+    
+    /* 4. Initialize system timer (1 GHz default) */
+    arch_init_timer(1000000000);
+
+    /* 5. Initialize ACPI */
+    acpi_init();
+
+    /* 6. Initialize SMP */
+    arch_init_smp();
     
     current_init_level = INIT_LEVEL_INTERRUPTS;
 }
@@ -109,27 +236,34 @@ void kernel_init_subsystems(void)
 {
     pr_info("Initializing kernel subsystems...\n");
     
-    /* Memory management */
-    pr_info("  Memory management...\n");
-    mm_init();
+    /* 1. Memory management (Complete) */
+    pr_info("  Memory management (PMM, Paging, VMM, Heap, Slab)...\n");
+    pmm_init();
+    arch_init_paging();
+    vmm_init();
+    heap_init();
+    slab_init();
     
-    /* Scheduler */
+    /* 2. Scheduler */
     pr_info("  Scheduler...\n");
     scheduler_init();
     
-    /* Process management */
+    /* 3. Process management */
     pr_info("  Process management...\n");
     process_init();
     
-    /* IPC */
+    /* 4. IPC */
     pr_info("  IPC...\n");
     ipc_init();
     
-    /* Synchronization primitives */
+    /* 5. Synchronization primitives */
     sync_init();
     
-    /* Syscall interface */
+    /* 6. Syscall interface */
     syscall_init();
+
+    /* 7. Enable interrupts globally */
+    arch_enable_interrupts();
     
     current_init_level = INIT_LEVEL_SUBSYSTEMS;
 }
@@ -154,12 +288,17 @@ void kernel_init_drivers(void)
     /* Network */
     pr_info("  Network...\n");
     network_init();
+    if (protocol_init() != 0) {
+        pr_err("  Failed to initialize network protocols.\n");
+    }
     
     /* Graphics */
     graphics_init();
     
     /* Input devices */
-    input_init();
+    if (input_init() != 0) {
+        pr_err("  Failed to initialize input devices.\n");
+    }
     
     /* Late driver initialization */
     driver_late_init();
@@ -175,13 +314,38 @@ void kernel_init_late(void)
     pr_info("Late kernel initialization...\n");
     
     /* Security subsystem */
-    security_init();
+    security_core_init();
     
     /* Power management */
     power_init();
     
     /* Virtualization */
-    hypervisor_init();
+    if (hypervisor_init() != 0) {
+        pr_warn("  Failed to initialize hypervisor.\n");
+    }
+    
+    /* AI/ML Inference */
+    if (inference_init() != 0) {
+        pr_err("  Failed to initialize inference engine.\n");
+    }
+    
+    /* IoT Stack */
+    if (iot_init() != 0) {
+        pr_err("  Failed to initialize IoT stack.\n");
+    }
+    
+    /* Containers */
+    if (container_init() != 0) {
+        pr_err("  Failed to initialize container runtime.\n");
+    }
+    
+    /* Mobile Telephony */
+    if (telephony_init() != 0) {
+        pr_err("  Failed to initialize telephony manager.\n");
+    }
+    
+    /* Execute registered initcalls */
+    do_initcalls();
     
     /* Architecture-specific late init */
     arch_late_init();
@@ -196,11 +360,37 @@ void kernel_init_userspace(void)
 {
     pr_info("Initializing userspace...\n");
     
-    /* Start init process */
+    /* 1. Start init process */
     init_process_start();
     
-    /* Start service manager */
+    /* 2. Start service manager */
     service_manager_start();
+
+    /* 3. Initialize GUI components (Login / Onboarding) */
+    boot_params_t *params = get_boot_params();
+    if (params && params->graphics_mode) {
+        pr_info("  Initializing GUI components...\n");
+        
+        /* Initialize GUI framework (Renderer, Compositor) */
+        gui_framework_init();
+
+        /* Initialize Desktop Environment */
+        desktop_init_global();
+
+        /* Check if onboarding is needed (first boot) */
+        onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
+        if (wizard) {
+            onboarding_wizard_init(wizard);
+            onboarding_wizard_run(wizard);
+        }
+
+        /* Initialize login screen */
+        login_screen_t *login = login_screen_get_instance();
+        if (login) {
+            login_screen_init(login);
+            login_screen_run(login);
+        }
+    }
     
     pr_info("Userspace initialization complete.\n");
 }
@@ -252,8 +442,6 @@ void kernel_main_init(void)
 /**
  * initcall - Register initialization function
  */
-typedef void (*initcall_t)(void);
-
 #define DEFINE_INITCALL(fn, level) \
     static initcall_t __initcall_##fn __section(".initcall_" #level) = fn
 
@@ -265,15 +453,27 @@ typedef void (*initcall_t)(void);
 
 /**
  * do_initcalls - Execute all registered initcalls
+ * 
+ * Executes all initialization functions registered via initcall macros.
+ * This is called during kernel initialization to run all subsystem init functions.
  */
+__attribute__((used))
 static void do_initcalls(void)
 {
     extern initcall_t __initcall_start[], __initcall_end[];
     initcall_t *call;
+    u32 count = 0;
+
+    pr_info("Executing initcalls...\n");
     
     for (call = __initcall_start; call < __initcall_end; call++) {
-        (*call)();
+        if (*call) {
+            (*call)();
+            count++;
+        }
     }
+    
+    pr_info("Executed %u initcalls\n", count);
 }
 
 /*===========================================================================*/

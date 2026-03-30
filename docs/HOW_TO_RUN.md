@@ -76,6 +76,27 @@ make run-qemu
 make run-debug
 ```
 
+### Option 1b: VMware (Enhanced)
+
+```bash
+# Standard VMware VM (default)
+make run-vm
+
+# Minimal resources (1 CPU, 1GB RAM)
+make run-vm-minimal
+
+# Maximum performance (4 CPUs, 4GB RAM)
+make run-vm-performance
+
+# VMware VM Management
+make vm-start     # Start VM
+make vm-stop      # Stop VM
+make vm-reset     # Reset VM
+make vm-list      # List running VMs
+make vm-delete    # Delete VM
+make vm-rebuild   # Rebuild with new ISO
+```
+
 ### Option 2: Manual QEMU Command
 
 Use `-boot d` so QEMU boots from the CD-ROM (avoids "no bootable device"):

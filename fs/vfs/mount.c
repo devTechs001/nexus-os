@@ -267,7 +267,7 @@ static s32 vfs_do_mount(struct vfs_filesystem *fs, u32 flags, const char *dev_na
         /* Initialize superblock */
         sb->magic = VFS_MAGIC;
         sb->s_dev = 0; /* TODO: Get from dev_name */
-        sb->s_type = fs->fs_type;
+        sb->s_type = fs;
         sb->s_flags = flags;
         sb->s_op = fs->fs_op;
         sb->s_mount = mnt;
@@ -764,11 +764,11 @@ void vfs_mount_dump(void)
                    mount->mnt_mountpoint);
 
             if (mount->mnt_sb) {
-                printk("         Superblock: dev=%u, type=%u, inodes=%llu/%llu\n",
+                printk("         Superblock: dev=%u, type=%s, inodes=%llu/%llu\n",
                        (u32)mount->mnt_sb->s_dev,
-                       mount->mnt_sb->s_type,
-                       (unsigned long long)(mount->mnt_sb->s_inodes - mount->mnt_sb->s_free_inodes),
-                       (unsigned long long)mount->mnt_sb->s_inodes);
+                       mount->mnt_sb->s_type ? mount->mnt_sb->s_type->name : "none",
+                       (unsigned long long)(mount->mnt_sb->s_inodes_total - mount->mnt_sb->s_free_inodes),
+                       (unsigned long long)mount->mnt_sb->s_inodes_total);
             }
 
             count++;
@@ -808,7 +808,7 @@ s32 vfs_mount_info(struct vfs_mount *mount, struct vfs_mount_info *info)
         info->s_size = mount->mnt_sb->s_size;
         info->s_free = mount->mnt_sb->s_free_blocks;
         info->s_bsize = mount->mnt_sb->s_bsize;
-        info->s_inodes = mount->mnt_sb->s_inodes;
+        info->s_inodes = mount->mnt_sb->s_inodes_total;
         info->s_free_inodes = mount->mnt_sb->s_free_inodes;
 
         if (mount->mnt_sb->s_dev_name) {

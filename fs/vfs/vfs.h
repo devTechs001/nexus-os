@@ -26,6 +26,30 @@
 #define VFS_DENTRY_HASH_BITS    12
 #define VFS_DENTRY_HASH_SIZE    (1 << VFS_DENTRY_HASH_BITS)
 
+/**
+ * vfs_inode_hash - Get hash bucket for inode
+ */
+static inline u32 vfs_inode_hash(dev_t dev, u64 ino)
+{
+    u64 hash = (u64)dev ^ ino;
+    hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+    hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+    hash = (hash >> 16) ^ hash;
+    return (u32)(hash & (VFS_INODE_HASH_SIZE - 1));
+}
+
+/**
+ * vfs_dentry_hash - Get hash bucket for dentry
+ */
+static inline u32 vfs_dentry_hash(void *parent, const char *name)
+{
+    u64 hash = (u64)parent;
+    while (*name) {
+        hash = (hash << 5) + hash + *name++;
+    }
+    return (u32)(hash & (VFS_DENTRY_HASH_SIZE - 1));
+}
+
 /* Cache Configuration */
 #define VFS_INODE_CACHE_SIZE    4096
 #define VFS_DENTRY_CACHE_SIZE   8192
@@ -99,6 +123,8 @@
 #define VFS_MOUNT_BIND          0x00000100
 #define VFS_MOUNT_MOVE          0x00000200
 
+typedef s32 (*filldir_t)(void *dirent, const char *name, int namelen, u64 offset, u64 ino, u32 d_type);
+
 /* Seek Positions */
 #define VFS_SEEK_SET            0
 #define VFS_SEEK_CUR            1
@@ -126,6 +152,7 @@
 #define VFS_ENAMETOOLONG        (-26)
 #define VFS_EOVERFLOW           (-27)
 #define VFS_EBADF               (-28)
+#define VFS_ENFILE              (-29)
 
 /*===========================================================================*/
 /*                         FORWARD DECLARATIONS                              */
@@ -144,6 +171,93 @@ struct vfs_file_operations;
 struct vfs_superblock_operations;
 struct vfs_page_cache;
 struct vfs_buffer;
+struct vfs_stat;
+struct vfs_statfs;
+struct vfs_dirent;
+struct vfs_aiocb;
+struct vfs_pipe;
+struct seq_file;
+
+/**
+ * struct vfs_stat - File status structure
+ */
+struct vfs_stat {
+    dev_t st_dev;                     /* Device ID */
+    u64 st_ino;                       /* Inode number */
+    mode_t st_mode;                   /* File mode */
+    u32 st_nlink;                     /* Number of hard links */
+    uid_t st_uid;                     /* User ID */
+    gid_t st_gid;                     /* Group ID */
+    dev_t st_rdev;                    /* Device ID (if special file) */
+    s64 st_size;                      /* Total size in bytes */
+    s64 st_blksize;                   /* Block size for I/O */
+    s64 st_blocks;                    /* Number of 512B blocks allocated */
+    time_t st_atime;                  /* Last access time */
+    time_t st_mtime;                  /* Last modification time */
+    time_t st_ctime;                  /* Last status change time */
+};
+
+/**
+ * struct vfs_statfs - Filesystem statistics structure
+ */
+struct vfs_statfs {
+    u32 f_type;                       /* Filesystem type */
+    u32 f_bsize;                      /* Optimal transfer block size */
+    u64 f_blocks;                     /* Total data blocks in filesystem */
+    u64 f_bfree;                      /* Free blocks in filesystem */
+    u64 f_bavail;                     /* Free blocks available to non-privileged users */
+    u64 f_files;                      /* Total file nodes in filesystem */
+    u64 f_ffree;                      /* Free file nodes in filesystem */
+    u32 f_fsid[2];                    /* Filesystem ID */
+    u32 f_namelen;                    /* Maximum length of filenames */
+    u32 f_frsize;                     /* Fragment size */
+    u32 f_flags;                      /* Mount flags of filesystem */
+    u32 f_spare[4];                   /* Spare for later use */
+};
+
+/**
+ * struct vfs_dirent - Directory entry structure
+ */
+struct vfs_dirent {
+    u64 d_ino;                        /* Inode number */
+    u64 d_off;                        /* Offset to next dirent */
+    u16 d_reclen;                     /* Length of this record */
+    u8 d_type;                        /* Type of file */
+    char d_name[256];                 /* Filename (null-terminated) */
+};
+
+/**
+ * struct vfs_aiocb - Async I/O control block
+ */
+struct vfs_aiocb {
+    int aio_fildes;                   /* File descriptor */
+    void *aio_buf;                    /* Data buffer */
+    u64 aio_nbytes;                   /* Number of bytes */
+    u64 aio_offset;                   /* File offset */
+    int aio_lio_opcode;               /* LIO opcode */
+    int aio_reqprio;                  /* Request priority */
+};
+
+/**
+ * struct vfs_pipe - VFS pipe structure
+ */
+struct vfs_pipe {
+    struct list_head list;            /* List of pipe buffers */
+    u32 count;                        /* Number of bytes in pipe */
+    u32 readers;                      /* Number of readers */
+    u32 writers;                      /* Number of writers */
+    spinlock_t lock;                  /* Pipe lock */
+};
+
+/**
+ * struct seq_file - Sequential file structure
+ */
+struct seq_file {
+    char *buf;                        /* Buffer for generated content */
+    u64 size;                         /* Buffer size */
+    u64 from;                         /* Start offset */
+    u64 count;                        /* Current size */
+};
 
 /*===========================================================================*/
 /*                         VFS STATISTICS                                    */
@@ -345,6 +459,14 @@ struct vfs_dentry {
 /*===========================================================================*/
 
 /**
+ * struct iovec - I/O vector for scatter/gather
+ */
+struct iovec {
+    void *iov_base;                   /* Pointer to data */
+    u64 iov_len;                      /* Length of data */
+};
+
+/**
  * struct vfs_file_operations - File operations
  *
  * Operations that can be performed on an open file.
@@ -465,7 +587,7 @@ struct vfs_superblock {
     /* Identity */
     dev_t s_dev;                      /* Device ID */
     u64 s_magic;                      /* Filesystem magic number */
-    u32 s_type;                       /* Filesystem type */
+    u32 s_type_id;                    /* Filesystem type ID */
 
     /* Size Information */
     u64 s_size;                       /* Total size in bytes */
@@ -474,7 +596,7 @@ struct vfs_superblock {
     u64 s_bsize;                      /* Block size */
 
     /* Inode Information */
-    u64 s_inodes;                     /* Total inodes */
+    u64 s_inodes_total;               /* Total inodes */
     u64 s_free_inodes;                /* Free inodes */
     u64 s_ino;                        /* Next inode number */
 
@@ -529,6 +651,7 @@ struct vfs_mount {
     struct vfs_dentry *mnt_mountpoint; /* Dentry of mount point */
     struct vfs_dentry *mnt_root;      /* Root dentry of mounted fs */
     struct vfs_superblock *mnt_sb;    /* Superblock */
+    time_t mnt_time;                  /* Mount time */
 
     /* Parent Mount */
     struct vfs_mount *mnt_parent;     /* Parent mount */
@@ -551,6 +674,24 @@ struct vfs_mount {
 
     /* Magic number for validation */
     u32 magic;                        /* Must be VFS_MAGIC */
+};
+
+/**
+ * struct vfs_mount_info - Mount information for userspace
+ */
+struct vfs_mount_info {
+    u32 mnt_id;
+    u32 mnt_flags;
+    u32 mnt_count;
+    char mnt_point[256];
+    char fs_type[32];
+    u32 s_dev;
+    u64 s_size;
+    u64 s_free;
+    u32 s_bsize;
+    u64 s_inodes;
+    u64 s_free_inodes;
+    char s_dev_name[128];
 };
 
 /*===========================================================================*/
@@ -786,5 +927,7 @@ u64 vfs_hash_string(const char *str, u64 len);
 /* Statistics Functions */
 void vfs_stats_print(void);
 void vfs_dump_info(void);
+
+extern struct vfs_global vfs_global;
 
 #endif /* _NEXUS_VFS_H */

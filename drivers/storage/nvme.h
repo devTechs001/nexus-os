@@ -82,17 +82,17 @@
 
 /* Controller Capabilities (CAP) */
 #define NVME_CAP_MQES_SHIFT         0
-#define NVME_CAP_MQES_MASK          (0xFFFF << NVME_CAP_MQES_SHIFT)
-#define NVME_CAP_TO                 (1 << 16)   /* Timeout */
+#define NVME_CAP_MQES_MASK          (0xFFFFULL << NVME_CAP_MQES_SHIFT)
+#define NVME_CAP_TO                 (1ULL << 16)   /* Timeout */
 #define NVME_CAP_DSTRD_SHIFT        32          /* Doorbell Stride */
-#define NVME_CAP_DSTRD_MASK         (0xF << NVME_CAP_DSTRD_SHIFT)
-#define NVME_CAP_NSSRS              (1 << 36)   /* NVM Subsystem Reset Supported */
-#define NVME_CAP_MSS                (1 << 37)   /* Memory Space Supported */
+#define NVME_CAP_DSTRD_MASK         (0xFULL << NVME_CAP_DSTRD_SHIFT)
+#define NVME_CAP_NSSRS              (1ULL << 36)   /* NVM Subsystem Reset Supported */
+#define NVME_CAP_MSS                (1ULL << 37)   /* Memory Space Supported */
 #define NVME_CAP_CSS_SHIFT          40          /* Command Sets Supported */
-#define NVME_CAP_CSS_MASK           (0xFF << NVME_CAP_CSS_SHIFT)
-#define NVME_CAP_BPS                (1 << 48)   /* Boot Partition Support */
-#define NVME_CAP_PMRS               (1 << 56)   /* Persistent Memory Region Supported */
-#define NVME_CAP_CMBS               (1 << 57)   /* Controller Memory Buffer Supported */
+#define NVME_CAP_CSS_MASK           (0xFFULL << NVME_CAP_CSS_SHIFT)
+#define NVME_CAP_BPS                (1ULL << 48)   /* Boot Partition Support */
+#define NVME_CAP_PMRS               (1ULL << 56)   /* Persistent Memory Region Supported */
+#define NVME_CAP_CMBS               (1ULL << 57)   /* Controller Memory Buffer Supported */
 
 /* Admin Queue Attributes (AQA) */
 #define NVME_AQA_ASQS_SHIFT         0           /* Admin Submission Queue Size */
@@ -428,7 +428,7 @@ typedef struct __packed {
     u32 hmminds;                /* Host Memory Buffer Minimum Descriptor Size */
     u16 hmmaxd;                 /* Host Memory Buffer Maximum Descriptors */
     u16 nsetid;                 /* NVM Set Identifier Maximum */
-    u16 cntlid;                 /* Controller ID Maximum */
+    u16 cntlid_max;             /* Controller ID Maximum */
     u8 rsvd340[172];
     
     /* I/O Command Set Attributes */

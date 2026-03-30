@@ -8,6 +8,13 @@
 #include "../hal.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declarations for x86 architecture-specific functions */
+#if defined(ARCH_X86_64)
+extern u32 x86_get_cpu_id(void);
+extern u32 x86_get_apic_id(void);
+extern u32 x86_cpu_get_frequency(u32 cpu_id);
+#endif
+
 /*===========================================================================*/
 /*                         CPU CORE DATA STRUCTURES                          */
 /*===========================================================================*/

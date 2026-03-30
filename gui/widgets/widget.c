@@ -157,9 +157,9 @@ widget_t *widget_create(const char *type, widget_t *parent)
     widget->checked = false;
 
     /* Default colors */
-    widget->foreground = (color_t)COLOR_BLACK;
-    widget->background = (color_t)COLOR_WHITE;
-    widget->border_color = (color_t){128, 128, 128, 255};
+    widget->foreground = (color_t){{0, 0, 0, 255}};
+    widget->background = (color_t){{255, 255, 255, 255}};
+    widget->border_color = (color_t){{128, 128, 128, 255}};
     widget->border_width = 1;
     widget->corner_radius = 0;
     widget->padding = 4;
@@ -516,6 +516,104 @@ int widget_set_visible(widget_t *widget, bool visible)
 }
 
 /**
+ * widget_show - Show a widget
+ * @widget: Widget
+ *
+ * Returns: 0 on success, error code on failure
+ */
+int widget_show(widget_t *widget)
+{
+    return widget_set_visible(widget, true);
+}
+
+/**
+ * widget_hide - Hide a widget
+ * @widget: Widget
+ *
+ * Returns: 0 on success, error code on failure
+ */
+int widget_hide(widget_t *widget)
+{
+    return widget_set_visible(widget, false);
+}
+
+/**
+ * widget_enable - Enable a widget
+ * @widget: Widget
+ *
+ * Returns: 0 on success, error code on failure
+ */
+int widget_enable(widget_t *widget)
+{
+    if (!widget) {
+        return -1;
+    }
+
+    widget->enabled = true;
+    widget->window.enabled = true;
+    widget->window.dirty = true;
+    
+    return 0;
+}
+
+/**
+ * widget_disable - Disable a widget
+ * @widget: Widget
+ *
+ * Returns: 0 on success, error code on failure
+ */
+int widget_disable(widget_t *widget)
+{
+    if (!widget) {
+        return -1;
+    }
+
+    widget->enabled = false;
+    widget->window.enabled = false;
+    widget->window.dirty = true;
+    
+    return 0;
+}
+
+/**
+ * widget_focus - Set focus to a widget
+ * @widget: Widget
+ *
+ * Returns: 0 on success, error code on failure
+ */
+int widget_focus(widget_t *widget)
+{
+    if (!widget) {
+        return -1;
+    }
+
+    widget->focused = true;
+    window_focus(&widget->window);
+    
+    return 0;
+}
+
+/**
+ * widget_set_font - Set widget font
+ * @widget: Widget
+ * @font_id: Font ID
+ * @font_size: Font size
+ *
+ * Returns: 0 on success, error code on failure
+ */
+int widget_set_font(widget_t *widget, u32 font_id, u32 font_size)
+{
+    if (!widget) {
+        return -1;
+    }
+
+    widget->font_size = font_size;
+    widget->window.dirty = true;
+    
+    return 0;
+}
+
+/**
  * widget_set_bounds - Set widget bounds
  * @widget: Widget
  * @x: X position
@@ -842,75 +940,89 @@ int widget_register_class(const char *name, widget_t *(*create)(void))
 /*===========================================================================*/
 
 /**
- * widget_create_button - Create a button widget
- * @text: Button text
- * @x: X position
- * @y: Y position
- * @width: Width
- * @height: Height
- *
- * Returns: Pointer to created button
+ * button_create - Create a button widget
  */
-widget_t *widget_create_button(const char *text, s32 x, s32 y, s32 width, s32 height)
+widget_t *button_create(widget_t *parent, const char *text, s32 x, s32 y, s32 width, s32 height)
 {
-    widget_t *button = widget_create("Button", NULL);
-    if (!button) {
-        return NULL;
-    }
-
+    widget_t *button = widget_create("Button", parent);
+    if (!button) return NULL;
     rect_t bounds = {x, y, width, height};
     widget_init(button, "Button", NULL, text, &bounds);
-
     button->corner_radius = 4;
     button->border_width = 1;
-
     return button;
 }
 
 /**
- * widget_create_label - Create a label widget
- * @text: Label text
- * @x: X position
- * @y: Y position
- * @width: Width
- * @height: Height
- *
- * Returns: Pointer to created label
+ * label_create - Create a label widget
  */
-widget_t *widget_create_label(const char *text, s32 x, s32 y, s32 width, s32 height)
+widget_t *label_create(widget_t *parent, const char *text, s32 x, s32 y, s32 width, s32 height)
 {
-    widget_t *label = widget_create("Label", NULL);
-    if (!label) {
-        return NULL;
-    }
-
+    widget_t *label = widget_create("Label", parent);
+    if (!label) return NULL;
     rect_t bounds = {x, y, width, height};
     widget_init(label, "Label", NULL, text, &bounds);
-
     label->border_width = 0;
-
     return label;
 }
 
 /**
- * widget_create_checkbox - Create a checkbox widget
- * @text: Checkbox text
- * @x: X position
- * @y: Y position
- *
- * Returns: Pointer to created checkbox
+ * checkbox_create - Create a checkbox widget
  */
-widget_t *widget_create_checkbox(const char *text, s32 x, s32 y)
+widget_t *checkbox_create(widget_t *parent, const char *text, s32 x, s32 y, s32 width, s32 height)
 {
-    widget_t *checkbox = widget_create("Checkbox", NULL);
-    if (!checkbox) {
-        return NULL;
-    }
-
-    rect_t bounds = {x, y, 20, 20};
+    widget_t *checkbox = widget_create("Checkbox", parent);
+    if (!checkbox) return NULL;
+    rect_t bounds = {x, y, width, height};
     widget_init(checkbox, "Checkbox", NULL, text, &bounds);
-
     checkbox->checked = false;
-
     return checkbox;
+}
+
+/**
+ * edit_create - Create an edit widget
+ */
+widget_t *edit_create(widget_t *parent, const char *text, s32 x, s32 y, s32 width, s32 height)
+{
+    widget_t *edit = widget_create("Edit", parent);
+    if (!edit) return NULL;
+    rect_t bounds = {x, y, width, height};
+    widget_init(edit, "Edit", NULL, text, &bounds);
+    return edit;
+}
+
+/**
+ * panel_create - Create a panel widget
+ */
+widget_t *panel_create(widget_t *parent, s32 x, s32 y, s32 width, s32 height)
+{
+    widget_t *panel = widget_create("Panel", parent);
+    if (!panel) return NULL;
+    rect_t bounds = {x, y, width, height};
+    widget_init(panel, "Panel", NULL, "", &bounds);
+    return panel;
+}
+
+/**
+ * progressbar_create - Create a progressbar widget
+ */
+widget_t *progressbar_create(widget_t *parent, s32 x, s32 y, s32 width, s32 height)
+{
+    widget_t *pb = widget_create("ProgressBar", parent);
+    if (!pb) return NULL;
+    rect_t bounds = {x, y, width, height};
+    widget_init(pb, "ProgressBar", NULL, "", &bounds);
+    return pb;
+}
+
+/**
+ * combobox_create - Create a combobox widget
+ */
+widget_t *combobox_create(widget_t *parent, s32 x, s32 y, s32 width, s32 height)
+{
+    widget_t *cb = widget_create("ComboBox", parent);
+    if (!cb) return NULL;
+    rect_t bounds = {x, y, width, height};
+    widget_init(cb, "ComboBox", NULL, "", &bounds);
+    return cb;
 }

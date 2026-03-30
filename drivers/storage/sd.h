@@ -398,6 +398,10 @@ typedef struct __packed {
     u8 pwr_cl_26_360;               /* [13] Power Class for 26MHz at 3.6V */
     u8 reserved_14;                 /* [14] Reserved */
     u8 reserved[168];               /* [15-182] Reserved */
+    u8 rpmb_size_mult;              /* [168] RPMB Size Multiplier */
+    u8 reserved_169[10];            /* [169-178] Reserved */
+    u8 partition_config;            /* [179] Partition Configuration */
+    u8 reserved_180[3];             /* [180-182] Reserved */
     u8 bus_width;                   /* [183] Bus Width */
     u8 strobe_support;              /* [184] Strobe Support */
     u8 reserved_185[8];             /* [185-192] Reserved */
@@ -408,6 +412,8 @@ typedef struct __packed {
     u8 hc_erase_grp_size;           /* [224] HC Erase Group Size */
     u8 hc_wp_grp_size;              /* [221] HC Write Protect Group Size */
     u8 reserved_222[2];             /* [222-223] Reserved */
+    u8 boot_size_mult;              /* [226] Boot Partition Size Multiplier */
+    u8 reserved_227[3];             /* [227-229] Reserved */
     u8 min_perf_r_26_26;            /* [230] Min Read Perf for 26MHz */
     u8 min_perf_w_26_26;            /* [231] Min Write Perf for 26MHz */
     u8 min_perf_r_52_52;            /* [232] Min Read Perf for 52MHz */
@@ -455,7 +461,7 @@ typedef struct __packed {
     u8 sd_spec4:1;
     u8 reserved3:3;
     u8 sd_spec5:1;
-    u8 reserved4:24;
+    u32 reserved4:24;
     u8 sd_spec6:1;
     u8 reserved5:7;
 } sd_scr_t;
@@ -508,6 +514,7 @@ typedef struct {
  */
 typedef struct sd_device {
     u32 device_id;                  /* Device ID */
+    u32 controller_id;              /* Controller ID */
     char name[32];                  /* Device Name */
     u32 card_type;                  /* Card Type */
     u32 card_state;                 /* Card State */

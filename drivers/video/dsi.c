@@ -116,12 +116,24 @@ static dsi_driver_t g_dsi;
 /*                         LOW-LEVEL DSI OPERATIONS                          */
 /*===========================================================================*/
 
+/**
+ * dsi_write_reg - Write to DSI controller register
+ * @reg: Register offset
+ * @value: Value to write
+ */
+__attribute__((used))
 static void dsi_write_reg(u32 reg, u32 value)
 {
     /* In real implementation, would write to DSI controller */
     (void)reg; (void)value;
 }
 
+/**
+ * dsi_read_reg - Read from DSI controller register
+ * @reg: Register offset
+ * Returns: Register value
+ */
+__attribute__((used))
 static u32 dsi_read_reg(u32 reg)
 {
     /* In real implementation, would read from DSI controller */
@@ -187,6 +199,14 @@ static int dsi_send_command(u8 cmd, u8 *params, u32 param_len)
 /*                         DSI COMMANDS                                      */
 /*===========================================================================*/
 
+/**
+ * dsi_cmd_nop - Send DSI No-Operation command
+ * 
+ * Sends a no-operation command to the DSI display.
+ * Used for testing communication and meeting timing requirements.
+ * Returns 0 on success.
+ */
+__attribute__((used))
 static int dsi_cmd_nop(void)
 {
     return dsi_send_command(DSI_CMD_NOP, NULL, 0);

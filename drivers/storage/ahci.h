@@ -298,7 +298,9 @@ typedef struct __packed {
     u32 prdtl;                /* PRDT Length */
     u32 prdbc;                /* PRDT Bytes Transferred */
     u32 ctba;                 /* Command Table Base Address (Low 32 bits) */
+    u32 ctbau;                /* Command Table Base Address (High 32 bits) */
     u32 reserved[4];          /* Reserved */
+    ahci_cmd_fis_t cfis;      /* Command FIS */
 } ahci_cmd_header_t;
 
 /**

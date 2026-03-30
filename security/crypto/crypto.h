@@ -382,8 +382,11 @@ s32 ecc_verify(ecc_context_t *ctx, const u8 *hash, u32 hash_len,
 /* Point Operations */
 s32 ecc_point_init(ecc_point_t *point, u32 size);
 void ecc_point_free(ecc_point_t *point);
-s32 ecc_point_add(ecc_point_t *r, const ecc_point_t *a, const ecc_point_t *b);
-s32 ecc_point_multiply(ecc_point_t *r, const ecc_point_t *p, const u8 *scalar, u32 scalar_len);
+s32 ecc_point_add(ecc_point_t *r, const ecc_point_t *p, const ecc_point_t *q,
+                  const u8 *prime, const u8 *a, u32 size);
+s32 ecc_point_multiply(ecc_point_t *r, const ecc_point_t *p,
+                       const u8 *scalar, u32 scalar_len,
+                       const u8 *prime, const u8 *a, u32 size);
 
 /*===========================================================================*/
 /*                         UTILITY FUNCTIONS                                 */

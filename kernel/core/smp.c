@@ -382,9 +382,9 @@ u32 topology_numa_node(u32 cpu)
 /*===========================================================================*/
 
 /**
- * cpu_get_stats - Get CPU statistics
+ * smp_get_cpu_stats - Get CPU statistics
  */
-void cpu_get_stats(u32 cpu, u64 *ticks, u64 *idle, u64 *kernel, u64 *user)
+void smp_get_cpu_stats(u32 cpu, u64 *ticks, u64 *idle, u64 *kernel, u64 *user)
 {
     if (cpu >= MAX_CPUS) {
         return;
@@ -477,13 +477,6 @@ int arch_cpu_down(u32 cpu)
 }
 
 /* Architecture stubs */
-void arch_send_ipi(u32 cpu, u32 vector)
-{
-    (void)cpu;
-    (void)vector;
-    /* In real implementation: send IPI via APIC */
-}
-
 void arch_scheduler_migrate(u32 cpu)
 {
     (void)cpu;

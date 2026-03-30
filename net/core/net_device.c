@@ -761,11 +761,11 @@ int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
         dev->stats.tx_bytes += skb->len;
         dev->last_tx_time = get_ticks();
 
-        NET_STAT_ADD(total_tx_packets, 1);
-        NET_STAT_ADD(total_tx_bytes, skb->len);
+        NET_STAT64_ADD(packets_out, 1);
+        NET_STAT64_ADD(bytes_out, skb->len);
     } else {
         dev->stats.tx_errors++;
-        NET_STAT_ADD(total_tx_errors, 1);
+        NET_STAT64_ADD(errors_out, 1);
     }
 
     return ret;
@@ -855,8 +855,8 @@ int netif_receive_skb(struct sk_buff *skb)
         dev->stats.rx_packets++;
         dev->stats.rx_bytes += skb->len;
 
-        NET_STAT_ADD(total_rx_packets, 1);
-        NET_STAT_ADD(total_rx_bytes, skb->len);
+        NET_STAT64_ADD(packets_in, 1);
+        NET_STAT64_ADD(bytes_in, skb->len);
     }
 
     /* In a full implementation, this would pass the packet up the stack */
@@ -1351,7 +1351,7 @@ int netdev_transmit(struct net_device *dev, struct sk_buff *skb)
     }
 
     /* Check if device is up and running */
-    if (!(dev->flags & NETDEV_FLAG_UP)) {
+    if (!(dev->flags & IFF_UP)) {
         return -ENETDOWN;
     }
 
@@ -1359,9 +1359,9 @@ int netdev_transmit(struct net_device *dev, struct sk_buff *skb)
     dev->stats.tx_packets++;
     dev->stats.tx_bytes += skb->len;
 
-    /* Call device's hard_start_xmit if available */
-    if (dev->hard_start_xmit) {
-        return dev->hard_start_xmit(skb, dev);
+    /* Call device's ndo_start_xmit if available */
+    if (dev->ops && dev->ops->ndo_start_xmit) {
+        return dev->ops->ndo_start_xmit(skb, dev);
     }
 
     /* Free the skb if no transmit function */

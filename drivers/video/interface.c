@@ -260,6 +260,14 @@ static void i2c_write(u32 bus, u32 addr, u8 reg, u8 data)
     (void)bus; (void)addr; (void)reg; (void)data;
 }
 
+/**
+ * i2c_read - Read from I2C device
+ * @bus: I2C bus number
+ * @addr: Device address
+ * @reg: Register to read
+ * Returns: Register value (0 if not available)
+ */
+__attribute__((used))
 static u8 i2c_read(u32 bus, u32 addr, u8 reg)
 {
     /* I2C read operation */

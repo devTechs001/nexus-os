@@ -259,9 +259,11 @@ s64 get_user(u64 *x, const u64 *ptr)
  * @nargs: Expected number of arguments
  *
  * Performs basic validation of syscall arguments.
+ * Checks for valid syscall number and argument count.
  *
  * Returns: 0 if valid, -EINVAL if invalid
  */
+__attribute__((used))
 static s64 syscall_validate_args(struct syscall_args *args, u32 nargs)
 {
     if (!args) {
@@ -282,16 +284,15 @@ static s64 syscall_validate_args(struct syscall_args *args, u32 nargs)
 /**
  * syscall_validate_ptr - Validate a user space pointer argument
  * @ptr: Pointer to validate
- * @size: Expected size of object
- * @flags: Validation flags
+ * @size: Expected size of object pointed to
+ * @flags: Validation flags (0x01=readable, 0x02=writable, 0x04=aligned)
  *
- * Validation flags:
- *   0x01 - Must be readable
- *   0x02 - Must be writable
- *   0x04 - Must be aligned
+ * Validates that a user space pointer is accessible and meets
+ * the specified requirements.
  *
  * Returns: 0 if valid, -EFAULT if invalid
  */
+__attribute__((used))
 static s64 syscall_validate_ptr(const void *ptr, size_t size, u32 flags)
 {
     if (!ptr) {

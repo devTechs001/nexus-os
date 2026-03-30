@@ -226,7 +226,7 @@ int ip_validate_addr(u32 addr)
  *
  * Returns: Port number in network byte order, or 0 on failure
  */
-static u16 ip_local_port_alloc(void)
+u16 ip_local_port_alloc(void)
 {
     u16 port;
     u32 offset;
@@ -256,7 +256,7 @@ static u16 ip_local_port_alloc(void)
  * ip_local_port_free - Free a local port
  * @port: Port number in network byte order
  */
-static void ip_local_port_free(u16 port)
+void ip_local_port_free(u16 port)
 {
     u16 p = ntohs(port);
     u32 offset;

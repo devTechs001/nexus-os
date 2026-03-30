@@ -32,7 +32,7 @@ static struct {
     u32 default_font_size;
     
     /* Font cache */
-    struct {
+    struct renderer_font {
         u32 id;
         char name[64];
         u32 size;
@@ -42,7 +42,7 @@ static struct {
     u32 next_font_id;
     
     /* Image cache */
-    struct {
+    struct renderer_image {
         u32 id;
         char path[256];
         void *surface;
@@ -329,6 +329,19 @@ int graphics_draw_line(graphics_context_t *ctx, s32 x1, s32 y1, s32 x2, s32 y2)
 }
 
 /**
+ * color_from_rgba - Create color from RGBA values
+ */
+color_t color_from_rgba(u8 r, u8 g, u8 b, u8 a)
+{
+    color_t color;
+    color.r = r;
+    color.g = g;
+    color.b = b;
+    color.a = a;
+    return color;
+}
+
+/**
  * graphics_draw_rect - Draw a rectangle outline
  * @ctx: Graphics context
  * @rect: Rectangle
@@ -347,15 +360,15 @@ int graphics_draw_rect(graphics_context_t *ctx, rect_t *rect)
     color.a = (color.a * ctx->alpha) / 255;
 
     /* Draw four lines */
-    renderer_draw_line_sw(ctx->surface, ctx->clip_rect.width, ctx->clip_rect.height,
+    renderer_draw_line_sw(ctx->surface, ctx->width, ctx->height,
                           rect->x, rect->y, rect->x + rect->width, rect->y, color);
-    renderer_draw_line_sw(ctx->surface, ctx->clip_rect.width, ctx->clip_rect.height,
+    renderer_draw_line_sw(ctx->surface, ctx->width, ctx->height,
                           rect->x + rect->width, rect->y, 
                           rect->x + rect->width, rect->y + rect->height, color);
-    renderer_draw_line_sw(ctx->surface, ctx->clip_rect.width, ctx->clip_rect.height,
+    renderer_draw_line_sw(ctx->surface, ctx->width, ctx->height,
                           rect->x + rect->width, rect->y + rect->height,
                           rect->x, rect->y + rect->height, color);
-    renderer_draw_line_sw(ctx->surface, ctx->clip_rect.width, ctx->clip_rect.height,
+    renderer_draw_line_sw(ctx->surface, ctx->width, ctx->height,
                           rect->x, rect->y + rect->height, rect->x, rect->y, color);
 
     g_renderer.draw_calls += 4;
@@ -384,7 +397,7 @@ int graphics_fill_rect(graphics_context_t *ctx, rect_t *rect, color_t color)
     /* Apply alpha */
     color.a = (color.a * ctx->alpha) / 255;
 
-    renderer_fill_rect_sw(ctx->surface, ctx->clip_rect.width, ctx->clip_rect.height,
+    renderer_fill_rect_sw(ctx->surface, ctx->width, ctx->height,
                           rect, color);
 
     g_renderer.draw_calls++;
@@ -657,12 +670,7 @@ u32 renderer_load_font(const char *name, u32 size)
     spin_lock(&g_renderer.lock);
 
     u32 font_id = g_renderer.next_font_id++;
-    struct {
-        u32 id;
-        char name[64];
-        u32 size;
-        void *data;
-    } *font = &g_renderer.fonts[g_renderer.num_fonts];
+    struct renderer_font *font = &g_renderer.fonts[g_renderer.num_fonts];
 
     font->id = font_id;
     strncpy(font->name, name, sizeof(font->name) - 1);
@@ -697,13 +705,7 @@ u32 renderer_load_image(const char *path)
     spin_lock(&g_renderer.lock);
 
     u32 image_id = g_renderer.next_image_id++;
-    struct {
-        u32 id;
-        char path[256];
-        void *surface;
-        u32 width;
-        u32 height;
-    } *img = &g_renderer.images[g_renderer.num_images];
+    struct renderer_image *img = &g_renderer.images[g_renderer.num_images];
 
     img->id = image_id;
     strncpy(img->path, path, sizeof(img->path) - 1);

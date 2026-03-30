@@ -9,6 +9,11 @@
 #include "../../kernel/include/kernel.h"
 #include "../core/net.h"
 
+/* x86_64 is little-endian */
+#ifndef __LITTLE_ENDIAN_BITFIELD
+#define __LITTLE_ENDIAN_BITFIELD
+#endif
+
 /*===========================================================================*/
 /*                         IPv4 CONSTANTS                                    */
 /*===========================================================================*/

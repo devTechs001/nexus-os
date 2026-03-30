@@ -7,6 +7,16 @@
 #include "../include/kernel.h"
 #include "../sync/sync.h"
 
+/* Architecture Interface Forward Declarations */
+extern int arch_init_task(struct task_struct *task, void (*fn)(void *), void *arg);
+extern void arch_free_task_arch(void *arch_data);
+extern int arch_copy_thread(struct task_struct *parent, struct task_struct *child);
+extern int arch_copy_mm(struct task_struct *parent, struct task_struct *child);
+extern int arch_copy_files(struct task_struct *parent, struct task_struct *child);
+extern void arch_set_return_value(struct task_struct *task, int value);
+extern int arch_load_binary(struct task_struct *task, const char *path,
+                            char **argv, char **envp);
+
 /*===========================================================================*/
 /*                         PROCESS MANAGEMENT DATA                           */
 /*===========================================================================*/
@@ -41,6 +51,27 @@ static struct task_struct *init_task = NULL;
 /*===========================================================================*/
 
 /**
+ * process_init - Initialize process management subsystem
+ */
+void process_init(void)
+{
+    spinlock_init(&task_allocator.pid_lock);
+    spinlock_init(&task_allocator.tid_lock);
+    spinlock_init(&task_list_lock);
+
+    /* Initialize task hash table */
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        task_allocator.task_hash[i] = NULL;
+    }
+
+    /* Initialize process and thread counts */
+    atomic_set(&process_count, 0);
+    atomic_set(&thread_count, 0);
+
+    pr_info("Process management subsystem initialized\n");
+}
+
+/**
  * allocate_pid - Allocate a new process ID
  *
  * Returns a unique process ID for a new process.
@@ -50,7 +81,7 @@ pid_t allocate_pid(void)
 {
     pid_t pid;
 
-    spin_lock(&task_allocator.pid_lock);
+    spinlock_lock(&task_allocator.pid_lock);
 
     pid = task_allocator.next_pid++;
 
@@ -59,7 +90,7 @@ pid_t allocate_pid(void)
         task_allocator.next_pid = 1;
     }
 
-    spin_unlock(&task_allocator.pid_lock);
+    spinlock_unlock(&task_allocator.pid_lock);
 
     return pid;
 }
@@ -73,7 +104,7 @@ tid_t allocate_tid(void)
 {
     tid_t tid;
 
-    spin_lock(&task_allocator.tid_lock);
+    spinlock_lock(&task_allocator.tid_lock);
 
     tid = task_allocator.next_tid++;
 
@@ -82,7 +113,7 @@ tid_t allocate_tid(void)
         task_allocator.next_tid = 1;
     }
 
-    spin_unlock(&task_allocator.tid_lock);
+    spinlock_unlock(&task_allocator.tid_lock);
 
     return tid;
 }
@@ -129,7 +160,7 @@ void task_hash_insert(struct task_struct *task)
 {
     u32 hash = task_hash_func(task->pid);
 
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
 
     task->se.rb_node.rb_left = NULL;
     task->se.rb_node.rb_right = NULL;
@@ -140,7 +171,7 @@ void task_hash_insert(struct task_struct *task)
     }
     task_allocator.task_hash[hash] = task;
 
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 }
 
 /**
@@ -152,7 +183,7 @@ void task_hash_remove(struct task_struct *task)
     u32 hash = task_hash_func(task->pid);
     struct task_struct *curr, *prev;
 
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
 
     curr = task_allocator.task_hash[hash];
     prev = NULL;
@@ -173,7 +204,7 @@ void task_hash_remove(struct task_struct *task)
                container_of(curr->se.rb_node.rb_right, struct task_struct, se.rb_node);
     }
 
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 }
 
 /*===========================================================================*/
@@ -377,18 +408,18 @@ struct task_struct *task_create(const char *name, void (*fn)(void *), void *arg)
 
     /* Add to parent's children list */
     if (parent) {
-        spin_lock(&task_list_lock);
+        spinlock_lock(&task_list_lock);
         list_add_tail(&task->sibling, &parent->children);
-        spin_unlock(&task_list_lock);
+        spinlock_unlock(&task_list_lock);
     }
 
     /* Insert into hash table */
     task_hash_insert(task);
 
     /* Add to global task list */
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
     list_add_tail(&task->run_list, &task_list);
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 
     /* Update process count */
     atomic_inc(&process_count);
@@ -428,16 +459,16 @@ static void release_task(struct task_struct *task)
     task_hash_remove(task);
 
     /* Remove from global task list */
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
     list_del(&task->run_list);
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 
     /* Remove from parent's children list */
     parent = task->parent;
     if (parent) {
-        spin_lock(&task_list_lock);
+        spinlock_lock(&task_list_lock);
         list_del(&task->sibling);
-        spin_unlock(&task_list_lock);
+        spinlock_unlock(&task_list_lock);
     }
 
     /* Free PID and TID */
@@ -537,7 +568,7 @@ void do_exit(struct task_struct *task, int code)
     }
 
     /* Release children */
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
     while (!list_empty(&task->children)) {
         struct task_struct *child;
         child = list_entry(task->children.next, struct task_struct, sibling);
@@ -547,7 +578,7 @@ void do_exit(struct task_struct *task, int code)
             list_add_tail(&child->sibling, &init_task->children);
         }
     }
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 
     /* Mark as dead */
     task->state = TASK_DEAD;
@@ -584,19 +615,19 @@ struct task_struct *task_by_pid(pid_t pid)
     u32 hash = task_hash_func(pid);
     struct task_struct *task;
 
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
 
     task = task_allocator.task_hash[hash];
     while (task) {
         if (task->pid == pid) {
-            spin_unlock(&task_list_lock);
+            spinlock_unlock(&task_list_lock);
             return task;
         }
         task = (struct task_struct *)
                container_of(task->se.rb_node.rb_right, struct task_struct, se.rb_node);
     }
 
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
     return NULL;
 }
 
@@ -611,16 +642,16 @@ struct task_struct *task_by_tid(tid_t tid)
 {
     struct task_struct *task;
 
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
 
     list_for_each_entry(task, &task_list, run_list) {
         if (task->tid == tid) {
-            spin_unlock(&task_list_lock);
+            spinlock_unlock(&task_list_lock);
             return task;
         }
     }
 
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
     return NULL;
 }
 
@@ -806,7 +837,7 @@ pid_t wait_for_children(int *exit_code, int options)
     }
 
     /* Check for exited children */
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
     list_for_each_entry(child, &task->children, sibling) {
         if (child->state == TASK_DEAD) {
             if (exit_code) {
@@ -816,13 +847,13 @@ pid_t wait_for_children(int *exit_code, int options)
 
             /* Reap the child */
             list_del(&child->sibling);
-            spin_unlock(&task_list_lock);
+            spinlock_unlock(&task_list_lock);
 
             task_destroy(child);
             return pid;
         }
     }
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 
     /* Check WNOHANG */
     if (options & 1) {  /* WNOHANG */
@@ -831,7 +862,7 @@ pid_t wait_for_children(int *exit_code, int options)
 
     /* Wait for any child */
     while (1) {
-        spin_lock(&task_list_lock);
+        spinlock_lock(&task_list_lock);
         list_for_each_entry(child, &task->children, sibling) {
             if (child->state == TASK_DEAD) {
                 if (exit_code) {
@@ -840,13 +871,13 @@ pid_t wait_for_children(int *exit_code, int options)
                 pid = child->pid;
 
                 list_del(&child->sibling);
-                spin_unlock(&task_list_lock);
+                spinlock_unlock(&task_list_lock);
 
                 task_destroy(child);
                 return pid;
             }
         }
-        spin_unlock(&task_list_lock);
+        spinlock_unlock(&task_list_lock);
 
         /* Sleep until a child exits */
         wait_event_interruptible(&task->wait_queue,
@@ -919,11 +950,8 @@ static void init_thread(void *arg)
 
 /**
  * create_init_process - Create the init process
- *
- * Creates the first user-space process (PID 1).
- * All other processes are descendants of init.
  */
-static void create_init_process(void)
+void create_init_process(void)
 {
     init_task = task_create("init", init_thread, NULL);
     if (!init_task) {
@@ -976,7 +1004,7 @@ void process_list(void)
            "PID", "TID", "Name", "State", "CPU", "Command");
     printk("--------------------------------------------------------\n");
 
-    spin_lock(&task_list_lock);
+    spinlock_lock(&task_list_lock);
     list_for_each_entry(task, &task_list, run_list) {
         const char *state_str;
 
@@ -1008,7 +1036,7 @@ void process_list(void)
                task->pid, task->tid, task->comm, state_str,
                task->cpu, task->comm);
     }
-    spin_unlock(&task_list_lock);
+    spinlock_unlock(&task_list_lock);
 
     printk("\nTotal: %d processes\n", atomic_read(&process_count));
     printk("\n");
@@ -1017,17 +1045,6 @@ void process_list(void)
 /*===========================================================================*/
 /*                         ARCHITECTURE INTERFACES                           */
 /*===========================================================================*/
-
-/* These functions must be implemented by architecture-specific code */
-
-extern int arch_init_task(struct task_struct *task, void (*fn)(void *), void *arg);
-extern void arch_free_task_arch(void *arch_data);
-extern int arch_copy_thread(struct task_struct *parent, struct task_struct *child);
-extern int arch_copy_mm(struct task_struct *parent, struct task_struct *child);
-extern int arch_copy_files(struct task_struct *parent, struct task_struct *child);
-extern void arch_set_return_value(struct task_struct *task, int value);
-extern int arch_load_binary(struct task_struct *task, const char *path,
-                            char **argv, char **envp);
 
 /* Architecture stubs */
 void arch_free_task_arch(void *arch_data)

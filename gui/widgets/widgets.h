@@ -67,7 +67,10 @@ typedef struct widget {
     /* Layout */
     u32 horizontal_align;
     u32 vertical_align;
-    
+
+    /* Tooltip */
+    char *tooltip;
+
     /* Children */
     struct widget *children;
     struct widget *next_sibling;

@@ -12,13 +12,6 @@
 /*                         IRQ DATA STRUCTURES                               */
 /*===========================================================================*/
 
-/* IRQ return values */
-#define IRQ_NONE        0
-#define IRQ_HANDLED     1
-#define IRQ_WAKE_THREAD 2
-
-typedef u32 irqreturn_t;
-
 /**
  * irq_action_t - IRQ action (handler registration)
  */
@@ -103,6 +96,16 @@ static irq_desc_extended_t irq_descs[NR_IRQS] __aligned(CACHE_LINE_SIZE);
 /*                         INTERNAL FUNCTIONS                                */
 /*===========================================================================*/
 
+#if defined(ARCH_X86_64)
+void x86_send_ipi(u32 cpu, u32 vector);
+void x86_send_ipi_all(u32 vector);
+#endif
+
+#if defined(ARCH_ARM64)
+void arm_send_ipi(u32 cpu, u32 vector);
+void arm_send_ipi_all(u32 vector);
+#endif
+
 /**
  * irq_validate - Validate IRQ number
  * @irq: IRQ number
@@ -140,6 +143,7 @@ static irq_desc_extended_t *irq_desc_get(u32 irq)
 
 /**
  * irq_action_create - Create IRQ action
+ * @irq: IRQ number
  * @handler: Interrupt handler
  * @dev_id: Device ID
  * @flags: IRQ flags
@@ -147,7 +151,7 @@ static irq_desc_extended_t *irq_desc_get(u32 irq)
  *
  * Returns: Pointer to new action, or NULL on failure
  */
-static irq_action_t *irq_action_create(irq_handler_t handler, void *dev_id,
+static irq_action_t *irq_action_create(u32 irq, irq_handler_t handler, void *dev_id,
                                         u32 flags, const char *name)
 {
     irq_action_t *action;
@@ -240,6 +244,7 @@ void interrupt_early_init(void)
 
     /* Initialize architecture-specific interrupt controller */
 #if defined(ARCH_X86_64)
+    pic_init();
     apic_init();
 #elif defined(ARCH_ARM64)
     gic_init();
@@ -324,7 +329,7 @@ int request_irq(u32 irq, irq_handler_t handler, u32 flags,
     }
 
     /* Create action */
-    action = irq_action_create(handler, dev_id, flags, name);
+    action = irq_action_create(irq, handler, dev_id, flags, name);
     if (!action) {
         ret = -ENOMEM;
         goto out_unlock;

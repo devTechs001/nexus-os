@@ -131,10 +131,22 @@ int touchscreen_shutdown(void)
 /*                         TOUCH PROCESSING                                  */
 /*===========================================================================*/
 
+/**
+ * process_touch_event - Process raw touch input
+ * @ts: Touchscreen device
+ * @id: Touch point ID
+ * @x: Raw X coordinate
+ * @y: Raw Y coordinate
+ * @pressure: Touch pressure value
+ * 
+ * Processes raw touch data, updates touch point state,
+ * and queues touch events for delivery to applications.
+ */
+__attribute__((used))
 static void process_touch_event(touchscreen_t *ts, u32 id, s32 x, s32 y, s32 pressure)
 {
     touch_point_t *point = NULL;
-    
+
     /* Find existing touch point or create new one */
     for (u32 i = 0; i < ts->active_points; i++) {
         if (ts->points[i].id == id) {
@@ -142,25 +154,25 @@ static void process_touch_event(touchscreen_t *ts, u32 id, s32 x, s32 y, s32 pre
             break;
         }
     }
-    
+
     if (!point && ts->active_points < TS_MAX_TOUCH_POINTS) {
         point = &ts->points[ts->active_points++];
         point->id = id;
     }
-    
+
     if (point) {
         point->x = x;
         point->y = y;
         point->pressure = pressure;
         point->timestamp = ktime_get_ms();
         point->is_active = (pressure > 0);
-        
+
         /* Queue event */
         spinlock_lock(&g_ts.lock);
         g_ts.event_queue[g_ts.queue_head] = *point;
         g_ts.queue_head = (g_ts.queue_head + 1) % TS_EVENT_QUEUE_SIZE;
         spinlock_unlock(&g_ts.lock);
-        
+
         /* Callback */
         if (g_ts.on_touch) {
             g_ts.on_touch(ts, point);
@@ -168,12 +180,20 @@ static void process_touch_event(touchscreen_t *ts, u32 id, s32 x, s32 y, s32 pre
     }
 }
 
+/**
+ * detect_gestures - Detect touch gestures
+ * @ts: Touchscreen device
+ * 
+ * Analyzes touch point data to detect common gestures
+ * such as tap, swipe, pinch, and rotate.
+ */
+__attribute__((used))
 static void detect_gestures(touchscreen_t *ts)
 {
     if (ts->active_points < 1) return;
-    
+
     touch_point_t *p1 = &ts->points[0];
-    
+
     /* Detect tap */
     if (p1->is_active && p1->pressure < 50) {
         gesture_t *gesture = &ts->gestures[ts->gesture_count++];
@@ -184,19 +204,19 @@ static void detect_gestures(touchscreen_t *ts)
         gesture->end_y = p1->y;
         gesture->duration_ms = 100;
         gesture->confidence = 90;
-        
+
         if (g_ts.on_gesture) {
             g_ts.on_gesture(ts, gesture);
         }
     }
-    
+
     /* Detect pinch (2+ fingers) */
     if (ts->active_points >= 2) {
         touch_point_t *p2 = &ts->points[1];
         s32 dx = p2->x - p1->x;
         s32 dy = p2->y - p1->y;
         s32 distance = sqrt(dx * dx + dy * dy);
-        
+
         gesture_t *gesture = &ts->gestures[ts->gesture_count++];
         if (distance < 50) {
             gesture->type = GESTURE_PINCH_IN;
@@ -204,7 +224,7 @@ static void detect_gestures(touchscreen_t *ts)
             gesture->type = GESTURE_PINCH_OUT;
         }
         gesture->confidence = 80;
-        
+
         if (g_ts.on_gesture) {
             g_ts.on_gesture(ts, gesture);
         }
@@ -224,16 +244,29 @@ int touchscreen_calibrate(u32 device_id, s32 *matrix)
             break;
         }
     }
-    
+
     if (!ts) return -ENOENT;
-    
+
     memcpy(ts->calibration_matrix, matrix, sizeof(s32) * 9);
     ts->is_calibrated = true;
-    
+
     printk("[TOUCHSCREEN] Calibrated device %d\n", device_id);
     return 0;
 }
 
+/**
+ * apply_calibration - Apply calibration matrix to touch coordinates
+ * @ts: Touchscreen device
+ * @x: Raw X coordinate
+ * @y: Raw Y coordinate
+ * @out_x: Output calibrated X coordinate
+ * @out_y: Output calibrated Y coordinate
+ * 
+ * Applies a 3x3 transformation matrix to convert raw touch
+ * coordinates to calibrated screen coordinates.
+ * Returns 0 on success.
+ */
+__attribute__((used))
 static s32 apply_calibration(touchscreen_t *ts, s32 x, s32 y, s32 *out_x, s32 *out_y)
 {
     if (!ts->is_calibrated) {
@@ -241,17 +274,17 @@ static s32 apply_calibration(touchscreen_t *ts, s32 x, s32 y, s32 *out_x, s32 *o
         *out_y = y;
         return 0;
     }
-    
+
     s32 *m = ts->calibration_matrix;
     s32 w = m[0] * x + m[1] * y + m[2];
     s32 z = m[3] * x + m[4] * y + m[5];
     s32 d = m[6] * x + m[7] * y + m[8];
-    
+
     if (d == 0) d = 1;
-    
+
     *out_x = w / d;
     *out_y = z / d;
-    
+
     return 0;
 }
 

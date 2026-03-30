@@ -68,6 +68,15 @@ int display_init(void)
 }
 
 /**
+ * display_restore_mode - Restore display mode
+ */
+int display_restore_mode(void)
+{
+    printk("[DISPLAY] Restoring display mode...\n");
+    return 0;
+}
+
+/**
  * display_shutdown - Shutdown display driver
  *
  * Returns: 0 on success
@@ -970,4 +979,64 @@ display_framebuffer_t *display_get_primary_framebuffer(void)
 display_driver_t *display_get_driver(void)
 {
     return &g_display_driver;
+}
+
+/*===========================================================================*/
+/*                         GRAPHICS SUBSYSTEM INIT                           */
+/*===========================================================================*/
+
+/* External driver initializers */
+extern int vga_init(void);
+extern int framebuffer_init(void);
+extern void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp);
+
+/**
+ * graphics_init - Comprehensive graphics subsystem initialization
+ *
+ * This function is called by the kernel during Phase 4 (Device Drivers).
+ * It initializes all graphics-related drivers and sets up the boot splash.
+ */
+void graphics_init(void)
+{
+    printk("[GRAPHICS] ========================================\n");
+    printk("[GRAPHICS] NEXUS OS Graphics Subsystem\n");
+    printk("[GRAPHICS] ========================================\n");
+
+    /* 1. Initialize hardware-specific drivers (VGA/SVGA/VESA) */
+    vga_init();
+
+    /* 2. Initialize the generic framebuffer layer */
+    framebuffer_init();
+
+    /* 3. Initialize the high-level display management driver */
+    display_init();
+
+    /* 4. Check boot parameters for graphical mode */
+    boot_params_t *params = get_boot_params();
+    if (params && params->graphics_mode) {
+        printk("[GRAPHICS] Graphical mode requested, initializing splash screen...\n");
+
+        display_framebuffer_t *fb = display_get_primary_framebuffer();
+        
+        if (fb && fb->base) {
+            /* Use existing primary framebuffer (e.g. from VESA) */
+            splash_init((u32*)fb->base, fb->width, fb->height, fb->stride, fb->bpp);
+            printk("[GRAPHICS] Splash screen active on %dx%dx%d FB\n", 
+                   fb->width, fb->height, fb->bpp);
+        } else {
+            /* Fallback: Create a standard 1024x768 framebuffer */
+            display_framebuffer_t new_fb;
+            if (display_create_framebuffer(1024, 768, PIXEL_FORMAT_XRGB8888, &new_fb) == 0) {
+                splash_init((u32*)new_fb.base, 1024, 768, new_fb.stride, new_fb.bpp);
+                printk("[GRAPHICS] Splash screen active on new 1024x768 FB\n");
+            } else {
+                printk("[ERROR] Failed to create framebuffer for splash screen!\n");
+            }
+        }
+    } else {
+        printk("[GRAPHICS] Booting in text mode, skipping graphical splash.\n");
+    }
+
+    printk("[GRAPHICS] Graphics subsystem initialization complete.\n");
+    printk("[GRAPHICS] ========================================\n");
 }

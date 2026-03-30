@@ -26,26 +26,28 @@ extern void outb(unsigned short port, unsigned char val);
 extern unsigned char inb(unsigned short port);
 extern void io_wait(void);
 
-/* Spinlock init stub */
-#define spin_lock_init(lock) do { (lock)->lock = 0; } while(0)
+/* Forward declarations for initialization (implemented in init.c) */
+extern void kernel_main_init(void);
 
-/* Forward declarations for network stack (real implementations in net/) */
-extern void net_init(void);
-extern void ipv4_init(void);
-extern void ipv6_init(void);
-
-/* Network stubs */
-void net_init(void) { }
-void ipv4_init(void) { }
-void ipv6_init(void) { }
-extern void firewall_init(void);
+/* Forward declarations for initialization helper functions */
+extern void console_init(void);
+extern void printk_init(void);
+extern void mm_early_init(void);
+extern void percpu_init(void);
+extern void interrupt_init(void);
+extern void storage_init(void);
+extern void input_init(void);
+extern void power_init(void);
+extern int hypervisor_init(void);
+extern void init_process_start(void);
+extern void service_manager_start(void);
 
 /*===========================================================================*/
 /*                         KERNEL BSS SECTION                                */
 /*===========================================================================*/
 
 /* Place kernel globals in BSS to avoid bloating binary */
-__section(".bss") static struct {
+__section(".bss") struct {
     const char *version;
     const char *codename;
     u64 boot_time;
@@ -62,13 +64,13 @@ __section(".bss") static struct {
     char virt_mode[16];       /* Current virtualization mode */
 } kernel_state;
 
-__section(".bss") static percpu_data_t percpu_data[MAX_CPUS];
+__section(".bss") percpu_data_t percpu_data[MAX_CPUS];
 
-__section(".bss") static spinlock_t kernel_lock;
+__section(".bss") spinlock_t kernel_lock;
 
-__section(".bss") static u64 kernel_ticks;
+__section(".bss") u64 kernel_ticks;
 
-__section(".bss") static u32 apic_timer_freq;
+__section(".bss") u32 apic_timer_freq;
 
 /*===========================================================================*/
 /*                         EXTERNAL DECLARATIONS                             */
@@ -391,7 +393,7 @@ int printk(const char *fmt, ...)
  * Uses CPUID hypervisor detection to identify the virtualization environment.
  * Sets kernel_state.virt_mode and appropriate flags.
  */
-static void detect_virtualization(void)
+void detect_virtualization(void)
 {
     u32 eax, ebx, ecx, edx;
     char hypervisor_sig[13];
@@ -478,161 +480,10 @@ static void detect_virtualization(void)
     }
 }
 
-/**
- * kernel_early_init - Early kernel initialization
- *
- * Called immediately after bootloader hands control to kernel.
- * Only safe to call very basic functions here.
+/* 
+ * Redundant initialization functions removed. 
+ * Use kernel_main_init() in init.c instead.
  */
-void kernel_early_init(void)
-{
-    kernel_state.state = KERNEL_STATE_BOOTING;
-
-    /* Clear screen with blue background */
-    vga_clear(vga_make_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE));
-
-    /* Print boot banner */
-    printk("\n");
-    printk("  ____   ___   __  __   _   _  _____ \n");
-    printk(" |  _ \\ / _ \\ |  \\/  | | \\ | || ____|\n");
-    printk(" | |_) | | | || |\\/| | |  \\| ||  _|  \n");
-    printk(" |  _ <| |_| || |  | | | |\\  || |___ \n");
-    printk(" |_| \\_\\\\___/ |_|  |_| |_| \\_||_____|\n");
-    printk("\n");
-    printk("  Version: %s (%s)\n", NEXUS_VERSION_STRING, NEXUS_CODENAME);
-    printk("  Built: %s %s\n", __DATE__, __TIME__);
-    printk("  ==============================================\n");
-    printk("\n");
-
-    /* Initialize spinlock */
-    kernel_lock.lock = 0;
-
-    /* Architecture-specific early init (GDT, IDT, early console) */
-    arch_early_init();
-
-    /* Detect virtualization environment EARLY */
-    detect_virtualization();
-
-    /* Initialize boot CPU data */
-    u32 boot_cpu = arch_get_cpu_id();
-    percpu_data[boot_cpu].cpu_id = boot_cpu;
-    percpu_data[boot_cpu].apic_id = arch_get_apic_id();
-    percpu_data[boot_cpu].current_thread = NULL;
-    percpu_data[boot_cpu].current_process = NULL;
-    percpu_data[boot_cpu].context_switches = 0;
-    percpu_data[boot_cpu].interrupts = 0;
-    percpu_data[boot_cpu].kernel_stack = NULL;
-
-    kernel_state.cpu_count = 1;
-    kernel_state.smp_enabled = false;
-    kernel_state.virt_enabled = false;
-
-    /* Print virtualization status */
-    if (kernel_state.is_vmware) {
-        printk("[VM] VMware environment detected - using VMware optimizations\n");
-    } else if (kernel_state.is_virtualbox) {
-        printk("[VM] VirtualBox environment detected\n");
-    } else if (kernel_state.is_qemu) {
-        printk("[VM] QEMU environment detected\n");
-    } else if (kernel_state.is_hyperv) {
-        printk("[VM] Hyper-V environment detected\n");
-    } else {
-        printk("[OK] Running on bare metal (%s mode)\n", kernel_state.virt_mode);
-    }
-
-    printk("[OK] Early initialization complete\n");
-}
-
-/**
- * kernel_init - Main kernel initialization
- */
-void kernel_init(void)
-{
-    kernel_state.state = KERNEL_STATE_INITIALIZING;
-    
-    printk("\n[INFO] Starting kernel initialization...\n\n");
-    
-    /* Initialize GDT and IDT */
-    printk("[    ] Initializing GDT...\n");
-    arch_init_gdt();
-    printk("[OK]  GDT initialized\n");
-    
-    printk("[    ] Initializing IDT...\n");
-    arch_init_idt();
-    printk("[OK]  IDT initialized\n");
-    
-    /* Initialize memory management */
-    printk("[    ] Initializing physical memory manager...\n");
-    pmm_init();
-    printk("[OK]  Physical memory manager initialized\n");
-    
-    printk("[    ] Initializing virtual memory manager...\n");
-    arch_init_paging();
-    vmm_init();
-    printk("[OK]  Virtual memory manager initialized\n");
-    
-    printk("[    ] Initializing kernel heap...\n");
-    heap_init();
-    printk("[OK]  Kernel heap initialized\n");
-    
-    printk("[    ] Initializing slab allocator...\n");
-    slab_init();
-    printk("[OK]  Slab allocator initialized\n");
-    
-    /* Initialize interrupt system */
-    printk("[    ] Initializing interrupt system...\n");
-    interrupt_init();
-    arch_enable_interrupts();
-    printk("[OK]  Interrupt system initialized\n");
-    
-    /* Initialize timer */
-    printk("[    ] Initializing APIC timer...\n");
-    apic_timer_freq = 1000000000; /* 1 GHz */
-    arch_init_timer(apic_timer_freq);
-    printk("[OK]  APIC timer initialized\n");
-    
-    /* Initialize scheduler */
-    printk("[    ] Initializing scheduler...\n");
-    scheduler_init();
-    printk("[OK]  Scheduler initialized\n");
-    
-    /* Initialize SMP (if enabled) */
-#ifdef CONFIG_SMP
-    printk("[    ] Initializing SMP...\n");
-    arch_init_smp();
-    kernel_state.smp_enabled = true;
-    kernel_state.cpu_count = 1; /* Will be updated by arch_init_smp */
-    printk("[OK]  SMP initialized (%u CPUs)\n", kernel_state.cpu_count);
-#endif
-    
-    /* Initialize ACPI */
-    printk("[    ] Initializing ACPI...\n");
-    acpi_init();
-    printk("[OK]  ACPI initialized\n");
-
-    /* Initialize network stack */
-    printk("[    ] Initializing network stack...\n");
-    net_init();
-    ipv4_init();
-    ipv6_init();
-    firewall_init();
-    printk("[OK]  Network stack initialized (IPv4 + IPv6 + Firewall)\n");
-
-    /* Architecture-specific late init */
-    arch_late_init();
-    
-    kernel_state.state = KERNEL_STATE_RUNNING;
-    kernel_state.boot_time = kernel_ticks;
-    
-    printk("\n");
-    printk("  ==============================================\n");
-    printk("  NEXUS OS Initialization Complete!\n");
-    printk("  Boot time: %u ms\n", (u32)(kernel_state.boot_time / 1000));
-    printk("  Memory: %u MB total\n", (u32)(kernel_state.mem_total / (1024 * 1024)));
-    printk("  CPUs: %u online\n", kernel_state.cpu_count);
-    printk("  ==============================================\n");
-    printk("\n");
-}
 
 /**
  * kernel_start_scheduler - Start the scheduler
@@ -715,39 +566,19 @@ void kernel_main(u64 multiboot_info)
     if (cmdline && cmdline[0]) {
         parse_boot_params(cmdline);
     } else {
-        printk("[BOOT] No command line provided\n");
+        printk("[BOOT] No command line provided, using defaults\n");
     }
 
-    /* Initialize console based on boot mode */
+    /* Initialize consolidated console first */
     console_init();
 
-    /* Show boot splash */
-    boot_params_t *params = get_boot_params();
-    if (params->graphics_mode) {
-        console_print("\n\033[2J\033[H");
-        console_print("  ╔════════════════════════════════════════╗\n");
-        console_print("  ║                                        ║\n");
-        console_print("  ║     \033[1;36mN E X U S   O S\033[0m                  ║\n");
-        console_print("  ║     \033[2;36mGenesis Edition\033[0m                  ║\n");
-        console_print("  ║                                        ║\n");
-        console_print("  ║     \033[33mBoot Mode: ");
-        if (params->safe_mode)
-            console_print("Safe Mode\033[0m");
-        else if (params->debug_mode)
-            console_print("Debug Mode\033[0m");
-        else if (params->native_mode)
-            console_print("Native Hardware\033[0m");
-        else if (params->text_mode)
-            console_print("Text Mode\033[0m");
-        else
-            console_print("Graphical Mode\033[0m");
-        console_print("          ║\n");
-        console_print("  ║                                        ║\n");
-        console_print("  ╚════════════════════════════════════════╝\n\n");
-    }
+    /* 
+     * Start the unified initialization sequence defined in init.c
+     * This handles all phases from early boot to userspace transition.
+     */
+    kernel_main_init();
 
-    kernel_early_init();
-    kernel_init();
+    /* Start the scheduler (this should never return) */
     kernel_start_scheduler();
 
     /* Idle loop - should never reach here in normal operation */
@@ -824,6 +655,22 @@ void kernel_assert_failed(const char *expr, const char *file, int line)
 /*===========================================================================*/
 
 /**
+ * percpu_init - Initialize per-CPU data for boot processor
+ */
+void percpu_init(void)
+{
+    u32 cpu = arch_get_cpu_id();
+    if (cpu >= MAX_CPUS) return;
+
+    memset(&percpu_data[cpu], 0, sizeof(percpu_data_t));
+    percpu_data[cpu].cpu_id = cpu;
+    percpu_data[cpu].apic_id = arch_get_apic_id();
+    
+    pr_info("Per-CPU data initialized for CPU %u (APIC %u)\n", 
+            cpu, percpu_data[cpu].apic_id);
+}
+
+/**
  * get_percpu - Get per-CPU data for current CPU
  */
 percpu_data_t *get_percpu(void)
@@ -873,22 +720,6 @@ void delay_ms(u64 ms)
     while (get_time_ms() < end) {
         arch_halt_cpu();
     }
-}
-
-/**
- * local_irq_enable - Enable local interrupts
- */
-void local_irq_enable(void)
-{
-    arch_enable_interrupts();
-}
-
-/**
- * local_irq_disable - Disable local interrupts
- */
-void local_irq_disable(void)
-{
-    arch_disable_interrupts();
 }
 
 /**
@@ -1068,25 +899,43 @@ u32 kernel_get_state(void)
 /* void slab_init(void) { } */
 /* void pmm_init(void) { } */
 
-/* Interrupt stubs */
-void interrupt_init(void) { }
+/* Interrupt initialization */
+extern void interrupt_init(void);
 
-/* Timer stubs */
-void arch_init_timer(u64 freq) { (void)freq; }
+/* Timer initialization */
+extern void arch_init_timer(u64 freq);
 
-/* SMP stubs */
-void arch_init_smp(void) { }
+/* SMP initialization */
+extern void arch_init_smp(void);
 
-/* ACPI stub */
-void acpi_init(void) { }
+/* ACPI initialization */
+extern void acpi_init(void);
 
-/* Architecture init stubs */
-void arch_init_gdt(void) { }
-void arch_init_idt(void) { }
-void arch_init_paging(void) { }
+/* Architecture init functions */
+extern void arch_init_gdt(void);
+extern void arch_init_idt(void);
+/* Paging initialization */
+extern void arch_init_paging(void);
 
-/* CPU info */
-unsigned int arch_get_apic_id(void) { return 0; }
+/* Architecture initialization */
+extern void arch_early_init(void);
+extern void arch_late_init(void);
+extern void arch_init_cpus(void);
+extern void arch_enable_interrupts(void);
+/* Hypervisor initialization */
+extern int hypervisor_init(void);
+
+/* GUI functions - real implementations in gui/ */
+typedef struct login_screen login_screen_t;
+typedef struct onboarding_wizard onboarding_wizard_t;
+
+extern login_screen_t *login_screen_get_instance(void);
+extern int login_screen_init(login_screen_t *screen);
+extern int login_screen_run(login_screen_t *screen);
+
+extern onboarding_wizard_t *onboarding_wizard_get_instance(void);
+extern int onboarding_wizard_init(onboarding_wizard_t *wizard);
+extern int onboarding_wizard_run(onboarding_wizard_t *wizard);
 
 /* Network stubs - real implementations in net/ */
 /* net_init, ipv4_init, ipv6_init, firewall_init are in net/ */

@@ -35,8 +35,6 @@ static int swap_buffers(compositor_t *comp);
 
 /* Damage tracking */
 static int calculate_damage(compositor_t *comp);
-static bool rect_intersects(rect_t *a, rect_t *b);
-static rect_t rect_union(rect_t *a, rect_t *b);
 
 /* GPU operations (stubs for software fallback) */
 static int gpu_create_texture(void *data, u32 width, u32 height, u32 *texture_id);
@@ -59,7 +57,7 @@ static int software_blend_pixel(u8 *dst, const u8 *src, u32 alpha);
  *
  * Returns: 0 on success, negative error code on failure
  */
-int compositor_init(compositor_t *comp)
+int compositor_init_global(compositor_t *comp)
 {
     if (!comp) {
         return -EINVAL;
@@ -1071,6 +1069,11 @@ static int swap_buffers(compositor_t *comp)
     return 0;
 }
 
+int compositor_init(void)
+{
+    return compositor_init_global(&g_compositor);
+}
+
 /**
  * compositor_wait_vsync - Wait for VSync
  * @comp: Pointer to compositor structure
@@ -1086,8 +1089,8 @@ int compositor_wait_vsync(compositor_t *comp)
     /* In real implementation, would wait for VBlank */
     /* For now, simple delay for 60Hz */
     if (comp->refresh_rate > 0) {
-        u32 delay_ms = 1000 / comp->refresh_rate;
-        delay_ms(delay_ms);
+        u32 wait_time = 1000 / comp->refresh_rate;
+        delay_ms(wait_time);
     }
     
     return 0;
@@ -1200,7 +1203,7 @@ static int calculate_damage(compositor_t *comp)
  *
  * Returns: true if intersect, false otherwise
  */
-static bool rect_intersects(rect_t *a, rect_t *b)
+bool rect_intersects(rect_t *a, rect_t *b)
 {
     return !(a->x + a->width <= b->x ||
              b->x + b->width <= a->x ||
@@ -1215,7 +1218,7 @@ static bool rect_intersects(rect_t *a, rect_t *b)
  *
  * Returns: Union rectangle
  */
-static rect_t rect_union(rect_t *a, rect_t *b)
+rect_t rect_union(rect_t *a, rect_t *b)
 {
     rect_t result;
     result.x = (a->x < b->x) ? a->x : b->x;

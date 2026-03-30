@@ -338,6 +338,7 @@ bool spinlock_is_locked(spinlock_t *lock);
 void spinlock_get_stats(spinlock_t *lock, struct spinlock_stats *stats);
 
 /* Read-write lock functions */
+
 void rwlock_init(rwlock_t *lock);
 void rwlock_init_named(rwlock_t *lock, const char *name);
 void read_lock(rwlock_t *lock);
@@ -352,12 +353,17 @@ bool rwlock_is_write_locked(rwlock_t *lock);
 void rwlock_get_stats(rwlock_t *lock, struct rwlock_stats *stats);
 
 /* Atomic operations - defined as inline functions in kernel.h */
-/* atomic_inc, atomic_dec, atomic_add_return, atomic_cmpxchg, atomic_read, atomic_set */
+void atomic_inc(atomic_t *v);
+void atomic_dec(atomic_t *v);
+s32 atomic_read(const atomic_t *v);
+void atomic_set(atomic_t *v, s32 i);
+s32 atomic_add_return(s32 i, atomic_t *v);
+s32 atomic_sub_return(s32 i, atomic_t *v);
+s32 atomic_cmpxchg(atomic_t *v, s32 old, s32 new);
 
 /* Additional atomic operations */
 void atomic_add(s32 i, atomic_t *v);
 void atomic_sub(s32 i, atomic_t *v);
-s32 atomic_sub_return(s32 i, atomic_t *v);
 s32 atomic_xchg(atomic_t *v, s32 new);
 void atomic_and(u32 mask, atomic_t *v);
 void atomic_or(u32 mask, atomic_t *v);
@@ -370,7 +376,7 @@ void atomic64_inc(atomic64_t *v);
 void atomic64_dec(atomic64_t *v);
 void atomic64_add(s64 i, atomic64_t *v);
 void atomic64_sub(s64 i, atomic64_t *v);
-s64 atomic64_read(atomic64_t *v);
+s64 atomic64_read(const atomic64_t *v);
 void atomic64_set(atomic64_t *v, s64 i);
 s64 atomic64_cmpxchg(atomic64_t *v, s64 old, s64 new);
 

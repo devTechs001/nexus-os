@@ -743,7 +743,11 @@ void pipe_stats(struct pipe_inode_info *pipe)
 
 /**
  * ipc_pipe_global_stats - Print global pipe statistics
+ * 
+ * Displays system-wide pipe statistics including active pipes,
+ * total created/destroyed, and memory usage.
  */
+__attribute__((used))
 static void ipc_pipe_global_stats(void)
 {
     spin_lock(&pipe_global.lock);

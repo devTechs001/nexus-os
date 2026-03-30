@@ -21,6 +21,10 @@ Features:
 - Live migration support
 - Snapshot support
 - Nested virtualization (3 levels)
+- GPU passthrough support
+- Secure boot for VMs
+- Encrypted VMs (SEV)
+- VMware Tools integration
 
 ### 2. VM Manager (`virt/vm/`)
 
@@ -34,6 +38,7 @@ Features:
 - Extension support (32 slots)
 - Health monitoring
 - Resource allocation
+- Real-time performance monitoring
 
 ### 3. Nested Virtualization (`virt/emulation/`)
 
@@ -61,6 +66,49 @@ Features:
 - Health checks
 - Rolling updates
 - Service scaling (1-100 replicas)
+
+## VMware Integration
+
+NEXUS OS provides enhanced VMware integration with the following features:
+
+### VMware Detection & Optimization
+
+The kernel automatically detects when running in VMware and enables optimized settings:
+
+```c
+// Automatic VMware detection
+if (kernel_state.is_vmware) {
+    detect_vmware_features();
+    enable_vmware_optimizations();
+}
+```
+
+### VMware-Specific Features
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| VMware Tools | Guest integration | Auto-detected |
+| 3D Acceleration | Hardware graphics | Enabled |
+| High Resolution | Up to 2560x1600 | Auto-configured |
+| Shared Folders | HGFS support | Enabled |
+| Copy/Paste | Clipboard sync | Enabled |
+| Drag & Drop | File transfer | Enabled |
+| Time Sync | NTP synchronization | Active |
+
+### VMware Display Configuration
+
+```c
+// Configure VMware display
+virt_manager_set_vmware_display(1920, 1080, 32, true);
+```
+
+### VMware Performance Settings
+
+```c
+// Configure performance
+virt_manager_set_vmware_performance(4, 4096, true, true);
+// CPU limit, Memory MB, CPU hot-add, Memory hot-add
+```
 
 ## Usage
 

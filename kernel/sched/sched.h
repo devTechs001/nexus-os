@@ -218,6 +218,9 @@ struct task_struct {
     u64 stime;
     u64 cutime;
     u64 cstime;
+
+    /* GUI Callbacks (e.g. for onboarding wizard) */
+    bool (*on_back)(struct task_struct *);
 };
 
 /**

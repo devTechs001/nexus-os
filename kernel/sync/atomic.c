@@ -10,6 +10,22 @@
 /*===========================================================================*/
 
 /**
+ * atomic64_read - Read 64-bit atomic value
+ */
+s64 atomic64_read(const atomic64_t *v)
+{
+    return v->counter;
+}
+
+/**
+ * atomic64_set - Set 64-bit atomic value
+ */
+void atomic64_set(atomic64_t *v, s64 i)
+{
+    v->counter = i;
+}
+
+/**
  * atomic_read - Read atomic value
  * @v: Atomic value to read
  *

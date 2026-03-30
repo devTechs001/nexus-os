@@ -216,8 +216,12 @@ static inline void update_rq_clock(struct rq *rq)
 
 /**
  * idle_thread - Idle task main function
- * @arg: Unused argument
+ * @arg: Task structure argument
+ * 
+ * Main idle loop executed when no runnable tasks exist.
+ * Continuously checks for reschedule requests and enters low-power state.
  */
+__attribute__((used))
 static void idle_thread(void *arg)
 {
     struct task_struct *task = (struct task_struct *)arg;
@@ -1030,9 +1034,14 @@ void idle_balance(int cpu)
 
 /**
  * pull_task - Pull a task from one run queue to another
- * @src_rq: Source run queue
- * @dst_rq: Destination run queue
+ * @src_rq: Source run queue to pull task from
+ * @dst_rq: Destination run queue to add task to
+ * 
+ * Attempts to pull a task from the source CPU's run queue to the destination.
+ * Used for load balancing across multiple CPUs.
+ * Returns the pulled task, or NULL if no task could be pulled.
  */
+__attribute__((used))
 static struct task_struct *pull_task(struct rq *src_rq, struct rq *dst_rq)
 {
     struct task_struct *task = NULL;

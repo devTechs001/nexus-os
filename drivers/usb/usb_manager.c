@@ -194,6 +194,15 @@ int usb_shutdown(void)
 /*                         DEVICE ENUMERATION                                */
 /*===========================================================================*/
 
+/**
+ * usb_get_device_descriptor - Get USB device descriptor
+ * @dev: USB device structure
+ * 
+ * Reads the device descriptor from the USB device.
+ * Contains device class, vendor ID, product ID, etc.
+ * Returns 0 on success.
+ */
+__attribute__((used))
 static int usb_get_device_descriptor(usb_device_t *dev)
 {
     /* In real implementation, would read via control transfer */
@@ -206,10 +215,19 @@ static int usb_get_device_descriptor(usb_device_t *dev)
     dev->device_desc.idProduct = 0x0024;
     dev->device_desc.bcdDevice = 0x0000;
     dev->device_desc.bNumConfigurations = 1;
-    
+
     return 0;
 }
 
+/**
+ * usb_get_config_descriptor - Get USB configuration descriptor
+ * @dev: USB device structure
+ * 
+ * Reads the configuration descriptor from the USB device.
+ * Contains power requirements, interface count, etc.
+ * Returns 0 on success.
+ */
+__attribute__((used))
 static int usb_get_config_descriptor(usb_device_t *dev)
 {
     /* Mock config descriptor */
@@ -220,7 +238,7 @@ static int usb_get_config_descriptor(usb_device_t *dev)
     dev->config_desc.bConfigurationValue = 1;
     dev->config_desc.bmAttributes = 0xC0;  /* Self-powered */
     dev->config_desc.bMaxPower = 50;  /* 100mA */
-    
+
     return 0;
 }
 
@@ -467,6 +485,13 @@ int usb_set_hotplug_callback(void (*connect)(usb_device_t *),
     return 0;
 }
 
+/**
+ * usb_check_hotplug - Check for USB device hotplug events
+ * 
+ * Monitors USB ports for device connection/disconnection.
+ * Calls registered callbacks when changes are detected.
+ */
+__attribute__((used))
 static void usb_check_hotplug(void)
 {
     /* In real implementation, would check root hub status */

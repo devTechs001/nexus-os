@@ -6,6 +6,7 @@
  * Provides PAM-compatible authentication interface
  */
 
+#include "auth.h"
 #include "../security.h"
 
 /*===========================================================================*/
@@ -198,7 +199,7 @@ static int pam_default_conv(int num_msg, const pam_message_t **msg,
                 /* In real implementation, would read from terminal */
                 /* For now, use appdata if available */
                 if (appdata_ptr) {
-                    (*resp)[i].resp = strdup((const char *)appdata_ptr);
+                    (*resp)[i].resp = kstrdup((const char *)appdata_ptr);
                 }
                 break;
 
@@ -436,7 +437,7 @@ int pam_set_item(pam_handle_t *pamh, int item_type, const void *item)
                 kfree(pamh->authtok);
             }
             if (item) {
-                str = strdup((const char *)item);
+                str = kstrdup((const char *)item);
                 if (!str) {
                     return PAM_BUF_ERR;
                 }
@@ -450,7 +451,7 @@ int pam_set_item(pam_handle_t *pamh, int item_type, const void *item)
                 kfree(pamh->oldauthtok);
             }
             if (item) {
-                str = strdup((const char *)item);
+                str = kstrdup((const char *)item);
                 if (!str) {
                     return PAM_BUF_ERR;
                 }
@@ -507,7 +508,8 @@ int pam_authenticate(pam_handle_t *pamh, int flags)
         msg.msg_style = 2;  /* PAM_PROMPT_ECHO_ON */
         msg.msg = "Username: ";
 
-        ret = pamh->conv.conv(1, &msg, &resp, pamh->conv.appdata_ptr);
+        const pam_message_t *msg_ptr = &msg;
+        ret = pamh->conv.conv(1, &msg_ptr, &resp, pamh->conv.appdata_ptr);
         if (ret != PAM_SUCCESS || !resp || !resp->resp) {
             spin_unlock(&pamh->lock);
             return PAM_CONV_ERR;
@@ -527,7 +529,8 @@ int pam_authenticate(pam_handle_t *pamh, int flags)
         msg.msg_style = 1;  /* PAM_PROMPT_ECHO_OFF */
         msg.msg = "Password: ";
 
-        ret = pamh->conv.conv(1, &msg, &resp, pamh->conv.appdata_ptr);
+        const pam_message_t *msg_ptr = &msg;
+        ret = pamh->conv.conv(1, &msg_ptr, &resp, pamh->conv.appdata_ptr);
         if (ret != PAM_SUCCESS || !resp || !resp->resp) {
             spin_unlock(&pamh->lock);
             return PAM_CONV_ERR;
@@ -747,13 +750,7 @@ int pam_close_session(pam_handle_t *pamh, int flags)
     }
 
     /* Find and close user's sessions */
-    for (i = 0; i < AUTH_MAX_SESSIONS; i++) {
-        session = auth_session_table[i];
-        if (session && session->magic == AUTH_SESSION_MAGIC &&
-            session->uid == auth_user->uid) {
-            auth_session_destroy(session->sid);
-        }
-    }
+    auth_destroy_user_sessions(auth_user->uid);
 
     pamh->last_status = PAM_SUCCESS;
     return PAM_SUCCESS;
@@ -799,10 +796,12 @@ int pam_chauthtok(pam_handle_t *pamh, int flags)
     /* Get old password */
     pam_get_item(pamh, PAM_OLDAUTHTOK, (const void **)&oldtok);
     if (!oldtok) {
+        /* Prompt for old password */
         msg.msg_style = 1;  /* PAM_PROMPT_ECHO_OFF */
         msg.msg = "Old Password: ";
 
-        ret = pamh->conv.conv(1, &msg, &resp, pamh->conv.appdata_ptr);
+        const pam_message_t *msg_ptr1 = &msg;
+        ret = pamh->conv.conv(1, &msg_ptr1, &resp, pamh->conv.appdata_ptr);
         if (ret != PAM_SUCCESS || !resp || !resp->resp) {
             return PAM_CONV_ERR;
         }
@@ -824,10 +823,12 @@ int pam_chauthtok(pam_handle_t *pamh, int flags)
     /* Get new password */
     pam_get_item(pamh, PAM_AUTHTOK, (const void **)&newtok);
     if (!newtok) {
+        /* Prompt for new password */
         msg.msg_style = 1;  /* PAM_PROMPT_ECHO_OFF */
         msg.msg = "New Password: ";
 
-        ret = pamh->conv.conv(1, &msg, &resp, pamh->conv.appdata_ptr);
+        const pam_message_t *msg_ptr2 = &msg;
+        ret = pamh->conv.conv(1, &msg_ptr2, &resp, pamh->conv.appdata_ptr);
         if (ret != PAM_SUCCESS || !resp || !resp->resp) {
             return PAM_CONV_ERR;
         }

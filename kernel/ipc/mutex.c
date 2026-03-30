@@ -629,7 +629,11 @@ void mutex_stats(mutex_t *mutex)
 
 /**
  * mutex_global_stats - Print global mutex statistics
+ * 
+ * Displays system-wide mutex statistics including active mutexes,
+ * acquisitions, contentions, and other metrics.
  */
+__attribute__((used))
 static void mutex_global_stats(void)
 {
     spin_lock(&mutex_global.lock);

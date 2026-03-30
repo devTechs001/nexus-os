@@ -45,7 +45,7 @@ static struct {
  *
  * Initializes the spinlock to unlocked state with default values.
  */
-void spin_lock_init(spinlock_t *lock)
+void spinlock_init(spinlock_t *lock)
 {
     if (!lock) {
         return;
@@ -64,11 +64,20 @@ void spin_lock_init(spinlock_t *lock)
 }
 
 /**
- * spin_lock_init_named - Initialize a spinlock with a name
+ * spin_lock_init_named - Alias for spinlock_init_named
+ */
+void spin_lock_init_named(spinlock_t *lock, const char *name)
+{
+    spinlock_init_named(lock, name);
+}
+
+/**
+ * spinlock_init_named - Initialize a spinlock with a name
+
  * @lock: Spinlock to initialize
  * @name: Lock name for debugging
  */
-void spin_lock_init_named(spinlock_t *lock, const char *name)
+void spinlock_init_named(spinlock_t *lock, const char *name)
 {
     if (!lock) {
         return;
@@ -120,12 +129,12 @@ static void __spin_lock_slowpath(spinlock_t *lock)
 
             if (spin_time > 0) {
                 contended = true;
-                spin_lock(&spinlock_global.lock);
+                spinlock_lock(&spinlock_global.lock);
                 spinlock_global.total_spin_time += spin_time;
                 if (spin_time > spinlock_global.max_spin_time) {
                     spinlock_global.max_spin_time = spin_time;
                 }
-                spin_unlock(&spinlock_global.lock);
+                spinlock_unlock(&spinlock_global.lock);
             }
 #endif
             lock->owner_cpu = get_cpu_id();
@@ -167,7 +176,7 @@ static void __spin_lock_slowpath(spinlock_t *lock)
  * This function disables preemption and should be used for short critical
  * sections only.
  */
-void spin_lock(spinlock_t *lock)
+void spinlock_lock(spinlock_t *lock)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC) {
         return;
@@ -194,7 +203,7 @@ void spin_lock(spinlock_t *lock)
  *
  * Returns: true if lock acquired, false otherwise
  */
-bool spin_trylock(spinlock_t *lock)
+bool spinlock_trylock(spinlock_t *lock)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC) {
         return false;
@@ -223,7 +232,7 @@ bool spin_trylock(spinlock_t *lock)
  *
  * Releases the spinlock, making it available for other CPUs.
  */
-void spin_unlock(spinlock_t *lock)
+void spinlock_unlock(spinlock_t *lock)
 {
     u64 hold_time;
 
@@ -261,50 +270,50 @@ void spin_unlock(spinlock_t *lock)
  * Disables local interrupts and acquires the spinlock.
  * Use when the lock may be taken from interrupt context.
  */
-void spin_lock_irq(spinlock_t *lock)
+void spinlock_lock_irq(spinlock_t *lock)
 {
     local_irq_disable();
-    spin_lock(lock);
+    spinlock_lock(lock);
 }
 
 /**
- * spin_unlock_irq - Release spinlock and enable interrupts
+ * spinlock_unlock_irq - Release spinlock and enable interrupts
  * @lock: Spinlock to release
  *
  * Releases the spinlock and enables local interrupts.
  */
-void spin_unlock_irq(spinlock_t *lock)
+void spinlock_unlock_irq(spinlock_t *lock)
 {
-    spin_unlock(lock);
+    spinlock_unlock(lock);
     local_irq_enable();
 }
 
 /**
- * spin_lock_irqsave - Acquire spinlock and save interrupt state
+ * spinlock_lock_irqsave - Acquire spinlock and save interrupt state
  * @lock: Spinlock to acquire
  * @flags: Storage for interrupt flags
  *
  * Saves the current interrupt state, disables interrupts, and acquires
  * the spinlock.
  */
-void spin_lock_irqsave(spinlock_t *lock, unsigned long *flags)
+void spinlock_lock_irqsave(spinlock_t *lock, unsigned long *flags)
 {
     /* In real implementation: save flags and disable interrupts */
-    *flags = 0;
+    if (flags) *flags = 0;
     local_irq_disable();
-    spin_lock(lock);
+    spinlock_lock(lock);
 }
 
 /**
- * spin_unlock_irqrestore - Release spinlock and restore interrupt state
+ * spinlock_unlock_irqrestore - Release spinlock and restore interrupt state
  * @lock: Spinlock to release
  * @flags: Saved interrupt flags
  *
  * Releases the spinlock and restores the saved interrupt state.
  */
-void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags)
+void spinlock_unlock_irqrestore(spinlock_t *lock, unsigned long flags)
 {
-    spin_unlock(lock);
+    spinlock_unlock(lock);
     /* In real implementation: restore flags */
     if (flags) {
         local_irq_enable();
@@ -321,7 +330,7 @@ void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags)
  *
  * Returns: true if locked, false if unlocked
  */
-bool spin_is_locked(spinlock_t *lock)
+bool spinlock_is_locked(spinlock_t *lock)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC) {
         return false;
@@ -331,12 +340,12 @@ bool spin_is_locked(spinlock_t *lock)
 }
 
 /**
- * spin_is_contended - Check if spinlock has contention
+ * spinlock_is_contended - Check if spinlock has contention
  * @lock: Spinlock to check
  *
  * Returns: true if there is contention, false otherwise
  */
-bool spin_is_contended(spinlock_t *lock)
+bool spinlock_is_contended(spinlock_t *lock)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC) {
         return false;
@@ -346,12 +355,12 @@ bool spin_is_contended(spinlock_t *lock)
 }
 
 /**
- * spin_lock_cpu - Get CPU that owns the lock
+ * spinlock_lock_cpu - Get CPU that owns the lock
  * @lock: Spinlock to query
  *
  * Returns: CPU ID of owner, or 0xFFFFFFFF if unlocked
  */
-u32 spin_lock_cpu(spinlock_t *lock)
+u32 spinlock_lock_cpu(spinlock_t *lock)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC) {
         return 0xFFFFFFFF;
@@ -365,12 +374,12 @@ u32 spin_lock_cpu(spinlock_t *lock)
 /*===========================================================================*/
 
 /**
- * spin_lock_assert - Assert that spinlock is held
+ * spinlock_lock_assert - Assert that spinlock is held
  * @lock: Spinlock to check
  *
  * Panics if the lock is not held by the current CPU.
  */
-void spin_lock_assert(spinlock_t *lock)
+void spinlock_lock_assert(spinlock_t *lock)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC) {
         kernel_panic("Spinlock: Invalid lock pointer\n");
@@ -387,11 +396,11 @@ void spin_lock_assert(spinlock_t *lock)
 }
 
 /**
- * spin_lock_stats - Get spinlock statistics
+ * spinlock_get_stats - Get spinlock statistics
  * @lock: Spinlock to query
  * @stats: Statistics structure to fill
  */
-void spin_lock_stats(spinlock_t *lock, struct spinlock_stats *stats)
+void spinlock_get_stats(spinlock_t *lock, struct spinlock_stats *stats)
 {
     if (!lock || lock->magic != SPINLOCK_MAGIC || !stats) {
         return;
@@ -418,7 +427,7 @@ void spin_lock_stats(spinlock_t *lock, struct spinlock_stats *stats)
  */
 void spinlock_global_stats(void)
 {
-    spin_lock(&spinlock_global.lock);
+    spinlock_lock(&spinlock_global.lock);
 
     printk("\n=== Global Spinlock Statistics ===\n");
     printk("Total Lock Acquisitions: %d\n", atomic_read(&spinlock_global.total_locks));
@@ -433,7 +442,7 @@ void spinlock_global_stats(void)
         printk("Contention Rate: %u%%\n", contention_rate);
     }
 
-    spin_unlock(&spinlock_global.lock);
+    spinlock_unlock(&spinlock_global.lock);
 }
 
 /**
@@ -456,7 +465,7 @@ void spinlock_subsystem_init(void)
 {
     pr_info("Initializing Spinlock Subsystem...\n");
 
-    spin_lock_init(&spinlock_global.lock);
+    spinlock_init(&spinlock_global.lock);
     atomic_set(&spinlock_global.total_locks, 0);
     atomic_set(&spinlock_global.total_contentions, 0);
     atomic_set(&spinlock_global.active_locks, 0);

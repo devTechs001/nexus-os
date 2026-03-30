@@ -168,7 +168,7 @@ int power_manager_shutdown(void)
 /*                         CPU FREQUENCY SCALING                             */
 /*===========================================================================*/
 
-int cpu_set_frequency(u32 cpu_id, u32 freq_khz)
+int pm_cpu_set_frequency(u32 cpu_id, u32 freq_khz)
 {
     if (cpu_id >= g_pm.cpu_count) return -EINVAL;
     
@@ -189,7 +189,7 @@ int cpu_set_frequency(u32 cpu_id, u32 freq_khz)
     return 0;
 }
 
-int cpu_get_frequency(u32 cpu_id)
+int pm_cpu_get_frequency(u32 cpu_id)
 {
     if (cpu_id >= g_pm.cpu_count) return 0;
     
@@ -219,40 +219,79 @@ int cpu_set_governor(u32 cpu_id, u32 governor)
     return 0;
 }
 
+/**
+ * ondemand_governor - On-demand CPU frequency governor
+ * @cpu_id: CPU to adjust
+ * @load: Current CPU load percentage (0-100)
+ * 
+ * Dynamically adjusts CPU frequency based on current load.
+ * Increases frequency when load exceeds 80%, decreases when below 20%.
+ */
+__attribute__((used))
 static void ondemand_governor(u32 cpu_id, u32 load)
 {
     cpu_info_t *cpu = &g_pm.cpus[cpu_id];
-    
+
+    if (!cpu || !cpu->state_count) return;
+
+    /* Hysteresis to prevent rapid oscillation */
     if (load > 80 && cpu->current_state < cpu->max_state) {
+        /* High load - increase frequency */
         cpu->current_state++;
+        cpu_set_frequency(cpu_id, cpu->states[cpu->current_state].freq);
+        pr_debug("[GOVERNOR] CPU%u: Load %u%% - UP to state %u\n", 
+                 cpu_id, load, cpu->current_state);
     } else if (load < 20 && cpu->current_state > cpu->min_state) {
+        /* Low load - decrease frequency */
         cpu->current_state--;
+        cpu_set_frequency(cpu_id, cpu->states[cpu->current_state].freq);
+        pr_debug("[GOVERNOR] CPU%u: Load %u%% - DOWN to state %u\n",
+                 cpu_id, load, cpu->current_state);
     }
 }
 
+/**
+ * schedutil_governor - Scheduler-driven CPU frequency governor
+ * @cpu_id: CPU to adjust
+ * @util: Current CPU utilization
+ * @max: Maximum utilization
+ * 
+ * Uses scheduler utilization hints to set optimal frequency.
+ * Provides smoother frequency transitions than ondemand.
+ */
+__attribute__((used))
 static void schedutil_governor(u32 cpu_id, u32 util, u32 max)
 {
     cpu_info_t *cpu = &g_pm.cpus[cpu_id];
-    
-    /* Calculate target frequency based on utilization */
+
+    if (!cpu || !cpu->state_count || max == 0) return;
+
+    /* Calculate target frequency based on utilization ratio */
     u32 target_freq = (util * cpu->states[cpu->max_state].freq) / max;
-    
-    /* Find closest state */
+
+    /* Find closest frequency state */
+    u32 best_state = cpu->max_state;
     for (u32 i = 0; i < cpu->state_count; i++) {
         if (cpu->states[i].freq >= target_freq) {
-            cpu->current_state = i;
-            return;
+            best_state = i;
+            break;
         }
     }
-    
-    cpu->current_state = cpu->state_count - 1;
+
+    /* Apply frequency change with rate limiting */
+    if (best_state != cpu->current_state) {
+        cpu->current_state = best_state;
+        cpu_set_frequency(cpu_id, cpu->states[cpu->current_state].freq);
+        pr_debug("[GOVERNOR] CPU%u: Util %u/%u - Freq %u MHz\n",
+                 cpu_id, util, max, cpu->states[cpu->current_state].freq);
+    }
 }
 
 /*===========================================================================*/
 /*                         IDLE STATES                                       */
 /*===========================================================================*/
 
-int cpu_idle(u32 cpu_id, u32 state)
+int pm_cpu_idle_state(u32 cpu_id, u32 state)
 {
     if (cpu_id >= g_pm.cpu_count) return -EINVAL;
     
@@ -376,26 +415,81 @@ int thermal_set_fan_speed(u32 device_id, u32 speed)
     return 0;
 }
 
+/**
+ * thermal_check_zones - Check all thermal zones and take action
+ * 
+ * Monitors all thermal zones and triggers appropriate cooling actions:
+ * - Critical: Emergency shutdown
+ * - Active: Increase fan speed, reduce CPU frequency
+ * - Passive: Reduce CPU frequency only
+ */
+__attribute__((used))
 static void thermal_check_zones(void)
 {
     for (u32 i = 0; i < g_pm.thermal_zone_count; i++) {
         thermal_zone_t *zone = &g_pm.thermal_zones[i];
-        
+
+        if (!zone || !zone->is_valid) continue;
+
         s32 temp = thermal_get_temperature(i);
-        
+
         if (temp >= zone->critical_threshold) {
-            /* Critical: emergency shutdown */
-            printk("[THERMAL] CRITICAL: Zone '%s' at %d°C!\n", 
-                   zone->name, temp / 1000);
-            /* Trigger emergency shutdown */
+            /* Critical temperature - emergency shutdown required */
+            pr_emerg("[THERMAL] CRITICAL: Zone '%s' at %d°C! Emergency shutdown!\n",
+                     zone->name, temp / 1000);
+            
+            /* Trigger emergency thermal shutdown */
+            for (u32 cpu = 0; cpu < g_pm.cpu_count; cpu++) {
+                cpu_set_frequency(cpu, g_pm.cpus[cpu].states[g_pm.cpus[cpu].min_state].freq);
+            }
+            
+            /* Force maximum cooling */
+            for (u32 fan = 0; fan < g_pm.cooling_device_count; fan++) {
+                thermal_set_fan_speed(fan, 100);
+            }
+            
         } else if (temp >= zone->active_threshold) {
-            /* Active cooling */
-            printk("[THERMAL] Zone '%s' at %d°C - activating cooling\n",
-                   zone->name, temp / 1000);
-            /* Increase fan speed, reduce CPU freq */
+            /* Active cooling required */
+            pr_info("[THERMAL] Zone '%s' at %d°C - activating cooling\n",
+                    zone->name, temp / 1000);
+            
+            /* Increase fan speed proportionally */
+            u32 fan_speed = 70 + ((temp - zone->active_threshold) * 30) / 
+                            (zone->critical_threshold - zone->active_threshold);
+            if (fan_speed > 100) fan_speed = 100;
+            
+            for (u32 fan = 0; fan < g_pm.cooling_device_count; fan++) {
+                thermal_set_fan_speed(fan, fan_speed);
+            }
+            
+            /* Reduce CPU frequency if temperature is high */
+            for (u32 cpu = 0; cpu < g_pm.cpu_count; cpu++) {
+                if (g_pm.cpus[cpu].current_state > g_pm.cpus[cpu].min_state) {
+                    g_pm.cpus[cpu].current_state--;
+                }
+            }
+            
         } else if (temp >= zone->passive_threshold) {
-            /* Passive cooling */
-            /* Reduce CPU frequency */
+            /* Passive cooling - frequency reduction only */
+            pr_debug("[THERMAL] Zone '%s' at %d°C - passive cooling\n",
+                     zone->name, temp / 1000);
+            
+            /* Gradually restore CPU frequency if cooling down */
+            for (u32 cpu = 0; cpu < g_pm.cpu_count; cpu++) {
+                if (g_pm.cpus[cpu].current_state < g_pm.cpus[cpu].max_state) {
+                    g_pm.cpus[cpu].current_state++;
+                }
+            }
+        } else {
+            /* Normal temperature - restore maximum performance */
+            for (u32 cpu = 0; cpu < g_pm.cpu_count; cpu++) {
+                g_pm.cpus[cpu].current_state = g_pm.cpus[cpu].max_state;
+            }
+            
+            /* Reduce fan speed to minimum */
+            for (u32 fan = 0; fan < g_pm.cooling_device_count; fan++) {
+                thermal_set_fan_speed(fan, 20);
+            }
         }
     }
 }
@@ -404,7 +498,7 @@ static void thermal_check_zones(void)
 /*                         POWER STATISTICS                                  */
 /*===========================================================================*/
 
-int power_get_stats(u64 *active_time, u64 *sleep_time, u32 *avg_power)
+int power_manager_get_stats_legacy(u64 *active_time, u64 *sleep_time, u32 *avg_power)
 {
     u64 now = ktime_get_sec();
     g_pm.total_active_time += (now - g_pm.resume_time);

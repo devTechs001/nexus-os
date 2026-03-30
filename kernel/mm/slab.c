@@ -823,8 +823,14 @@ void kmem_cache_free(void *cache_ptr, void *obj)
 /*===========================================================================*/
 
 /**
- * slab_alloc - Allocate from general purpose caches
+ * slab_alloc - Allocate object from general purpose slab caches
+ * @size: Size in bytes to allocate
+ * 
+ * Selects appropriate slab cache based on size and allocates object.
+ * Falls back to kmalloc for sizes larger than cache support.
+ * Returns pointer to allocated memory, or NULL on failure.
  */
+__attribute__((used))
 static void *slab_alloc(size_t size)
 {
     struct slab_cache *cache = NULL;
@@ -857,8 +863,14 @@ static void *slab_alloc(size_t size)
 }
 
 /**
- * slab_free - Free to general purpose caches
+ * slab_free - Free object to general purpose slab caches
+ * @cache: Slab cache (or NULL for automatic detection)
+ * @obj: Object to free
+ * 
+ * Frees object back to appropriate slab cache.
+ * If cache is NULL or invalid, falls back to kfree.
  */
+__attribute__((used))
 static void slab_free(void *cache, void *obj)
 {
     if (cache && ((struct slab_cache *)cache)->magic == SLAB_MAGIC) {

@@ -31,9 +31,9 @@ static void *ahci_alloc_contiguous(u32 size, phys_addr_t *phys);
 static void ahci_free_contiguous(void *virt, phys_addr_t phys, u32 size);
 
 /* Controller Operations */
-static int ahci_controller_reset(ahci_controller_t *ctrl);
-static int ahci_controller_init(ahci_controller_t *ctrl);
-static int ahci_port_init(ahci_controller_t *ctrl, u32 port_num);
+int ahci_controller_reset(ahci_controller_t *ctrl);
+int ahci_controller_init(ahci_controller_t *ctrl);
+int ahci_port_init(ahci_controller_t *ctrl, u32 port_num);
 
 /* Command Operations */
 static int ahci_build_command(ahci_port_t *port, u8 cmd, u64 lba, u32 count, void *buffer, phys_addr_t phys);
@@ -41,8 +41,8 @@ static int ahci_issue_command(ahci_port_t *port);
 static int ahci_wait_command_complete(ahci_port_t *port, u32 timeout_ms);
 
 /* Device Operations */
-static int ahci_identify_device(ahci_port_t *port);
-static int ahci_smart_enable(ahci_port_t *port);
+int ahci_identify_device(ahci_port_t *port);
+int ahci_smart_enable(ahci_port_t *port);
 
 /*===========================================================================*/
 /*                         MMIO REGISTER ACCESS                              */
@@ -367,7 +367,7 @@ int ahci_list_controllers(ahci_controller_t *ctrls, u32 *count)
 /**
  * ahci_controller_init - Initialize AHCI controller
  */
-static int ahci_controller_init(ahci_controller_t *ctrl)
+int ahci_controller_init(ahci_controller_t *ctrl)
 {
     if (!ctrl) {
         return -EINVAL;
@@ -444,7 +444,7 @@ static int ahci_controller_init(ahci_controller_t *ctrl)
 /**
  * ahci_controller_reset - Reset AHCI controller
  */
-static int ahci_controller_reset(ahci_controller_t *ctrl)
+int ahci_controller_reset(ahci_controller_t *ctrl)
 {
     if (!ctrl) {
         return -EINVAL;
@@ -522,7 +522,7 @@ int ahci_controller_disable(ahci_controller_t *ctrl)
 /**
  * ahci_port_init - Initialize AHCI port
  */
-static int ahci_port_init(ahci_controller_t *ctrl, u32 port_num)
+int ahci_port_init(ahci_controller_t *ctrl, u32 port_num)
 {
     if (!ctrl || port_num >= 32) {
         return -EINVAL;
@@ -616,7 +616,7 @@ static int ahci_port_init(ahci_controller_t *ctrl, u32 port_num)
 /**
  * ahci_port_detect_device - Detect device on port
  */
-static int ahci_port_detect_device(ahci_controller_t *ctrl, u32 port_num)
+int ahci_port_detect_device(ahci_controller_t *ctrl, u32 port_num)
 {
     if (!ctrl) {
         return -EINVAL;
@@ -710,7 +710,7 @@ int ahci_port_stop(ahci_controller_t *ctrl, u32 port_num)
 /**
  * ahci_identify_device - Identify device
  */
-static int ahci_identify_device(ahci_port_t *port)
+int ahci_identify_device(ahci_port_t *port)
 {
     if (!port) {
         return -EINVAL;
@@ -834,7 +834,7 @@ int ahci_read_sector(ahci_port_t *port, u64 lba, u32 count, void *buffer)
     memcpy(buffer, dma_buffer, count * 512);
     
     /* Update statistics */
-    port->reads++;
+    port->host_reads++;
     port->read_bytes += count * 512;
     
     ahci_free_contiguous(dma_buffer, phys, count * 512);
@@ -883,7 +883,7 @@ int ahci_write_sector(ahci_port_t *port, u64 lba, u32 count, const void *buffer)
     /* In real implementation, would submit through hardware */
     
     /* Update statistics */
-    port->writes++;
+    port->host_writes++;
     port->write_bytes += count * 512;
     
     ahci_free_contiguous(dma_buffer, phys, count * 512);
@@ -925,7 +925,7 @@ int ahci_flush_cache(ahci_port_t *port)
 /**
  * ahci_smart_enable - Enable SMART
  */
-static int ahci_smart_enable(ahci_port_t *port)
+int ahci_smart_enable(ahci_port_t *port)
 {
     if (!port) {
         return -EINVAL;

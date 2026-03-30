@@ -17,6 +17,13 @@
 /*                         WINDOW MANAGER STATE                              */
 /*===========================================================================*/
 
+typedef struct window_class {
+    char name[64];
+    void (*wnd_proc)(window_t *, u32, void *, void *);
+    u32 style;
+    color_t background;
+} window_class_t;
+
 static struct {
     bool initialized;
     
@@ -35,12 +42,7 @@ static struct {
     u32 top_z_order;
     
     /* Window classes */
-    struct {
-        char name[64];
-        void (*wnd_proc)(window_t *, u32, void *, void *);
-        u32 style;
-        color_t background;
-    } window_classes[32];
+    window_class_t window_classes[32];
     u32 num_classes;
     
     /* Desktop window */
@@ -776,12 +778,7 @@ int window_manager_register_class(const char *name,
 
     spin_lock(&g_window_manager.lock);
 
-    struct {
-        char name[64];
-        void (*wnd_proc)(window_t *, u32, void *, void *);
-        u32 style;
-        color_t background;
-    } *cls = &g_window_manager.window_classes[g_window_manager.num_classes];
+    window_class_t *cls = &g_window_manager.window_classes[g_window_manager.num_classes];
 
     strncpy(cls->name, name, sizeof(cls->name) - 1);
     cls->wnd_proc = wnd_proc;

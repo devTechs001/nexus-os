@@ -589,33 +589,41 @@ int gpu_mem_free(gpu_bo_t *bo)
 /*                         SCHEDULER THREAD                                  */
 /*===========================================================================*/
 
+/**
+ * gpu_sched_run - GPU scheduler main thread
+ * @arg: Unused argument
+ * 
+ * Main scheduler loop that processes GPU command queues,
+ * submits jobs to hardware, and manages fence signaling.
+ */
+__attribute__((used))
 static void gpu_sched_run(void *arg)
 {
     (void)arg;
-    
+
     while (g_gpu_sched.scheduler_running) {
         /* Process each queue */
         for (u32 q = 0; q < g_gpu_sched.queue_count; q++) {
             gpu_queue_t *queue = &g_gpu_sched.queues[q];
-            
+
             if (queue->suspended || queue->job_count == 0) {
                 continue;
             }
-            
+
             /* Get next job */
             gpu_job_t *job = queue->jobs[queue->head];
-            
+
             if (job->state == GPU_JOB_STATE_PENDING) {
                 /* Execute job */
                 job->state = GPU_JOB_STATE_RUNNING;
                 job->start_time = ktime_get_us();
-                
+
                 /* In real implementation, would submit to hardware */
                 /* Simulate execution */
                 job->state = GPU_JOB_STATE_COMPLETE;
                 job->end_time = ktime_get_us();
                 job->result = 0;
-                
+
                 /* Signal fence */
                 gpu_fence_t *fence = NULL;
                 for (u32 i = 0; i < g_gpu_sched.fence_count; i++) {
@@ -624,7 +632,7 @@ static void gpu_sched_run(void *arg)
                         break;
                     }
                 }
-                
+
                 if (fence) {
                     fence->signaled = true;
                     fence->timestamp = job->end_time;

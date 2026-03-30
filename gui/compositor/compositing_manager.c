@@ -96,21 +96,45 @@ static compositor_state_t g_comp;
 /*===========================================================================*/
 
 /* Integer-based easing functions to avoid SSE on x86_64 */
+
+/**
+ * ease_linear - Linear easing function
+ * @t: Time value (0-256)
+ * Returns: Interpolated value
+ */
+__attribute__((used))
 static int ease_linear(int t)
 {
     return t;
 }
 
+/**
+ * ease_in_quad - Quadratic ease in
+ * @t: Time value (0-256)
+ * Returns: Interpolated value with quadratic acceleration
+ */
 static int ease_in_quad(int t)
 {
     return (t * t) / 256;
 }
 
+/**
+ * ease_out_quad - Quadratic ease out
+ * @t: Time value (0-256)
+ * Returns: Interpolated value with quadratic deceleration
+ */
+__attribute__((used))
 static int ease_out_quad(int t)
 {
     return (t * (512 - t)) / 256;
 }
 
+/**
+ * ease_in_out_quad - Quadratic ease in and out
+ * @t: Time value (0-256)
+ * Returns: Interpolated value with quadratic acceleration and deceleration
+ */
+__attribute__((used))
 static int ease_in_out_quad(int t)
 {
     if (t < 128) return (2 * t * t) / 256;
@@ -123,12 +147,22 @@ static int ease_out_cubic(int t)
     return 256 - (inv * inv * inv) / 65536;
 }
 
+static int pow3(int x) {
+    return x * x * x;
+}
+
 static int ease_in_out_cubic(int t)
 {
     if (t < 128) return (4 * t * t * t) / 65536;
-    return 256 - (pow(-2 * t + 512, 3) / 2) / 65536;
+    int v = -2 * t + 512;
+    return 256 - (pow3(v) / 2) / 65536;
 }
 
+/**
+ * ease_out_elastic - Elastic ease out
+ * @t: Time value (0-256)
+ * Returns: Interpolated value with elastic overshoot
+ */
 static int ease_out_elastic(int t)
 {
     /* Simplified elastic easing using integer math */
@@ -136,6 +170,12 @@ static int ease_out_elastic(int t)
     return 256 + (t * (256 - t)) / 64;
 }
 
+/**
+ * ease_out_bounce - Bounce ease out
+ * @t: Time value (0-256)
+ * Returns: Interpolated value with bouncing effect
+ */
+__attribute__((used))
 static int ease_out_bounce(int t)
 {
     if (t < 93) return (7 * t * t) / 256;
@@ -147,7 +187,7 @@ static int ease_out_bounce(int t)
 /*                         INITIALIZATION                                    */
 /*===========================================================================*/
 
-int compositor_init(void)
+int compositing_manager_init(void)
 {
     printk("[COMP] ========================================\n");
     printk("[COMP] NEXUS OS Compositing Manager\n");
@@ -174,6 +214,49 @@ int compositor_init(void)
     printk("[COMP]   VSync: %s\n", g_comp.vsync_enabled ? "ON" : "OFF");
     printk("[COMP]   Animations: %s\n", g_comp.animations_enabled ? "ON" : "OFF");
     
+    return 0;
+}
+
+int compositor_add_window(window_t *window)
+{
+    if (!window || g_comp.decor_count >= COMP_MAX_WINDOWS) {
+        return -1;
+    }
+    
+    spin_lock(&g_comp.lock);
+    
+    comp_window_decor_t *decor = &g_comp.decorations[g_comp.decor_count++];
+    decor->window_id = window->window_id;
+    decor->opacity = 255;
+    decor->has_shadow = true;
+    decor->has_border = true;
+    decor->rounded_corners = true;
+    decor->corner_radius = COMP_BLUR_RADIUS;
+    
+    spin_unlock(&g_comp.lock);
+    return 0;
+}
+
+int compositor_remove_window(window_t *window)
+{
+    if (!window) return -1;
+    
+    spin_lock(&g_comp.lock);
+    for (u32 i = 0; i < g_comp.decor_count; i++) {
+        if (g_comp.decorations[i].window_id == window->window_id) {
+            /* Move last to this position */
+            g_comp.decorations[i] = g_comp.decorations[--g_comp.decor_count];
+            break;
+        }
+    }
+    spin_unlock(&g_comp.lock);
+    return 0;
+}
+
+int compositor_update_window(window_t *window)
+{
+    /* Mark as damaged/dirty for re-compositing */
+    (void)window;
     return 0;
 }
 
@@ -555,7 +638,7 @@ int compositor_composite(void *output_surface)
     return 0;
 }
 
-int compositor_wait_vsync(compositor_t *comp)
+int compositing_manager_wait_vsync(compositor_t *comp)
 {
     (void)comp;  /* Use parameter */
     if (!g_comp.vsync_enabled) return 0;

@@ -38,7 +38,7 @@ static int create_on_screen_keyboard(login_screen_t *screen);
 static void on_login_button_clicked(widget_t *button);
 static void on_cancel_button_clicked(widget_t *button);
 static void on_user_selected(widget_t *widget);
-static void on_session_changed(widget_t *widget);
+static void on_session_changed(widget_t *widget, const char *text);
 static void on_power_clicked(widget_t *widget);
 static void on_accessibility_clicked(widget_t *widget);
 static void on_password_changed(widget_t *widget, const char *text);
@@ -1300,13 +1300,14 @@ static void on_user_selected(widget_t *widget)
 /**
  * on_session_changed - Handle session type change
  * @widget: Combobox widget
+ * @text: Selected session name
  */
-static void on_session_changed(widget_t *widget)
+static void on_session_changed(widget_t *widget, const char *text)
 {
     if (!widget || !widget->user_data) return;
     
     login_screen_t *screen = (login_screen_t *)widget->user_data;
-    /* Would get selected index from combobox */
+    /* Would get selected index from combobox based on text */
     u32 session_index = 0;
     
     login_screen_select_session(screen, session_index);

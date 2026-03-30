@@ -82,23 +82,6 @@ static vga_driver_t g_vga;
 /*                         LOW-LEVEL VGA OPERATIONS                          */
 /*===========================================================================*/
 
-static inline void vga_outb(u16 port, u8 value)
-{
-    asm volatile("outb %0, %1" :: "a"(value), "d"(port));
-}
-
-static inline u8 vga_inb(u16 port)
-{
-    u8 value;
-    asm volatile("inb %1, %0" : "=a"(value) : "d"(port));
-    return value;
-}
-
-static inline void vga_outw(u16 port, u16 value)
-{
-    asm volatile("outw %0, %1" :: "a"(value), "d"(port));
-}
-
 static void vga_write_seq(u8 index, u8 value)
 {
     vga_outb(VGA_SEQ_PORT, index);

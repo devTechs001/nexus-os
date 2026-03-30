@@ -33,7 +33,7 @@ static int sd_init_mmc_card(sd_controller_t *ctrl, sd_device_t *dev);
 static int sd_init_emmc_card(sd_controller_t *ctrl, sd_device_t *dev);
 
 /* Command operations */
-static int sd_send_command(sd_controller_t *ctrl, sd_cmd_t *cmd);
+int sd_send_command(sd_controller_t *ctrl, sd_cmd_t *cmd);
 static int sd_wait_command(sd_controller_t *ctrl, u32 timeout_ms);
 static int sd_wait_data(sd_controller_t *ctrl, u32 timeout_ms);
 
@@ -597,8 +597,8 @@ static int sd_init_emmc_card(sd_controller_t *ctrl, sd_device_t *dev)
     
     /* Get partition info */
     dev->partition_count = 1;  /* User area */
-    if (dev->ext_csd.rpmb_size != 0) {
-        dev->rpmb_size = dev->ext_csd.rpmb_size * 128 * 1024;  /* 128KB units */
+    if (dev->ext_csd.rpmb_size_mult != 0) {
+        dev->rpmb_size = dev->ext_csd.rpmb_size_mult * 128 * 1024;  /* 128KB units */
         dev->partition_count++;
     }
     
@@ -687,9 +687,23 @@ int sd_list_devices(sd_device_t *devices, u32 *count)
 /*===========================================================================*/
 
 /**
+ * sd_wait_ready - Wait for SD controller to be ready
+ */
+int sd_wait_ready(sd_controller_t *ctrl, u32 timeout_ms)
+{
+    u32 start = get_time_ms();
+    while (get_time_ms() - start < timeout_ms) {
+        /* Check controller status - real implementation would check a register */
+        if (ctrl && ctrl->is_initialized) return 0;
+        delay_ms(1);
+    }
+    return -ETIMEDOUT;
+}
+
+/**
  * sd_send_command - Send SD/MMC command
  */
-static int sd_send_command(sd_controller_t *ctrl, sd_cmd_t *cmd)
+int sd_send_command(sd_controller_t *ctrl, sd_cmd_t *cmd)
 {
     if (!ctrl || !cmd) {
         return -EINVAL;

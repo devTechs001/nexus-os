@@ -255,24 +255,31 @@ int dm_parse_edid(u32 connector_id, display_mode_t *modes, u32 *mode_count)
 /*                         HOTPLUG DETECTION                                 */
 /*===========================================================================*/
 
+/**
+ * check_hotplug - Check for display hotplug events
+ * 
+ * Monitors display adapters for connection/disconnection events.
+ * Calls registered hotplug callback when changes are detected.
+ */
+__attribute__((used))
 static void check_hotplug(void)
 {
     u32 current_state = 0;
-    
+
     /* Check each connector for changes */
     for (u32 i = 0; i < g_dm.adapter_count; i++) {
         display_adapter_t *adapter = &g_dm.adapters[i];
-        
+
         /* In real implementation, would check HPD (Hot Plug Detect) pin */
         /* Mock: assume all adapters are connected */
         if (adapter->is_active) {
             current_state |= (1 << i);
         }
     }
-    
+
     /* Detect changes */
     u32 changed = current_state ^ g_dm.last_hotplug_state;
-    
+
     if (changed && g_dm.on_hotplug) {
         for (u32 i = 0; i < g_dm.adapter_count; i++) {
             if (changed & (1 << i)) {

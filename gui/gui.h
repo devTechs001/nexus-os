@@ -248,6 +248,9 @@ struct window {
     
     /* Reference counting */
     atomic_t refcount;
+
+    /* User data */
+    void *user_data;
 };
 
 /**
@@ -358,6 +361,8 @@ typedef struct animation {
  */
 typedef struct graphics_context {
     void *surface;              /* Drawing surface */
+    u32 width;                  /* Surface width */
+    u32 height;                 /* Surface height */
     rect_t clip_rect;           /* Clip rectangle */
     color_t foreground;         /* Foreground color */
     color_t background;         /* Background color */

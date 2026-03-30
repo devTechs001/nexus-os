@@ -1,0 +1,12 @@
+continue.txt
+
+# Log files
+*.log
+continue.txt
+current.txt
+expected.txt
+objects.txt
+sources.txt
+
+# Build directory
+build/

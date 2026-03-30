@@ -32,7 +32,7 @@ static struct {
     atomic_t total_freed;             /* Total frees */
     atomic_t total_sent;              /* Total messages sent */
     atomic_t total_received;          /* Total messages received */
-    size_t total_messages;            /* Total messages in all queues */
+    atomic_t total_messages;            /* Total messages in all queues */
     struct list_head msgq_list;       /* List of all queues */
 } msgq_global = {
     .lock = { .lock = 0 },
@@ -41,7 +41,7 @@ static struct {
     .total_freed = ATOMIC_INIT(0),
     .total_sent = ATOMIC_INIT(0),
     .total_received = ATOMIC_INIT(0),
-    .total_messages = 0,
+    .total_messages = ATOMIC_INIT(0),
 };
 
 /* Key to ID hash table */
@@ -836,7 +836,7 @@ void msg_stats(void)
     printk("Total Freed: %d\n", atomic_read(&msgq_global.total_freed));
     printk("Total Messages Sent: %d\n", atomic_read(&msgq_global.total_sent));
     printk("Total Messages Received: %d\n", atomic_read(&msgq_global.total_received));
-    printk("Current Messages: %zu\n", msgq_global.total_messages);
+    printk("Current Messages: %d\n", atomic_read(&msgq_global.total_messages));
 
     printk("\nQueue Details:\n");
 
@@ -889,7 +889,7 @@ void msgq_init(void)
     atomic_set(&msgq_global.total_freed, 0);
     atomic_set(&msgq_global.total_sent, 0);
     atomic_set(&msgq_global.total_received, 0);
-    msgq_global.total_messages = 0;
+    atomic_set(&msgq_global.total_messages, 0);
 
     pr_info("  Maximum queues: %d\n", MSGQ_MAX_ID);
     pr_info("  Maximum message size: %d bytes\n", MSGMAX);

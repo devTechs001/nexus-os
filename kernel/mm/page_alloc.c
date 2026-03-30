@@ -649,8 +649,13 @@ void free_page(struct page *page)
 /*===========================================================================*/
 
 /**
- * gfp_to_zone - Convert GFP flags to zone
+ * gfp_to_zone - Convert GFP flags to memory zone
+ * @flags: GFP allocation flags
+ * 
+ * Converts GFP (Get Free Pages) flags to the appropriate memory zone.
+ * Returns ZONE_DMA, ZONE_DMA32, ZONE_NORMAL, or ZONE_HIGHMEM.
  */
+__attribute__((used))
 static u32 gfp_to_zone(u32 flags)
 {
     if (flags & GFP_DMA) {
@@ -666,8 +671,13 @@ static u32 gfp_to_zone(u32 flags)
 }
 
 /**
- * gfp_check - Validate GFP flags
+ * gfp_check - Validate GFP flags combination
+ * @flags: GFP allocation flags to validate
+ * 
+ * Validates GFP flags for invalid combinations.
+ * Returns true if flags are valid, false otherwise.
  */
+__attribute__((used))
 static bool gfp_check(u32 flags)
 {
     /* Check for invalid flag combinations */

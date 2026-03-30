@@ -144,8 +144,15 @@ typedef s64 result_t;
 #define EINTR           (-16)
 #define EFAULT          (-17)
 #define ENOTCONN        (-18)
-#define ENETDOWN        (-19)
+#define ENOSPC          (-19)
+#define ENETDOWN        (-20)
 #define EPIPE           (-25)
+#define EAFNOSUPPORT    (-26)
+#define EOPNOTSUPP      (-27)
+#define ENETUNREACH     (-28)
+#define EADDRNOTAVAIL   (-29)
+#define EPROTONOSUPPORT (-30)
+#define ENOPROTOOPT     (-31)
 
 /* File Descriptor */
 typedef s32 fd_t;

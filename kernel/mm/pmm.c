@@ -87,20 +87,29 @@ static ssize_t bitmap_find_free(u64 *bitmap, size_t nbits, size_t count)
 /*===========================================================================*/
 
 /**
- * pmm_add_region - Add memory region
+ * pmm_add_region - Add memory region to physical memory manager
+ * @start: Start physical address
+ * @end: End physical address
+ * @type: Memory type (RAM, RESERVED, ACPI, etc.)
+ * 
+ * Adds a physical memory region to the memory map.
+ * Returns 0 on success, -1 if maximum regions reached.
  */
+__attribute__((used))
 static int pmm_add_region(phys_addr_t start, phys_addr_t end, u32 type)
 {
     if (num_memory_regions >= MAX_MEMORY_REGIONS) {
+        pr_err("PMM: Maximum memory regions reached\n");
         return -1;
     }
-    
+
     memory_regions[num_memory_regions].start = start;
     memory_regions[num_memory_regions].end = end;
     memory_regions[num_memory_regions].type = type;
     memory_regions[num_memory_regions].flags = 0;
     num_memory_regions++;
-    
+
+    pr_debug("PMM: Added region 0x%X-0x%X type %u\n", start, end, type);
     return 0;
 }
 

@@ -20,12 +20,16 @@ VM_MEMORY="2048"
 VM_CPUS="2"
 VM_DISK_SIZE="20G"
 
+# VM Presets
+VM_PRESET="standard"  # minimal, standard, performance
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 log() {
@@ -43,6 +47,16 @@ print_banner() {
     echo ""
     echo "  NEXUS OS - Auto VMware Boot Manager"
     echo -e "${NC}"
+}
+
+print_presets() {
+    echo ""
+    echo -e "${CYAN}Available VM Presets:${NC}"
+    echo "  minimal    - 1 CPU, 1GB RAM, 10GB disk"
+    echo "  standard   - 2 CPUs, 2GB RAM, 20GB disk (default)"
+    echo "  performance - 4 CPUs, 4GB RAM, 40GB disk"
+    echo ""
+    echo -e "Usage: $0 --preset <preset>${NC}"
 }
 
 check_prerequisites() {
@@ -85,6 +99,9 @@ create_vm_config() {
     log "${YELLOW}Creating VMware VM configuration...${NC}"
     
     cat > "$VMX_FILE" << EOF
+# NEXUS OS - VMware Configuration
+# Generated for NEXUS OS Virtualization
+
 config.version = "8"
 virtualHW.version = "19"
 virtualHW.productCompatibility = "hosted"
@@ -94,14 +111,51 @@ nvram = "$VM_NAME.nvram"
 uuid.location = "56 4d $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 ))"
 uuid.bios = "56 4d $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 )) $(( RANDOM % 256 ))"
 
-# Memory and CPU
+# ============================================
+# ENHANCED HARDWARE CONFIGURATION
+# ============================================
+
+# Memory and CPU - Optimized for NEXUS OS
 memsize = "$VM_MEMORY"
 numvcpus = "$VM_CPUS"
 cpuid.coresPerSocket = "2"
+sched.cpu.latencySensitivity = "normal"
+sched.cpu.hyperthreadedKernel = "TRUE"
 
-# Boot configuration
+# ============================================
+# ENHANCED GRAPHICS CONFIGURATION
+# ============================================
+
+# SVGA Display with 3D Acceleration
+svga.present = "TRUE"
+svga.vramSize = "268435456"
+svga.numDisplays = "1"
+svga.displayName = "Auto-detect"
+svga.guestBackedPrimaryAwareEnabled = "TRUE"
+
+# 3D Graphics Acceleration
+mks.enable3d = "TRUE"
+mks.maxWidth = "2560"
+mks.maxHeight = "1600"
+mks.overrideWindowedMode = "TRUE"
+mks.windowedDirectMode = "FALSE"
+
+# Fullscreen resolution support
+pref.mruDisplays.userLevel = "6"
+pref.mruDisplays.enableAllDisplays = "TRUE"
+
+# ============================================
+# BOOT CONFIGURATION
+# ============================================
+
 boot.order = "cdrom"
 bios.bootOrder = "cdrom,hdd,ethernet"
+bios.bootDelay = "2000"
+bios.displayName = "NEXUS OS - Universal Operating System"
+
+# ============================================
+# ENHANCED STORAGE CONFIGURATION
+# ============================================
 
 # IDE CD-ROM for ISO
 ide1:0.present = "TRUE"
@@ -109,50 +163,135 @@ ide1:0.fileName = "$ISO_PATH"
 ide1:0.deviceType = "cdrom-image"
 ide1:0.startConnected = "TRUE"
 ide1:0.autodetect = "FALSE"
+ide1:0.mode = "persistent"
 
-# Hard disk (optional, for persistence)
+# SCSI Controller for Hard disk
 scsi0.present = "TRUE"
 scsi0.virtualDev = "lsilogic"
+scsi0.sharedBus = "none"
 scsi0:0.present = "TRUE"
 scsi0:0.fileName = "$VM_NAME.vmdk"
 scsi0:0.writeThrough = "FALSE"
+scsi0:0.deviceType = "scsi-hardDisk"
 
-# Network
+# ============================================
+# ADVANCED NETWORK CONFIGURATION
+# ============================================
+
+# Primary Network Adapter (NAT)
 ethernet0.present = "TRUE"
 ethernet0.connectionType = "nat"
 ethernet0.virtualDev = "vmxnet3"
 ethernet0.wakeOnPcktRcv = "FALSE"
 ethernet0.addressType = "generated"
+ethernet0.MACAddress = "00:0c:29:$(printf '%02x' $((RANDOM%256))):$(printf '%02x' $((RANDOM%256))):$(printf '%02x' $((RANDOM%256)))"
 
-# USB
+# Secondary Network Adapter (Host-only)
+ethernet1.present = "TRUE"
+ethernet1.connectionType = "hostonly"
+ethernet1.virtualDev = "vmxnet3"
+ethernet1.addressType = "generated"
+
+# ============================================
+# USB AND INPUT DEVICES
+# ============================================
+
+# USB Controller
 usb.present = "TRUE"
+usb.xhci.present = "TRUE"
 ehci.present = "TRUE"
 uhci.present = "TRUE"
 
-# Sound (optional)
-sound.present = "FALSE"
+# Pointing devices
+pointingDevice.present = "TRUE"
+mouse.vusb.enable = "TRUE"
 
-# Display
-svga.vramSize = "128"
-svga.autodetect = "TRUE"
-mks.enable3d = "FALSE"
+# Keyboard
+keyboard.present = "TRUE"
 
-# Power management
+# ============================================
+# SOUND CONFIGURATION
+# ============================================
+
+sound.present = "TRUE"
+sound.virtualDev = "hdaudio"
+sound.fileName = "-1"
+sound.autodetect = "TRUE"
+
+# ============================================
+# SHARED FOLDERS
+# ============================================
+
+# Enable HGFS for shared folders
+isolation.tools.hgfs.disable = "FALSE"
+isolation.tools.hgfs.folderAutoMount = "TRUE"
+
+# ============================================
+# ENHANCED GUEST FEATURES
+# ============================================
+
+# Copy/Paste and Drag/Drop
+isolation.tools.dnd.disable = "FALSE"
+isolation.tools.copy.disable = "FALSE"
+isolation.tools.paste.disable = "FALSE"
+
+# Time synchronization
+tools.syncTime = "TRUE"
+time.synchronize.continue = "TRUE"
+time.synchronize.restore = "TRUE"
+time.synchronize.resume.disk = "TRUE"
+time.synchronize.resume.memory = "TRUE"
+
+# ============================================
+# VMWARE SPECIFIC OPTIMIZATIONS
+# ============================================
+
+# Hardware virtualization
+vhv.enable = "TRUE"
+
+# Memory management
+sched.mem.pshare.enable = "TRUE"
+sched.mem.min = "512"
+sched.mem.max = "$VM_MEMORY"
+
+# CPU management
+monitor.virtual_exec = "hardware"
+monitor.virtual_mmu = "hardware"
+
+# I/O management
+sched.scsi0:0.shares = "normal"
+sched.scsi0:0.latency = "normal"
+
+# Network performance
+net.rmtDev0.enable = "TRUE"
+net.tcpipEnabled = "TRUE"
+
+# ============================================
+# POWER MANAGEMENT
+# ============================================
+
 powerType.powerOff = "soft"
 powerType.powerOn = "soft"
 powerType.suspend = "soft"
 powerType.reset = "soft"
 
-# VMware Tools (not needed for NEXUS OS but good to have)
-isolation.tools.hgfs.disable = "FALSE"
-isolation.tools.dnd.disable = "FALSE"
-isolation.tools.copy.disable = "FALSE"
-isolation.tools.paste.disable = "FALSE"
+# ============================================
+# ADVANCED FEATURES
+# ============================================
 
-# VMware-specific optimizations for NEXUS OS
-monitor.virtual_exec = "software"
-monitor.virtual_mmu = "software"
-vhv.enable = "TRUE"
+# Logging
+logging = "TRUE"
+log.rotateSize = "100000"
+log.keepOld = "10"
+
+# Feature flags
+featureKey.proxy = "FALSE"
+vmx.buildType = "release"
+
+# Guest memory management
+disable_accel = "FALSE"
+numa.autosize.onceAuto = "FALSE"
+numa.autosize = "FALSE"
 EOF
 
     log "${GREEN}✓ VM configuration created: $VMX_FILE${NC}"
@@ -264,6 +403,112 @@ cleanup_old_vm() {
     fi
 }
 
+apply_vm_preset() {
+    local preset=$1
+    
+    case $preset in
+        minimal)
+            VM_MEMORY="1024"
+            VM_CPUS="1"
+            VM_DISK_SIZE="10G"
+            log "${YELLOW}Applied minimal preset: 1 CPU, 1GB RAM, 10GB disk${NC}"
+            ;;
+        standard)
+            VM_MEMORY="2048"
+            VM_CPUS="2"
+            VM_DISK_SIZE="20G"
+            log "${YELLOW}Applied standard preset: 2 CPUs, 2GB RAM, 20GB disk${NC}"
+            ;;
+        performance)
+            VM_MEMORY="4096"
+            VM_CPUS="4"
+            VM_DISK_SIZE="40G"
+            log "${YELLOW}Applied performance preset: 4 CPUs, 4GB RAM, 40GB disk${NC}"
+            ;;
+        *)
+            log "${RED}Unknown preset: $preset${NC}"
+            print_presets
+            return 1
+            ;;
+    esac
+    
+    VM_PRESET=$preset
+    return 0
+}
+
+show_vm_status() {
+    echo ""
+    echo -e "${MAGENTA}╔════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║       NEXUS OS - VM Status            ║${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}VM Configuration:${NC}"
+    echo "  Name:       $VM_NAME"
+    echo "  Preset:     $VM_PRESET"
+    echo "  Memory:     $VM_MEMORY MB"
+    echo "  CPUs:       $VM_CPUS"
+    echo "  Disk:       $VM_DISK_SIZE"
+    echo "  ISO:        $ISO_PATH"
+    echo ""
+    echo -e "${CYAN}VMware Features Enabled:${NC}"
+    echo "  ✓ Hardware Virtualization (VT-x/AMD-V)"
+    echo "  ✓ 3D Graphics Acceleration"
+    echo "  ✓ vmxnet3 Network Adapter"
+    echo "  ✓ USB 3.0 (xHCI)"
+    echo "  ✓ Shared Folders (HGFS)"
+    echo "  ✓ Copy/Paste Integration"
+    echo "  ✓ Time Synchronization"
+    echo "  ✓ High Resolution Display"
+    echo ""
+}
+
+vm_operations() {
+    local operation=$1
+    
+    case $operation in
+        start)
+            log "${BLUE}Starting VM...${NC}"
+            if command -v vmrun &> /dev/null; then
+                vmrun start "$VMX_FILE" nogui
+                log "${GREEN}VM started${NC}"
+            else
+                launch_vmware
+            fi
+            ;;
+        stop)
+            log "${YELLOW}Stopping VM...${NC}"
+            if command -v vmrun &> /dev/null; then
+                vmrun stop "$VMX_FILE" nogui
+                log "${GREEN}VM stopped${NC}"
+            fi
+            ;;
+        reset)
+            log "${YELLOW}Resetting VM...${NC}"
+            if command -v vmrun &> /dev/null; then
+                vmrun reset "$VMX_FILE" nogui
+                log "${GREEN}VM reset${NC}"
+            fi
+            ;;
+        delete)
+            log "${RED}Deleting VM...${NC}"
+            if command -v vmrun &> /dev/null; then
+                vmrun deleteVM "$VMX_FILE"
+                log "${GREEN}VM deleted${NC}"
+            fi
+            ;;
+        list)
+            if command -v vmrun &> /dev/null; then
+                vmrun list
+            else
+                log "${RED}vmrun not found${NC}"
+            fi
+            ;;
+        *)
+            echo "Usage: $0 <start|stop|reset|delete|list>"
+            ;;
+    esac
+}
+
 main() {
     print_banner
     echo ""
@@ -271,6 +516,7 @@ main() {
     # Parse arguments
     local clean_boot=false
     local recreate_config=false
+    local operation=""
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -282,21 +528,65 @@ main() {
                 recreate_config=true
                 shift
                 ;;
-            --help)
+            --preset)
+                VM_PRESET="$2"
+                shift 2
+                ;;
+            --memory)
+                VM_MEMORY="$2"
+                shift 2
+                ;;
+            --cpus)
+                VM_CPUS="$2"
+                shift 2
+                ;;
+            --disk)
+                VM_DISK_SIZE="$2"
+                shift 2
+                ;;
+            --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --clean     Remove old NVRAM for clean boot"
-                echo "  --recreate  Recreate VM configuration"
-                echo "  --help      Show this help"
+                echo "  --clean        Remove old NVRAM for clean boot"
+                echo "  --recreate     Recreate VM configuration"
+                echo "  --preset P     VM preset (minimal/standard/performance)"
+                echo "  --memory MB    Set memory in MB"
+                echo "  --cpus N       Set number of CPUs"
+                echo "  --disk SIZE    Set disk size (e.g., 20G)"
+                echo ""
+                echo "VM Operations:"
+                echo "  start          Start the VM"
+                echo "  stop           Stop the VM"
+                echo "  reset           Reset the VM"
+                echo "  delete         Delete the VM"
+                echo "  list           List running VMs"
+                echo ""
+                print_presets
                 exit 0
+                ;;
+            start|stop|reset|delete|list)
+                operation=$1
+                shift
                 ;;
             *)
                 echo "Unknown option: $1"
+                echo "Use --help for usage information"
                 exit 1
                 ;;
         esac
     done
+    
+    # Handle VM operations
+    if [ -n "$operation" ]; then
+        vm_operations "$operation"
+        exit 0
+    fi
+    
+    # Apply VM preset
+    if [ -n "$VM_PRESET" ]; then
+        apply_vm_preset "$VM_PRESET"
+    fi
     
     # Check prerequisites
     if ! check_prerequisites; then
@@ -321,6 +611,7 @@ main() {
     
     # Show boot info
     show_boot_info
+    show_vm_status
     
     # Launch VMware
     launch_vmware
@@ -333,8 +624,10 @@ main() {
     log "VMware Mode optimizations:"
     log "  - VMware paravirtualized drivers"
     log "  - vmxnet3 network adapter"
+    log "  - Hardware 3D acceleration"
     log "  - Optimized memory management"
     log "  - VMware hypervisor detection"
+    log "  - Guest Tools integration ready"
     log ""
 }
 

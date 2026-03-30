@@ -336,12 +336,17 @@ void power_early_init(void)
     power_manager.num_idle_states = 1;
 }
 
+extern int power_manager_init(void);
+
 /**
  * power_init - Main power management initialization
  */
 void power_init(void)
 {
     pr_info("Power: Initializing power management subsystem...\n");
+
+    /* Initialize core power manager */
+    power_manager_init();
 
     /* Initialize idle governors */
     idle_governor_menu_init();
@@ -852,6 +857,19 @@ int device_register(const char *name, u32 available_states)
 /*===========================================================================*/
 /*                         POWER STATISTICS                                  */
 /*===========================================================================*/
+
+struct power_stats {
+    u32 system_state;
+    u32 sleep_state;
+    u64 total_sleep_time;
+    u64 total_wakeups;
+    u64 total_idle_entries;
+    u64 total_freq_changes;
+    u32 num_idle_states;
+    u32 num_freq_states;
+    char idle_governor[32];
+    char freq_governor[32];
+};
 
 /**
  * power_get_stats - Get power management statistics

@@ -206,6 +206,198 @@ nexus-vm snapshot restore myvm backup1
 nexus-vm migrate myvm target-host
 ```
 
+## VMware Integration
+
+NEXUS OS provides seamless integration when running in VMware environments.
+
+### Virtualization Manager GUI
+
+The NEXUS OS Virtualization Manager includes a comprehensive GUI with menu bars and toolbars:
+
+#### Menu Bar
+
+| Menu | Description | Actions |
+|------|-------------|---------|
+| **File** | VM file operations | New VM, Open, Save, Export, Import, Exit |
+| **Edit** | Edit operations | Cut, Copy, Paste, Preferences |
+| **View** | Display options | Refresh, Zoom, Fullscreen |
+| **VM** | VM lifecycle | Start, Stop, Pause, Restart, Clone |
+| **Container** | Container ops | Create, Start, Stop, Logs, Shell |
+| **Hardware** | HW config | Add/Remove, GPU, Network, Storage |
+| **VMware** | VMware features | Settings, Tools, Snapshots, Migration |
+| **Tools** | System tools | Performance, Monitoring, Backup |
+| **Help** | Documentation | Documentation, About |
+
+#### Toolbar
+
+| Button | Function |
+|--------|----------|
+| + | New VM |
+| > | Start |
+| || | Pause |
+| [] | Stop |
+| R | Restart |
+| S | Snapshot |
+| C | Clone |
+| M | Migrate |
+| X | Delete |
+| E | Export |
+| I | Import |
+| H | VMware Settings |
+| G | GPU Passthrough |
+
+#### Sidebar Categories
+
+- All VMs
+- Running
+- Paused
+- Stopped
+- Templates
+- Snapshots
+- Networks
+- Storage
+- **Containers**
+- **VMware**
+- **Console**
+- **Migration**
+- **GPU Passthrough**
+- **Export/Import**
+
+### VMware Console
+
+NEXUS OS provides a built-in console for VM management:
+
+```bash
+# Access VM console
+nexus-vm console myvm
+
+# Console features:
+# - Full screen mode
+# - Copy/paste support
+# - Resolution adjustment
+# - Remote display (VNC)
+```
+
+### VM Migration
+
+Live migration support for moving VMs between hosts:
+
+```bash
+# Live migration
+nexus-vm migrate myvm target-host
+
+# Pre-migration checks:
+# - Network connectivity
+# - Storage access
+# - Memory transfer
+# - CPU state
+```
+
+### GPU Passthrough
+
+Configure GPU passthrough for graphics-intensive workloads:
+
+```c
+// Configure GPU passthrough
+virt_manager_configure_gpu_passthrough(vm_id, gpu_id, true);
+
+// Features:
+// - Direct GPU access
+// - NVIDIA/AMD support
+// - Multiple GPUs
+// - Performance monitoring
+```
+
+### Export/Import
+
+Export and import VMs in standard formats:
+
+```bash
+# Export to OVA
+nexus-vm export myvm /path/to/vm.ova
+
+# Import from OVA/OVF
+nexus-vm import /path/to/vm.ova
+
+# Formats supported:
+// - OVA (Open Virtual Appliance)
+// - OVF (Open Virtualization Format)
+// - VMDK (VMware)
+// - QCOW2 (QEMU)
+```
+
+### Automatic Detection
+
+When NEXUS OS boots in VMware, it automatically detects the environment and enables optimized settings:
+
+```
+[VM] VMware environment detected - using VMware optimizations
+[VMWARE] Version: 17, Tools: Present
+[VMWARE] Enabling optimized graphics and performance...
+```
+
+### VMware-Specific Features
+
+| Feature | Boot Parameter | Description |
+|---------|---------------|-------------|
+| 3D Acceleration | `vmware.3d=true` | Hardware-accelerated graphics |
+| High Resolution | `vmware.resolution=1920x1080` | Display resolution |
+| Shared Folders | `vmware.hgfs=true` | Host-guest file sharing |
+| Copy/Paste | `vmware.clipboard=true` | Clipboard integration |
+| Time Sync | `vmware.timesync=true` | Automatic time sync |
+
+### VMware Boot Configuration
+
+Edit `tools/auto-vm-boot.sh` or VMX file for enhanced VMware performance:
+
+```bash
+# Enhanced graphics
+svga.vramSize = "268435456"  # 256MB VRAM
+mks.enable3d = "TRUE"
+
+# Hardware virtualization
+vhv.enable = "TRUE"
+monitor.virtual_exec = "hardware"
+monitor.virtual_mmu = "hardware"
+
+# Network performance
+ethernet0.virtualDev = "vmxnet3"
+
+# USB 3.0 support
+usb.xhci.present = "TRUE"
+```
+
+### Running in VMware
+
+```bash
+# Build and run in VMware mode
+make && make run-vmware
+
+# Or manually with auto-vm-boot.sh
+./tools/auto-vm-boot.sh
+```
+
+### VMware Tools Integration
+
+NEXUS OS detects VMware Tools and enables:
+
+- **Time Synchronization**: Guest clock synced with host
+- **Drag & Drop**: File transfer between host and guest
+- **Copy & Paste**: Clipboard sharing
+- **Shared Folders**: Access host filesystem from guest
+- **Optimized Graphics**: Better display performance
+
+### VMware Display Modes
+
+NEXUS OS supports multiple display configurations in VMware:
+
+| Resolution | Color Depth | 3D Accel | Use Case |
+|------------|-------------|-----------|----------|
+| 1024x768 | 24-bit | No | Basic |
+| 1280x800 | 32-bit | Yes | Standard |
+| 1920x1080 | 32-bit | Yes | Full HD |
+| 2560x1600 | 32-bit | Yes | High DPI |
+
 ## Performance Comparison
 
 | Mode | Overhead | Boot Time | Isolation | Use Case |

@@ -32,6 +32,10 @@
 #define SOL_TCP         6
 #define SOL_UDP         17
 
+/* Network Device Flags */
+#define NETDEV_FLAG_UP      IFF_UP
+#define NETDEV_FLAG_RUNNING IFF_RUNNING
+
 /* Socket Options */
 #define SO_DEBUG        1
 #define SO_REUSEADDR    2
@@ -43,6 +47,8 @@
 #define SO_RCVBUF       8
 #define SO_KEEPALIVE    9
 #define SO_LINGER       13
+#define SO_RCVTIMEO     20
+#define SO_SNDTIMEO     21
 #define SO_TIMESTAMP    29
 
 /* Address Families */
@@ -109,6 +115,11 @@
 #define NET_STAT_DEC(stat)      atomic_dec(&net_stats.stat)
 #define NET_STAT_ADD(stat, n)   atomic_add((n), &net_stats.stat)
 #define NET_STAT_SUB(stat, n)   atomic_sub((n), &net_stats.stat)
+
+#define NET_STAT64_INC(stat)    atomic64_inc(&net_stats.stat)
+#define NET_STAT64_DEC(stat)    atomic64_dec(&net_stats.stat)
+#define NET_STAT64_ADD(stat, n) atomic64_add((n), &net_stats.stat)
+#define NET_STAT64_SUB(stat, n) atomic64_sub((n), &net_stats.stat)
 
 /*===========================================================================*/
 /*                         NETWORK ADDRESS STRUCTURES                        */
@@ -324,7 +335,7 @@ struct socket {
     /* Socket Errors */
     atomic_t sk_err;            /* Socket error */
     atomic_t sk_err_soft;       /* Soft socket error */
-    u32 sk_ack_backlog;         /* ACK backlog */
+    atomic_t sk_ack_backlog;    /* ACK backlog */
 
     /* Socket Address */
     struct sockaddr_in local_addr;      /* Local address */
@@ -482,6 +493,19 @@ struct net_device {
     /* Statistics */
     struct net_device_stats stats;      /* Device statistics */
     struct net_device_stats *pcpu_stats;  /* Per-CPU statistics */
+
+    /* Legacy Statistics */
+    struct {
+        u64 total_tx_packets;
+        u64 total_tx_bytes;
+        u64 total_tx_errors;
+        u64 total_rx_packets;
+        u64 total_rx_bytes;
+        u64 total_rx_errors;
+    } legacy_stats;
+
+    /* Operations - Direct Call Optimization */
+    int (*hard_start_xmit)(struct sk_buff *skb, struct net_device *dev);
 
     /* Wait Queue */
     wait_queue_head_t waitq;    /* Wait queue */

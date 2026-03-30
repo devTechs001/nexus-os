@@ -637,7 +637,7 @@ int sock_listen(struct socket *sock, int backlog)
         backlog = SOCKET_MAX_LISTEN;
     }
 
-    sock->sk_ack_backlog = backlog;
+    atomic_set(&sock->sk_ack_backlog, backlog);
     sock->state = SS_UNCONNECTED;  /* Still unconnected, but listening */
 
     spin_unlock(&sock->lock);
@@ -674,7 +674,7 @@ int sock_accept(struct socket *sock, struct socket *newsock, int flags)
 
     spin_lock(&sock->lock);
 
-    if (sock->state != SS_UNCONNECTED || sock->sk_ack_backlog == 0) {
+    if (sock->state != SS_UNCONNECTED || atomic_read(&sock->sk_ack_backlog) == 0) {
         spin_unlock(&sock->lock);
         return -EINVAL;
     }
@@ -746,8 +746,8 @@ int sock_sendmsg(struct socket *sock, void *msg, size_t len, int flags)
     sock->bytes_out += len;
 
     /* Update global statistics */
-    NET_STAT_ADD(packets_out, 1);
-    NET_STAT_ADD(bytes_out, len);
+    NET_STAT64_ADD(packets_out, 1);
+    NET_STAT64_ADD(bytes_out, len);
 
     /* Update statistics */
     atomic_inc(&socket_stats.send_calls);
@@ -817,8 +817,8 @@ int sock_recvmsg(struct socket *sock, void *msg, size_t len, int flags)
     sock->bytes_in += copy_len;
 
     /* Update global statistics */
-    NET_STAT_ADD(packets_in, 1);
-    NET_STAT_ADD(bytes_in, copy_len);
+    NET_STAT64_ADD(packets_in, 1);
+    NET_STAT64_ADD(bytes_in, copy_len);
 
     /* Update statistics */
     atomic_inc(&socket_stats.recv_calls);

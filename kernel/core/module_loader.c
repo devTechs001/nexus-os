@@ -170,35 +170,47 @@ typedef struct {
     u64 size;
 } elf_symbol_t;
 
+/**
+ * parse_elf - Parse ELF module file
+ * @mod: Module structure to populate
+ * @elf_data: Pointer to ELF data
+ * @elf_size: Size of ELF data
+ * 
+ * Parses ELF format kernel module, extracts symbols and relocations.
+ * Returns 0 on success, negative error code on failure.
+ */
+__attribute__((used))
 static int parse_elf(module_t *mod, const void *elf_data, u32 elf_size)
 {
     elf_header_t *hdr = (elf_header_t *)elf_data;
-    
-    /* Validate ELF magic */
-    if (hdr->magic != 0x464C457F) {  /* 0x7F ELF */
-        printk("[MODULE] Invalid ELF magic\n");
-        return -EINVAL;
-    }
-    
-    /* Check for x86_64 */
-    if (hdr->machine != 0x3E) {
-        printk("[MODULE] Unsupported architecture\n");
-        return -EINVAL;
-    }
-    
-    /* Parse sections */
-    elf_section_t *sections = (elf_section_t *)((u8 *)elf_data + hdr->shoff);
-    char *shstrtab = (char *)((u8 *)elf_data + sections[hdr->shstrndx].offset);
-    
-    /* Find symbol table and string table */
+    elf_section_t *sections;
+    char *shstrtab;
     elf_symbol_t *symtab = NULL;
     char *strtab = NULL;
     u64 symtab_size = 0;
     u64 strtab_size = 0;
-    
-    for (u32 i = 0; i < hdr->shnum; i++) {
+    u32 i;
+
+    /* Validate ELF magic */
+    if (hdr->magic != 0x464C457F) {  /* 0x7F ELF */
+        printk("[MODULE] Invalid ELF magic: 0x%X\n", hdr->magic);
+        return -EINVAL;
+    }
+
+    /* Check for x86_64 */
+    if (hdr->machine != 0x3E) {
+        printk("[MODULE] Unsupported architecture: 0x%X (expected 0x3E for x86_64)\n", hdr->machine);
+        return -EINVAL;
+    }
+
+    /* Parse sections */
+    sections = (elf_section_t *)((u8 *)elf_data + hdr->shoff);
+    shstrtab = (char *)((u8 *)elf_data + sections[hdr->shstrndx].offset);
+
+    /* Find symbol table and string table */
+    for (i = 0; i < hdr->shnum; i++) {
         char *name = &shstrtab[sections[i].name];
-        
+
         if (sections[i].type == 2) {  /* SHT_SYMTAB */
             symtab = (elf_symbol_t *)((u8 *)elf_data + sections[i].offset);
             symtab_size = sections[i].size;
@@ -209,22 +221,25 @@ static int parse_elf(module_t *mod, const void *elf_data, u32 elf_size)
             }
         }
     }
-    
+
     if (!symtab || !strtab) {
         printk("[MODULE] No symbol table found\n");
         return -EINVAL;
     }
-    
+
     /* Export symbols */
-    u32 sym_count = symtab_size / sizeof(elf_symbol_t);
-    for (u32 i = 0; i < sym_count; i++) {
-        if (symtab[i].value != 0 && symtab[i].size > 0) {
-            char *name = &strtab[symtab[i].name];
-            void *addr = (void *)((u8 *)mod->base + symtab[i].value);
-            module_add_symbol(mod, name, addr, symtab[i].size);
+    {
+        u32 sym_count = symtab_size / sizeof(elf_symbol_t);
+        for (i = 0; i < sym_count; i++) {
+            if (symtab[i].value != 0 && symtab[i].size > 0) {
+                char *name = &strtab[symtab[i].name];
+                void *addr = (void *)((u8 *)mod->base + symtab[i].value);
+                module_add_symbol(mod, name, addr, symtab[i].size);
+            }
         }
     }
-    
+
+    pr_info("[MODULE] Parsed ELF: %u symbols exported\n", mod->symbol_count);
     return 0;
 }
 

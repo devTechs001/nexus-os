@@ -9,7 +9,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NEXUS_OS_DIR="$(dirname "$SCRIPT_DIR")"
+NEXUS_OS_DIR="$SCRIPT_DIR"
 
 # Colors
 RED='\033[0;31m'
@@ -77,7 +77,12 @@ build_os() {
     
     cd "$NEXUS_OS_DIR"
     
-    if make clean && make; then
+    # Run make clean if build directory exists, otherwise skip
+    if [ -d "$NEXUS_OS_DIR/build" ]; then
+        make clean || true
+    fi
+    
+    if make; then
         print_success "Build complete!"
         print_info "ISO created: $NEXUS_OS_DIR/build/nexus-kernel.iso"
         ls -lh "$NEXUS_OS_DIR/build/nexus-kernel.iso"

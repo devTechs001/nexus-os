@@ -51,10 +51,14 @@ static struct {
 /*===========================================================================*/
 
 /**
- * rt_rq_init - Initialize RT run queue
+ * rt_rq_init - Initialize RT (Real-Time) run queue
  * @rt_rq: RT run queue to initialize
  * @rq: Parent run queue
+ * 
+ * Initializes the RT run queue including priority array for
+ * FIFO and Round-Robin scheduled real-time tasks.
  */
+__attribute__((used))
 static void rt_rq_init(struct rt_rq *rt_rq, struct rq *rq)
 {
     int i;
@@ -153,7 +157,9 @@ static inline bool rt_throttled(struct rt_rq *rt_rq)
  * @rt_rq: RT run queue
  *
  * Called at each RT period boundary to replenish runtime.
+ * Resets the RT runtime and clears throttling.
  */
+__attribute__((used))
 static void do_sched_rt_period_timer(struct rt_rq *rt_rq)
 {
     /* Replenish runtime */
@@ -380,6 +386,7 @@ void check_preempt_curr_rt(struct rq *rq, struct task_struct *task, int flags)
  * FIFO tasks run until they block, yield, or are preempted
  * by a higher priority task.
  */
+__attribute__((used))
 static void sched_fifo_run(struct rq *rq, struct task_struct *task)
 {
     /* FIFO tasks have no time slice - run until blocked */
@@ -395,7 +402,9 @@ static void sched_fifo_run(struct rq *rq, struct task_struct *task)
  * @task: Woken task
  *
  * Handles wakeup of a FIFO-scheduled task.
+ * Enqueues the task and checks for preemption.
  */
+__attribute__((used))
 static void fifo_wakeup(struct rq *rq, struct task_struct *task)
 {
     /* FIFO tasks go to end of their priority queue */
@@ -430,6 +439,7 @@ static u64 sched_rr_get_interval(struct task_struct *task)
  * RR tasks run for their time slice, then yield to other
  * tasks at the same priority.
  */
+__attribute__((used))
 static void sched_rr_run(struct rq *rq, struct task_struct *task)
 {
     /* Set time slice */
@@ -480,7 +490,9 @@ static void sched_rr_tick(struct rq *rq, struct task_struct *task)
  * @task: Woken task
  *
  * Handles wakeup of a round-robin scheduled task.
+ * Resets time slice and enqueues at end of priority queue.
  */
+__attribute__((used))
 static void rr_wakeup(struct rq *rq, struct task_struct *task)
 {
     /* Reset time slice on wakeup */

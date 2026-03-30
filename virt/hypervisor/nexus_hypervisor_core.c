@@ -838,7 +838,7 @@ int vm_gpu_passthrough(virtual_machine_t *vm, u32 gpu_id)
     printk("[HYPERVISOR] Enabling GPU passthrough (GPU %u) for VM %u\n",
            gpu_id, vm->config.vm_id);
     
-    if (!g_hypervisor.features & HYPERVISOR_FEATURE_GPU_PASSTHROUGH) {
+    if (!(g_hypervisor.features & HYPERVISOR_FEATURE_GPU_PASSTHROUGH)) {
         printk("[HYPERVISOR] ERROR: GPU passthrough not supported\n");
         return -1;
     }

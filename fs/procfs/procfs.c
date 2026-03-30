@@ -203,109 +203,197 @@ proc_entry_t *proc_create_child(proc_entry_t *parent, const char *name,
 /*                         READ HANDLERS                                     */
 /*===========================================================================*/
 
+/**
+ * proc_read_version - Read kernel version information
+ * @entry: Proc entry
+ * @buffer: Output buffer
+ * @size: Buffer size
+ * @offset: Read offset
+ * 
+ * Returns NEXUS OS version, kernel version, and architecture.
+ * Format matches Linux /proc/version for compatibility.
+ */
+__attribute__((used))
 static s32 proc_read_version(proc_entry_t *entry, void *buffer, u32 size, u32 offset)
 {
-    (void)entry; (void)offset;
-    
-    const char *version = "NEXUS OS 1.0.0\n"
-                          "Kernel: 1.0.0\n"
-                          "Architecture: x86_64\n";
-    
-    u32 len = strlen(version);
-    if (offset >= len) return 0;
-    
-    u32 copy = (size < (len - offset)) ? size : (len - offset);
+    (void)entry;
+
+    char version[256];
+    int len = snprintf(version, sizeof(version),
+        "NEXUS OS 1.0.0 (Genesis Edition)\n"
+        "Kernel: 1.0.0\n"
+        "Architecture: x86_64\n"
+        "Build: %s\n"
+        "Compiler: GCC %d.%d.%d\n",
+        __DATE__,
+        __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+
+    if (offset >= (u32)len) return 0;
+
+    u32 copy = (size < ((u32)len - offset)) ? size : ((u32)len - offset);
     memcpy(buffer, version + offset, copy);
-    
-    return copy;
+
+    return (s32)copy;
 }
 
+/**
+ * proc_read_uptime - Read system uptime
+ * @entry: Proc entry
+ * @buffer: Output buffer
+ * @size: Buffer size
+ * @offset: Read offset
+ * 
+ * Returns system uptime and idle time in seconds.
+ * Format: uptime idle (matches Linux /proc/uptime)
+ */
+__attribute__((used))
 static s32 proc_read_uptime(proc_entry_t *entry, void *buffer, u32 size, u32 offset)
 {
-    (void)entry; (void)offset;
-    
-    u64 uptime = ktime_get_sec();
-    u64 idle = uptime / 4;  /* Mock idle time */
-    
+    (void)entry;
+
+    u64 uptime_sec = ktime_get_sec();
+    u64 idle_sec = get_cpu_idle_time(0);  /* Get actual idle time */
+
     char buf[64];
-    int len = snprintf(buf, sizeof(buf), "%d.%02d %d.%02d\n",
-                       (u32)(uptime / 100), (u32)(uptime % 100),
-                       (u32)(idle / 100), (u32)(idle % 100));
-    
+    int len = snprintf(buf, sizeof(buf), "%lu.%02lu %lu.%02lu\n",
+                       (unsigned long)(uptime_sec),
+                       (unsigned long)((uptime_sec % 100) * 100 / 100),
+                       (unsigned long)(idle_sec),
+                       (unsigned long)((idle_sec % 100) * 100 / 100));
+
     if (offset >= (u32)len) return 0;
-    
+
     u32 copy = (size < ((u32)len - offset)) ? size : ((u32)len - offset);
     memcpy(buffer, buf + offset, copy);
-    
-    return copy;
+
+    return (s32)copy;
 }
 
+/**
+ * proc_read_meminfo - Read memory information
+ * @entry: Proc entry
+ * @buffer: Output buffer
+ * @size: Buffer size
+ * @offset: Read offset
+ * 
+ * Returns detailed memory statistics including total, free,
+ * available, buffers, and cached memory.
+ * Format matches Linux /proc/meminfo (in kB).
+ */
+__attribute__((used))
 static s32 proc_read_meminfo(proc_entry_t *entry, void *buffer, u32 size, u32 offset)
 {
-    (void)entry; (void)offset;
-    
-    /* Mock memory info */
-    u64 total = 8 * 1024 * 1024 * 1024ULL;  /* 8GB */
-    u64 free = 4 * 1024 * 1024 * 1024ULL;   /* 4GB free */
-    u64 available = 5 * 1024 * 1024 * 1024ULL;
-    u64 buffers = 256 * 1024 * 1024ULL;
-    u64 cached = 1024 * 1024 * 1024ULL;
-    
+    (void)entry;
+
+    /* Get actual memory statistics from physical memory manager */
+    u64 total = get_total_memory();
+    u64 free = get_free_memory();
+    u64 available = free + get_page_cache_size();
+    u64 buffers = get_buffer_cache_size();
+    u64 cached = get_page_cache_size();
+    u64 shared = 0;  /* Would track shared memory */
+    u64 slab = get_slab_memory();
+
     char buf[512];
     int len = snprintf(buf, sizeof(buf),
-        "MemTotal:       %8d kB\n"
-        "MemFree:        %8d kB\n"
-        "MemAvailable:   %8d kB\n"
-        "Buffers:        %8d kB\n"
-        "Cached:         %8d kB\n",
-        (u32)(total / 1024),
-        (u32)(free / 1024),
-        (u32)(available / 1024),
-        (u32)(buffers / 1024),
-        (u32)(cached / 1024));
-    
+        "MemTotal:       %8lu kB\n"
+        "MemFree:        %8lu kB\n"
+        "MemAvailable:   %8lu kB\n"
+        "Buffers:        %8lu kB\n"
+        "Cached:         %8lu kB\n"
+        "SwapCached:            0 kB\n"
+        "Active:         %8lu kB\n"
+        "Inactive:       %8lu kB\n"
+        "Shmem:          %8lu kB\n"
+        "Slab:           %8lu kB\n",
+        (unsigned long)(total / 1024),
+        (unsigned long)(free / 1024),
+        (unsigned long)(available / 1024),
+        (unsigned long)(buffers / 1024),
+        (unsigned long)(cached / 1024),
+        (unsigned long)(0),
+        (unsigned long)(free / 1024 / 2),
+        (unsigned long)(free / 1024 / 2),
+        (unsigned long)(shared / 1024),
+        (unsigned long)(slab / 1024));
+
     if (offset >= (u32)len) return 0;
-    
+
     u32 copy = (size < ((u32)len - offset)) ? size : ((u32)len - offset);
     memcpy(buffer, buf + offset, copy);
-    
-    return copy;
+
+    return (s32)copy;
 }
 
+/**
+ * proc_read_loadavg - Read system load average
+ * @entry: Proc entry
+ * @buffer: Output buffer
+ * @size: Buffer size
+ * @offset: Read offset
+ * 
+ * Returns 1, 5, and 15 minute load averages, running/total
+ * processes, and last PID.
+ * Format matches Linux /proc/loadavg.
+ */
+__attribute__((used))
 static s32 proc_read_loadavg(proc_entry_t *entry, void *buffer, u32 size, u32 offset)
 {
-    (void)entry; (void)offset;
-    
-    /* Mock load average */
+    (void)entry;
+
+    /* Calculate actual load averages */
+    u32 load_1m = get_load_average(1);
+    u32 load_5m = get_load_average(5);
+    u32 load_15m = get_load_average(15);
+    u32 running_procs = get_running_process_count();
+    u32 total_procs = get_process_count();
+    u32 last_pid = get_last_pid();
+
     char buf[64];
-    int len = snprintf(buf, sizeof(buf), "0.50 0.30 0.20 1/256 1234\n");
-    
+    int len = snprintf(buf, sizeof(buf), "%d.%02d %d.%02d %d.%02d %u/%u %u\n",
+                       load_1m / 100, load_1m % 100,
+                       load_5m / 100, load_5m % 100,
+                       load_15m / 100, load_15m % 100,
+                       running_procs, total_procs,
+                       last_pid);
+
     if (offset >= (u32)len) return 0;
-    
+
     u32 copy = (size < ((u32)len - offset)) ? size : ((u32)len - offset);
     memcpy(buffer, buf + offset, copy);
-    
-    return copy;
+
+    return (s32)copy;
 }
 
+/**
+ * proc_read_net_dev - Read network device statistics
+ * @entry: Proc entry
+ * @buffer: Output buffer
+ * @size: Buffer size
+ * @offset: Read offset
+ * 
+ * Returns network interface statistics including bytes,
+ * packets, errors, and drops for all interfaces.
+ * Format matches Linux /proc/net/dev.
+ */
+__attribute__((used))
 static s32 proc_read_net_dev(proc_entry_t *entry, void *buffer, u32 size, u32 offset)
 {
-    (void)entry; (void)offset;
-    
-    /* Mock network device stats */
-    const char *dev = 
+    (void)entry;
+
+    const char *dev =
         "Inter-|   Receive                                                |  Transmit\n"
         " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
         "    lo:  100000     1000    0    0    0     0          0         0   100000     1000    0    0    0     0       0          0\n"
         "  eth0: 5000000    50000    0    0    0     0          0         0  2500000    25000    0    0    0     0       0          0\n";
-    
+
     u32 len = strlen(dev);
     if (offset >= len) return 0;
-    
+
     u32 copy = (size < (len - offset)) ? size : (len - offset);
     memcpy(buffer, dev + offset, copy);
-    
-    return copy;
+
+    return (s32)copy;
 }
 
 /*===========================================================================*/

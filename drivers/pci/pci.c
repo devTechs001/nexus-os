@@ -116,44 +116,41 @@ static pci_manager_t g_pci;
 /*                         PCI LOW-LEVEL OPERATIONS                          */
 /*===========================================================================*/
 
-static inline void pci_write_config_byte(u32 bus, u32 dev, u32 func, 
-                                          u32 offset, u8 value)
+static inline void pci_write_config_dword(u32 bus, u32 dev, u32 func, u32 offset, u32 value)
 {
-    u32 address = (1 << 31) | (bus << 16) | (dev << 11) | (func << 8) | offset;
-    vga_outb(0xCF8, address & 0xFF);
-    vga_outb(0xCF9, (address >> 8) & 0xFF);
-    vga_outb(0xCFA, (address >> 16) & 0xFF);
-    vga_outb(0xCFB, (address >> 24) & 0xFF);
-    vga_outb(0xCFC, value);
+    u32 address = (u32)((bus << 16) | (dev << 11) | (func << 8) | (offset & 0xFC) | ((u32)0x80000000));
+    vga_outl(0xCF8, address);
+    vga_outl(0xCFC, value);
+}
+
+static inline void pci_write_config_byte(u32 bus, u32 dev, u32 func, u32 offset, u8 value)
+{
+    u32 address = (u32)((bus << 16) | (dev << 11) | (func << 8) | (offset & 0xFC) | ((u32)0x80000000));
+    vga_outl(0xCF8, address);
+    u32 val = vga_inl(0xCFC);
+    val &= ~(0xFF << ((offset & 3) * 8));
+    val |= (value << ((offset & 3) * 8));
+    vga_outl(0xCFC, val);
 }
 
 static inline u8 pci_read_config_byte(u32 bus, u32 dev, u32 func, u32 offset)
 {
-    u32 address = (1 << 31) | (bus << 16) | (dev << 11) | (func << 8) | offset;
-    vga_outb(0xCF8, address & 0xFF);
-    vga_outb(0xCF9, (address >> 8) & 0xFF);
-    vga_outb(0xCFA, (address >> 16) & 0xFF);
-    vga_outb(0xCFB, (address >> 24) & 0xFF);
-    return vga_inb(0xCFC);
+    u32 address = (u32)((bus << 16) | (dev << 11) | (func << 8) | (offset & 0xFC) | ((u32)0x80000000));
+    vga_outl(0xCF8, address);
+    return (u8)((vga_inl(0xCFC) >> ((offset & 3) * 8)) & 0xff);
 }
 
 static inline u16 pci_read_config_word(u32 bus, u32 dev, u32 func, u32 offset)
 {
-    u32 address = (1 << 31) | (bus << 16) | (dev << 11) | (func << 8) | offset;
-    vga_outb(0xCF8, address & 0xFF);
-    vga_outb(0xCF9, (address >> 8) & 0xFF);
-    vga_outb(0xCFA, (address >> 16) & 0xFF);
-    vga_outb(0xCFB, (address >> 24) & 0xFF);
-    return vga_inw(0xCFC);
+    u32 address = (u32)((bus << 16) | (dev << 11) | (func << 8) | (offset & 0xFC) | ((u32)0x80000000));
+    vga_outl(0xCF8, address);
+    return (u16)((vga_inl(0xCFC) >> ((offset & 3) * 8)) & 0xffff);
 }
 
 static inline u32 pci_read_config_dword(u32 bus, u32 dev, u32 func, u32 offset)
 {
-    u32 address = (1 << 31) | (bus << 16) | (dev << 11) | (func << 8) | offset;
-    vga_outb(0xCF8, address & 0xFF);
-    vga_outb(0xCF9, (address >> 8) & 0xFF);
-    vga_outb(0xCFA, (address >> 16) & 0xFF);
-    vga_outb(0xCFB, (address >> 24) & 0xFF);
+    u32 address = (u32)((bus << 16) | (dev << 11) | (func << 8) | (offset & 0xFC) | ((u32)0x80000000));
+    vga_outl(0xCF8, address);
     return vga_inl(0xCFC);
 }
 
