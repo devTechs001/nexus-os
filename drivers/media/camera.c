@@ -219,7 +219,7 @@ int uvc_probe(u16 vendor, u16 device, u32 interface)
     priv->interface = interface;
     
     u32 dev_id = cam_register_device("uvc_camera", vendor, device, 1);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }

@@ -392,7 +392,7 @@ int virtio_gpu_init(void)
     printk("[VIRTIO-GPU]   EDID: %s\n", g_virtio_gpu.has_edid ? "Yes" : "No");
     
     /* Get display info */
-    virtio_gpu_get_display_info();
+    virtio_gpu_query_display_info();
     
     /* Create framebuffer resource */
     if (g_virtio_gpu.display_count > 0) {

@@ -148,6 +148,9 @@ typedef struct apic_manager {
 
 static apic_manager_t apic_manager __aligned(CACHE_LINE_SIZE);
 
+/* Forward declarations */
+void apic_calibrate_timer(void);
+
 /*===========================================================================*/
 /*                         APIC REGISTER ACCESS                              */
 /*===========================================================================*/
@@ -162,7 +165,7 @@ static inline u32 apic_read(u32 reg)
 {
     if (apic_manager.local_apic.x2apic_enabled) {
         /* x2APIC mode - use MSR */
-        u64 value;
+        u64 value = 0;
         /* MSR access would go here */
         return (u32)value;
     } else {

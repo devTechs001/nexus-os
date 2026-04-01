@@ -355,7 +355,7 @@ int fingerprint_probe(u16 vendor, u16 device, u32 bar0)
     
     /* Register device */
     u32 dev_id = bio_register_device("fingerprint", BIO_TYPE_FINGERPRINT, vendor, device);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }
@@ -414,7 +414,7 @@ int face_probe(u16 vendor, u16 device, u32 bar0)
     priv->ir_enabled = 1;
     
     u32 dev_id = bio_register_device("face_camera", BIO_TYPE_FACE, vendor, device);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }
@@ -466,7 +466,7 @@ int iris_probe(u16 vendor, u16 device, u32 bar0)
     priv->wavelength = 850;  /* Near-infrared */
     
     u32 dev_id = bio_register_device("iris_scanner", BIO_TYPE_IRIS, vendor, device);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }

@@ -132,7 +132,7 @@ static void splash_draw_logo(void)
 /**
  * splash_draw_text - Draw text string (simplified)
  */
-static void splash_draw_text(const char *text, u32 x, u32 y, u32 color)
+static __attribute__((unused)) void splash_draw_text(const char *text, u32 x, u32 y, u32 color)
 {
     // Simplified text rendering - in real implementation would use fonts
     (void)text;
@@ -168,7 +168,7 @@ static void splash_draw_progress(u32 percent)
 /**
  * splash_draw_status - Draw status text
  */
-static void splash_draw_status(const char *status)
+static __attribute__((unused)) void splash_draw_status(const char *status)
 {
     u32 text_y = g_splash.height * 2 / 3 + PROGRESS_BAR_HEIGHT + 20;
     console_print("\r\033[%d;%dH%s", text_y / 16, 0, status);

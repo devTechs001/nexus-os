@@ -731,7 +731,37 @@ int onboarding_wizard_run(onboarding_wizard_t *wizard)
     onboarding_wizard_goto_page(wizard, 0);
     
     printk("[ONBOARD] Onboarding wizard started\n");
-    
+
+    return 0;
+}
+
+/**
+ * onboarding_wizard_update - Update onboarding wizard state and render
+ * @wizard: Pointer to wizard structure
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int onboarding_wizard_update(onboarding_wizard_t *wizard)
+{
+    if (!wizard || !wizard->initialized) {
+        return -EINVAL;
+    }
+
+    if (!wizard->active) {
+        return 0;
+    }
+
+    /* Update progress indicator */
+    update_progress(wizard);
+
+    /* Handle animations */
+    update_animation(wizard);
+
+    /* Render the wizard */
+    extern struct compositor *compositor_get_instance(void);
+    extern int compositor_present(struct compositor *comp);
+    compositor_present(compositor_get_instance());
+
     return 0;
 }
 

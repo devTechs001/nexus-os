@@ -1002,7 +1002,7 @@ void rebalance_domains(void)
  * Called when a CPU's run queue becomes empty. Attempts to pull
  * tasks from other CPUs to keep this CPU busy.
  */
-void idle_balance(int cpu)
+void idle_balance(u32 cpu)
 {
     struct rq *rq = get_rq(cpu);
     u32 src_cpu;
@@ -1078,7 +1078,7 @@ static struct task_struct *pull_task(struct rq *src_rq, struct rq *dst_rq)
  * resched_cpu - Force reschedule on CPU
  * @cpu: CPU to reschedule
  */
-void resched_cpu(int cpu)
+void resched_cpu(u32 cpu)
 {
     struct rq *rq = get_rq(cpu);
 

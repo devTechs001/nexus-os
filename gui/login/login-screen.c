@@ -216,7 +216,51 @@ int login_screen_run(login_screen_t *screen)
     }
     
     printk("[LOGIN] Login screen active\n");
-    
+
+    return 0;
+}
+
+/**
+ * login_screen_update - Update login screen state and render
+ * @screen: Pointer to login screen structure
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int login_screen_update(login_screen_t *screen)
+{
+    if (!screen || !screen->initialized) {
+        return -EINVAL;
+    }
+
+    if (!screen->active) {
+        return 0;
+    }
+
+    /* Update clock display */
+    update_clock(screen);
+
+    /* Check for idle timeout */
+    u64 current_time = get_time_ms();
+    if (current_time - screen->idle_time > screen->idle_timeout) {
+        /* Lock screen due to inactivity */
+        screen->state = LOGIN_STATE_LOCKED;
+        screen->is_authenticated = false;
+        if (screen->password_entry) {
+            widget_set_text(screen->password_entry, "");
+        }
+        screen->password_length = 0;
+        update_status(screen, "Session locked due to inactivity");
+    }
+
+    /* Handle input events */
+    /* In a real implementation, would read from input subsystem */
+    /* For now, just update the display */
+
+    /* Render the screen */
+    extern struct compositor *compositor_get_instance(void);
+    extern int compositor_present(struct compositor *comp);
+    compositor_present(compositor_get_instance());
+
     return 0;
 }
 

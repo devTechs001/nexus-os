@@ -198,6 +198,7 @@ typedef struct onboarding_wizard {
 /* Wizard lifecycle */
 int onboarding_wizard_init(onboarding_wizard_t *wizard);
 int onboarding_wizard_run(onboarding_wizard_t *wizard);
+int onboarding_wizard_update(onboarding_wizard_t *wizard);
 int onboarding_wizard_shutdown(onboarding_wizard_t *wizard);
 int onboarding_wizard_pause(onboarding_wizard_t *wizard);
 int onboarding_wizard_resume(onboarding_wizard_t *wizard);

@@ -155,12 +155,21 @@ int vprintk(const char *fmt, __builtin_va_list args)
 
     *str = '\0';
 
-    /* Output to serial port - simple loop */
+    /* Output to serial port - with status check */
     {
         const char *p = printk_buffer;
         while (*p) {
-            /* Simple outb without waiting */
-            __asm__ __volatile__("outb %b0, $0x3F8" :: "a"(*p));
+            /* Wait for transmit holding register to be empty (bit 5 of LSR) */
+            while (!(inb(0x3FD) & 0x20));
+
+            /* Output character */
+            outb(0x3F8, *p);
+            
+            /* If newline, also output carriage return */
+            if (*p == '\n') {
+                while (!(inb(0x3FD) & 0x20));
+                outb(0x3F8, '\r');
+            }
             p++;
         }
     }

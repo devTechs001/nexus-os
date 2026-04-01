@@ -187,11 +187,19 @@ _start:
     ; Continue booting anyway - multiboot info in EBX should still be valid
 
 .clear_bss:
+    ; Initialize ECX with BSS start and EDX with BSS size
+    mov ecx, __bss_start
+    mov edx, __bss_end
+    sub edx, ecx
+    jz .bss_done
+
+.bss_loop:
     mov byte [ecx], 0
     inc ecx
     dec edx
-    jnz .clear_bss
+    jnz .bss_loop
 
+.bss_done:
     ; Output 'C' - BSS cleared
     mov dx, 0x3f8
     mov al, 'C'
@@ -233,8 +241,8 @@ _start:
     ; Disable interrupts (already disabled, but be explicit)
     cli
 
-    ; Load temporary GDT for transition
-    lgdt [gdt32_descriptor]
+    ; Load unified GDT for transition
+    lgdt [gdt_descriptor]
 
     ; Enable PAE (Physical Address Extension) - CR4.PAE = bit 5
     mov eax, cr4
@@ -243,7 +251,6 @@ _start:
 
     ; Load page map level 4 table (identity mapping)
     mov eax, pml4_table
-    or eax, 0x03  ; Present + Read/Write
     mov cr3, eax
 
     ; Enable EFER (Extended Feature Enable Register)
@@ -279,14 +286,14 @@ _start:
 .halt_m:
     cli
     hlt
-    jmp .halt_m
+    ; Jump to 64-bit code using 0x18 selector (64-bit code)
+    jmp 0x18:.start_64
 
-.multiboot_error:
-    db "Error: Invalid multiboot magic!", 0
+    .invalid_multiboot:
+    ...
+    [bits 64]
 
-[bits 64]
-
-.start_64:
+    .start_64:
     ; Immediately output '6' without wait - test if we're in 64-bit
     mov edx, 0x3f8
     mov al, '6'
@@ -297,14 +304,7 @@ _start:
     mov al, 'A'
     out dx, al
 
-    ; Load 64-bit GDT
-    lgdt [rel gdt64_descriptor]
-
-    ; Debug: output 'G' after GDT loaded
-    mov edx, 0x3f8
-    mov al, 'G'
-    out dx, al
-
+    ; GDT already loaded in 32-bit mode, but segments need to be set
     ; In 64-bit mode, DS/ES/SS are mostly ignored (must be null or valid)
     ; Just zero them - don't load selectors
     xor eax, eax
@@ -530,15 +530,15 @@ pd_table:
     %endrep
 
 ; ============================================================================
-; 32-bit GDT (for transition)
+; Unified GDT (for transition and long mode)
 ; ============================================================================
     align 16
 
-gdt32_start:
-    ; Null descriptor
+gdt_start:
+    ; 0x00: Null descriptor
     dq 0
 
-    ; 32-bit code segment (base=0, limit=4GB, type=code, D=1)
+    ; 0x08: 32-bit code segment (base=0, limit=4GB, type=code, D=1)
     dw 0xFFFF                   ; Limit (low)
     dw 0                        ; Base (low)
     db 0                        ; Base (middle)
@@ -546,29 +546,15 @@ gdt32_start:
     db 11001111b                ; Flags (4KB, 32-bit) + Limit (high)
     db 0                        ; Base (high)
 
-    ; 32-bit data segment (base=0, limit=4GB, type=data, D=1)
+    ; 0x10: 32-bit data segment (base=0, limit=4GB, type=data, D=1)
     dw 0xFFFF
     dw 0
     db 0
     db 10010010b                ; Access (present, ring 0, data, writable)
     db 11001111b
     db 0
-gdt32_end:
 
-gdt32_descriptor:
-    dw gdt32_end - gdt32_start - 1
-    dd gdt32_start
-
-; ============================================================================
-; 64-bit GDT (for long mode)
-; ============================================================================
-    align 16
-
-gdt64_start:
-    ; Null descriptor
-    dq 0
-
-    ; 64-bit code segment (base=0, limit=0, type=code, L=1)
+    ; 0x18: 64-bit code segment (base=0, limit=0, type=code, L=1)
     dw 0                        ; Limit (low)
     dw 0                        ; Base (low)
     db 0                        ; Base (middle)
@@ -576,18 +562,18 @@ gdt64_start:
     db 00100000b                ; Flags (64-bit) + Limit (high)
     db 0                        ; Base (high)
 
-    ; 64-bit data segment (base=0, limit=0, type=data)
+    ; 0x20: 64-bit data segment (base=0, limit=0, type=data)
     dw 0
     dw 0
     db 0
     db 10010010b                ; Access (present, ring 0, data, writable)
     db 00000000b
     db 0
-gdt64_end:
+gdt_end:
 
-gdt64_descriptor:
-    dw gdt64_end - gdt64_start - 1
-    dq gdt64_start
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dq gdt_start
 
 ; ============================================================================
 ; Storage for multiboot info (in .data to avoid BSS zeroing)
@@ -595,7 +581,7 @@ gdt64_descriptor:
 section .data
     align 16
     multiboot_info:
-        dq 0
+        dd 0
     multiboot_magic:
         dd 0
 

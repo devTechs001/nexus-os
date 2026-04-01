@@ -316,7 +316,7 @@ static int iwlwifi_probe(u16 vendor, u16 device, u32 bar0)
     
     /* Register device */
     u32 dev_id = wifi_register_device("iwlwifi", vendor, device, mac);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }
@@ -356,7 +356,7 @@ static int rtwifi_probe(u16 vendor, u16 device, u32 bar0)
     
     /* Register device */
     u32 dev_id = wifi_register_device("rtwifi", vendor, device, mac);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }

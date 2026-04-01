@@ -342,6 +342,7 @@ bool login_screen_is_authenticated(login_screen_t *screen);
 int login_screen_update_clock(login_screen_t *screen);
 int login_screen_update_status(login_screen_t *screen, const char *status);
 int login_screen_update_message(login_screen_t *screen, const char *message);
+int login_screen_update(login_screen_t *screen);
 int login_screen_show_error(login_screen_t *screen, const char *error);
 int login_screen_clear_error(login_screen_t *screen);
 int login_screen_set_theme(login_screen_t *screen, const char *theme_name);

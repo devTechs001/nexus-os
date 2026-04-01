@@ -450,13 +450,10 @@ void smp_debug_print(void)
 
 /* These functions must be implemented by architecture-specific code */
 
-extern void arch_smp_detect(void);
 extern int arch_cpu_up(u32 cpu);
 extern int arch_cpu_down(u32 cpu);
 extern void arch_send_ipi(u32 cpu, u32 vector);
 extern void arch_scheduler_enable(u32 cpu);
-extern void arch_scheduler_migrate(u32 cpu);
-extern void arch_topology_parse(u32 cpu, cpu_topology_t *topology);
 
 /* Architecture stubs */
 void arch_smp_detect(void)

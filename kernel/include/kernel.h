@@ -239,6 +239,7 @@ static inline void cpu_relax(void) {
 struct process;
 struct thread;
 struct percpu_data;
+struct cpu_topology;
 
 /* Per-CPU Data */
 typedef struct percpu_data {
@@ -257,6 +258,16 @@ void kernel_early_init(void);
 void kernel_init(void);
 void kernel_start_scheduler(void) __noreturn;
 void kernel_panic(const char *fmt, ...) __noreturn;
+
+/* Logging Levels */
+#define LOG_EMERG   0
+#define LOG_ALERT   1
+#define LOG_CRIT    2
+#define LOG_ERR     3
+#define LOG_WARN    4
+#define LOG_NOTICE  5
+#define LOG_INFO    6
+#define LOG_DEBUG   7
 
 /* Logging */
 int printk(const char *fmt, ...);
@@ -358,6 +369,13 @@ u64 arch_get_ticks(void);
 u64 get_ticks(void);
 u64 get_time_ms(void);
 void delay_ms(u64 ms);
+
+/* Scheduler & SMP */
+void scheduler_migrate_tasks(u32 cpu);
+void resched_cpu(u32 cpu);
+void arch_smp_detect(void);
+void arch_scheduler_migrate(u32 cpu);
+void arch_topology_parse(u32 cpu, struct cpu_topology *topology);
 
 /* Spinlock functions (implemented in sync/spinlock.c) */
 void spinlock_init(spinlock_t *lock);

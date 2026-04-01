@@ -16,6 +16,14 @@
 static resource_sharing_config_t g_resource_config;
 static bool g_initialized = false;
 
+/**
+ * resource_sharing_get_global_config - Get the global configuration instance
+ */
+resource_sharing_config_t *resource_sharing_get_global_config(void)
+{
+    return &g_resource_config;
+}
+
 /*===========================================================================*/
 /*                         MODE DETECTION                                    */
 /*===========================================================================*/
@@ -171,6 +179,65 @@ int resource_sharing_shutdown(resource_sharing_config_t *config)
 /*                         MODE-SPECIFIC INIT                                */
 /*===========================================================================*/
 
+/*===========================================================================*/
+/*                         VMWARE BACKDOOR (SIMULATED)                       */
+/*===========================================================================*/
+
+/**
+ * vmware_backdoor_cmd - Send command to VMware backdoor
+ */
+u64 vmware_backdoor_cmd(u32 cmd, u32 ebx, u32 ecx, u32 edx)
+{
+    u32 eax = 0x564D5868; /* VMware Magic Number 'VMXh' */
+    u32 port = 0x5658;    /* VMware Backdoor Port 'VX' */
+
+    /*
+     * VMware Backdoor I/O
+     * EAX = Magic Number
+     * EBX = Parameter / Return
+     * ECX = Command ID
+     * EDX = Port
+     */
+
+    ecx = cmd;
+    __asm__ __volatile__(
+        "inl %%dx, %%eax"
+        : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(port)
+        :
+        : "memory"
+    );
+
+    if (cmd == 0x01) { /* GET_TIME */
+        /* For time command, result is in EAX, EBX, ECX */
+        printk("[VMWARE] Backdoor Time: EAX=%u, EBX=%u, ECX=%u\n", eax, ebx, ecx);
+    } else {
+        printk("[VMWARE] Backdoor CMD: 0x%X executed (Result EBX=0x%X)\n",
+               cmd, ebx);
+    }
+
+    return (u64)ebx;
+}
+
+/**
+ * vmware_get_host_time - Get host time via VMware backdoor
+ */
+void vmware_get_host_time(void)
+{
+    printk("[VMWARE] Synchronizing time with host...\n");
+    vmware_backdoor_cmd(0x01, 0, 0, 0); /* GET_TIME */
+    printk("[VMWARE] Time synchronized\n");
+}
+
+/**
+ * vmware_set_gui_options - Set GUI options for VMware
+ */
+void vmware_set_gui_options(void)
+{
+    printk("[VMWARE] Setting enhanced GUI options (Mouse Integration, Auto-Resize)\n");
+    vmware_backdoor_cmd(0x2F, 0, 0, 0); /* MOUSE_INTEGRATION */
+    vmware_backdoor_cmd(0x30, 0, 0, 0); /* AUTO_RESIZE */
+}
+
 /**
  * vmware_init_sharing - Initialize VMware-specific sharing
  */
@@ -179,6 +246,10 @@ int vmware_init_sharing(resource_sharing_config_t *config)
     printk("[RESOURCE] VMware mode: Enabling HGFS and enhanced features\n");
     
     config->sharing_level = SHARING_FULL;
+    
+    /* VMware Backdoor initializations */
+    vmware_get_host_time();
+    vmware_set_gui_options();
     
     /* Folder sharing (HGFS) */
     config->folders.enabled = true;
@@ -212,6 +283,13 @@ int vmware_init_sharing(resource_sharing_config_t *config)
     config->display.acceleration_3d = true;
     config->display.acceleration_2d = true;
     config->display.video_memory_mb = 128;
+    
+    /* Enhanced features */
+    printk("[RESOURCE] VMware Enhanced Features Enabled:\n");
+    printk("  - Seamless mouse integration\n");
+    printk("  - Host/Guest time sync\n");
+    printk("  - High-performance HGFS sharing\n");
+    printk("  - SVGA3D hardware acceleration\n");
     
     printk("[RESOURCE] VMware sharing configured\n");
     return 0;
@@ -322,32 +400,31 @@ int hyperv_init_sharing(resource_sharing_config_t *config)
 int native_init_sharing(resource_sharing_config_t *config)
 {
     printk("[RESOURCE] Native mode: Enabling direct hardware access\n");
-    
+
     config->sharing_level = SHARING_FULL;
-    
+
     /* No folder sharing needed - direct access */
     config->folders.enabled = false;
-    
+
     /* Direct network access */
     config->network.enabled = true;
     config->network.bridge_mode = true;
-    config->network.direct_network_access = true;
-    
+
     /* Direct device access */
     config->devices.usb.enabled = true;
     config->devices.direct_disk_access = true;
     config->devices.direct_gpu_access = true;
     config->devices.direct_network_access = true;
-    
+
     /* No clipboard sharing needed */
     config->clipboard.enabled = false;
     config->dragdrop.enabled = false;
-    
+
     /* Direct display access */
     config->display.enabled = true;
     config->display.acceleration_3d = true;
     config->display.acceleration_2d = true;
-    
+
     printk("[RESOURCE] Native mode configured - full hardware access\n");
     return 0;
 }

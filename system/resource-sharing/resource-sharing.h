@@ -236,6 +236,7 @@ typedef struct {
 int resource_sharing_init(resource_sharing_config_t *config);
 int resource_sharing_shutdown(resource_sharing_config_t *config);
 int resource_sharing_detect_mode(void);
+resource_sharing_config_t *resource_sharing_get_global_config(void);
 
 /* Mode-specific initialization */
 int vmware_init_sharing(resource_sharing_config_t *config);

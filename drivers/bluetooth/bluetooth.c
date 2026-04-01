@@ -333,7 +333,7 @@ static int btusb_probe(u16 vendor, u16 device, u32 bar0)
     
     /* Register device */
     u32 dev_id = bt_register_device("btusb", vendor, device, addr);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }

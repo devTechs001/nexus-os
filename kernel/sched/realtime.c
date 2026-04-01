@@ -922,11 +922,7 @@ const struct sched_class rt_sched_class = {
 
 /* These functions may need architecture-specific implementations */
 
-extern void resched_cpu(int cpu);
-
-/* Enqueue flags */
-#define ENQUEUE_REPLENISH     0x01
-#define ENQUEUE_HEAD          0x02
+extern void resched_cpu(u32 cpu);
 
 /* Scheduler class structure */
 struct sched_class {

@@ -929,6 +929,22 @@ extern int hypervisor_init(void);
 typedef struct login_screen login_screen_t;
 typedef struct onboarding_wizard onboarding_wizard_t;
 
+/**
+ * splash_draw_logo_text - Draw splash logo in text mode
+ * Weak stub to be overridden by gui/boot-splash/boot_splash.c
+ */
+__attribute__((weak))
+void splash_draw_logo_text(u32 x, u32 y)
+{
+    (void)x; (void)y;
+    printk("\n    _   _ _____ _____ _   _  ____  \n");
+    printk("   | \\ | | ____|_   _| | | |/ ___| \n");
+    printk("   |  \\| |  _|   | | | | | | |  _  \n");
+    printk("   | |\\  | |___  | | | |_| | |_| | \n");
+    printk("   |_| \\_|_____| |_|  \\___/ \\____| \n\n");
+    printk("        O P E R A T I N G   S Y S T E M\n\n");
+}
+
 extern login_screen_t *login_screen_get_instance(void);
 extern int login_screen_init(login_screen_t *screen);
 extern int login_screen_run(login_screen_t *screen);

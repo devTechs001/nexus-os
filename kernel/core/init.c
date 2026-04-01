@@ -11,6 +11,11 @@
 typedef void (*initcall_t)(void);
 static void do_initcalls(void);
 
+/* Forward type declarations for GUI components */
+typedef struct login_screen login_screen_t;
+typedef struct onboarding_wizard onboarding_wizard_t;
+struct compositor;
+
 /*===========================================================================*/
 /*                         INITIALIZATION LEVELS                             */
 /*===========================================================================*/
@@ -64,6 +69,8 @@ extern void power_init(void);
 extern int hypervisor_init(void);
 extern void syscall_init(void);
 extern void graphics_init(void);
+extern void splash_update_progress(u32 percent, const char *status);
+extern void splash_done(void);
 extern void acpi_init(void);
 extern void interrupt_init(void);
 extern void percpu_init(void);
@@ -130,9 +137,11 @@ extern int desktop_init_global(void);
 extern login_screen_t *login_screen_get_instance(void);
 extern int login_screen_init(login_screen_t *screen);
 extern int login_screen_run(login_screen_t *screen);
+extern int login_screen_update(login_screen_t *screen);
 extern onboarding_wizard_t *onboarding_wizard_get_instance(void);
 extern int onboarding_wizard_init(onboarding_wizard_t *wizard);
 extern int onboarding_wizard_run(onboarding_wizard_t *wizard);
+extern int onboarding_wizard_update(onboarding_wizard_t *wizard);
 
 /* Initcall sections */
 extern initcall_t __initcall_start[], __initcall_end[];
@@ -175,6 +184,10 @@ void kernel_init_early(void)
     
     /* 2. Initialize console output */
     console_init();
+
+    /* 2.5 Show Boot Splash Logo (Text Mode) */
+    void splash_draw_logo_text(u32 x, u32 y);
+    splash_draw_logo_text(0, 0);
     
     /* 3. Initialize early kernel memory */
     pmm_early_init();
@@ -237,33 +250,43 @@ void kernel_init_subsystems(void)
     pr_info("Initializing kernel subsystems...\n");
     
     /* 1. Memory management (Complete) */
-    pr_info("  Memory management (PMM, Paging, VMM, Heap, Slab)...\n");
+    pr_info("  [1/6] Memory management (PMM, Paging, VMM, Heap, Slab)...\n");
     pmm_init();
     arch_init_paging();
     vmm_init();
     heap_init();
     slab_init();
+    pr_info("  [OK] Memory management initialized\n");
     
     /* 2. Scheduler */
-    pr_info("  Scheduler...\n");
+    pr_info("  [2/6] Scheduler...\n");
     scheduler_init();
+    pr_info("  [OK] Scheduler initialized\n");
     
     /* 3. Process management */
-    pr_info("  Process management...\n");
+    pr_info("  [3/6] Process management...\n");
     process_init();
+    pr_info("  [OK] Process management initialized\n");
     
     /* 4. IPC */
-    pr_info("  IPC...\n");
+    pr_info("  [4/6] IPC...\n");
     ipc_init();
+    pr_info("  [OK] IPC initialized\n");
     
     /* 5. Synchronization primitives */
+    pr_info("  [5/6] Synchronization primitives...\n");
     sync_init();
+    pr_info("  [OK] Synchronization initialized\n");
     
     /* 6. Syscall interface */
+    pr_info("  [6/6] Syscall interface...\n");
     syscall_init();
+    pr_info("  [OK] Syscall interface initialized\n");
 
     /* 7. Enable interrupts globally */
+    pr_info("  Enabling interrupts globally...\n");
     arch_enable_interrupts();
+    pr_info("  [OK] Interrupts enabled\n");
     
     current_init_level = INIT_LEVEL_SUBSYSTEMS;
 }
@@ -294,14 +317,24 @@ void kernel_init_drivers(void)
     
     /* Graphics */
     graphics_init();
+    splash_update_progress(60, "Graphics subsystem initialized");
     
     /* Input devices */
     if (input_init() != 0) {
         pr_err("  Failed to initialize input devices.\n");
     }
+    splash_update_progress(70, "Input devices ready");
+
+    /* 6. Resource Sharing (VMware, VBox, QEMU guest tools) */
+    typedef struct resource_sharing_config resource_sharing_config_t;
+    extern int resource_sharing_init(resource_sharing_config_t *config);
+    extern resource_sharing_config_t *resource_sharing_get_global_config(void);
+    resource_sharing_init(resource_sharing_get_global_config());
     
     /* Late driver initialization */
     driver_late_init();
+    
+    splash_update_progress(80, "Kernel initialization complete");
     
     current_init_level = INIT_LEVEL_DRIVERS;
 }
@@ -315,6 +348,7 @@ void kernel_init_late(void)
     
     /* Security subsystem */
     security_core_init();
+    splash_update_progress(85, "Security subsystem initialized");
     
     /* Power management */
     power_init();
@@ -323,6 +357,7 @@ void kernel_init_late(void)
     if (hypervisor_init() != 0) {
         pr_warn("  Failed to initialize hypervisor.\n");
     }
+    splash_update_progress(90, "System services started");
     
     /* AI/ML Inference */
     if (inference_init() != 0) {
@@ -350,6 +385,8 @@ void kernel_init_late(void)
     /* Architecture-specific late init */
     arch_late_init();
     
+    splash_update_progress(95, "Preparing GUI...");
+    
     current_init_level = INIT_LEVEL_USERSPACE;
 }
 
@@ -359,39 +396,90 @@ void kernel_init_late(void)
 void kernel_init_userspace(void)
 {
     pr_info("Initializing userspace...\n");
-    
+
     /* 1. Start init process */
     init_process_start();
-    
+
     /* 2. Start service manager */
     service_manager_start();
 
     /* 3. Initialize GUI components (Login / Onboarding) */
     boot_params_t *params = get_boot_params();
     if (params && params->graphics_mode) {
-        pr_info("  Initializing GUI components...\n");
-        
+        pr_info("  [GUI] Starting Graphical User Interface...\n");
+
         /* Initialize GUI framework (Renderer, Compositor) */
-        gui_framework_init();
+        pr_info("  [GUI] Initializing Renderer and Compositor...\n");
+        if (gui_framework_init() == 0) {
+            pr_info("  [GUI] GUI Framework Ready\n");
 
-        /* Initialize Desktop Environment */
-        desktop_init_global();
+            splash_done();
 
-        /* Check if onboarding is needed (first boot) */
-        onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
-        if (wizard) {
-            onboarding_wizard_init(wizard);
-            onboarding_wizard_run(wizard);
+            /* Initialize Desktop Environment */
+            pr_info("  [GUI] Initializing Desktop Environment...\n");
+            desktop_init_global();
+
+            /* Check if onboarding is needed (first boot) */
+            onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
+            if (wizard) {
+                pr_info("  [GUI] Starting Onboarding Wizard...\n");
+                onboarding_wizard_init(wizard);
+                onboarding_wizard_run(wizard);
+            }
+
+            /* Initialize login screen */
+            login_screen_t *login = login_screen_get_instance();
+            if (login) {
+                pr_info("  [GUI] Starting Login Screen...\n");
+                login_screen_init(login);
+                login_screen_run(login);
+            }
+
+            /* 4. GUI Main Event Loop - Keep GUI running */
+            pr_info("  [GUI] Entering GUI event loop...\n");
+            bool gui_running = true;
+            u64 last_frame_time = get_time_ms();
+            u32 frame_count = 0;
+
+            while (gui_running) {
+                /* Calculate delta time */
+                u64 current_time = get_time_ms();
+                u64 delta_ms = current_time - last_frame_time;
+
+                /* Limit to ~60 FPS (16ms per frame) */
+                if (delta_ms < 16) {
+                    /* Small delay to prevent busy-waiting */
+                    arch_halt_cpu();
+                    continue;
+                }
+
+                last_frame_time = current_time;
+                frame_count++;
+
+                /* Update GUI state */
+                login_screen_update(login);
+                onboarding_wizard_update(wizard);
+
+                /* Present frame */
+                extern struct compositor *compositor_get_instance(void);
+                extern int compositor_present(struct compositor *comp);
+                compositor_present(compositor_get_instance());
+
+                /* Frame rate limiting */
+                if (frame_count >= 60) {
+                    pr_debug("[GUI] Running at %u FPS\n", frame_count);
+                    frame_count = 0;
+                }
+            }
+
+            pr_info("  [GUI] GUI event loop exited.\n");
+        } else {
+            pr_err("  [GUI] Failed to initialize GUI Framework! Falling back to console.\n");
         }
-
-        /* Initialize login screen */
-        login_screen_t *login = login_screen_get_instance();
-        if (login) {
-            login_screen_init(login);
-            login_screen_run(login);
-        }
+    } else {
+        pr_info("  [BOOT] Staying in text mode as requested.\n");
     }
-    
+
     pr_info("Userspace initialization complete.\n");
 }
 

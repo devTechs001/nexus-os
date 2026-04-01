@@ -268,7 +268,7 @@ int i801_wdt_probe(u16 vendor, u16 device, u32 base)
     priv->magic = 0x12345678;
     
     u32 dev_id = wdt_register_device("i801_wdt", vendor, device, I801_WDT_BASE);
-    if (dev_id < 0) {
+    if ((s32)dev_id < 0) {
         kfree(priv);
         return dev_id;
     }

@@ -40,7 +40,7 @@ CFLAGS = -ffreestanding -fno-stack-protector -fno-pie -nostdlib -nodefaultlibs \
          -m64 -mno-red-zone \
          -I$(KERNEL_DIR)/include \
          -DEFINES -D__FREESTANDING__=1 \
-         -fno-builtin -fno-exceptions -fno-rtti
+         -fno-builtin
 
 # Disable specific warnings for incomplete code
 CFLAGS += -Wno-implicit-function-declaration \
@@ -132,6 +132,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(SYSTEM_DIR)/audio/equalizer.c \
             $(SYSTEM_DIR)/logging/log_manager.c \
             $(SYSTEM_DIR)/feedback/feedback_manager.c \
+            $(SYSTEM_DIR)/resource-sharing/resource-sharing.c \
             $(APPS_DIR)/terminal/terminal_features.c \
             $(APPS_DIR)/terminal/terminal_animations.c \
             $(DRIVERS_DIR)/display/display.c \
@@ -279,6 +280,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/equalizer.o \
             $(BUILD_DIR)/log_manager.o \
             $(BUILD_DIR)/feedback_manager.o \
+            $(BUILD_DIR)/resource-sharing.o \
             $(BUILD_DIR)/terminal_features.o \
             $(BUILD_DIR)/terminal_animations.o \
             $(BUILD_DIR)/display.o \
@@ -646,6 +648,10 @@ $(BUILD_DIR)/log_manager.o: $(SYSTEM_DIR)/logging/log_manager.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
 
 $(BUILD_DIR)/feedback_manager.o: $(SYSTEM_DIR)/feedback/feedback_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
+$(BUILD_DIR)/resource-sharing.o: $(SYSTEM_DIR)/resource-sharing/resource-sharing.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
 

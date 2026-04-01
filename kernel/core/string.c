@@ -272,7 +272,7 @@ char *strrchr(const char *s, int c)
             p = s;
         s++;
     }
-    return p;
+    return (char *)p;
 }
 
 /**

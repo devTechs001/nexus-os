@@ -160,53 +160,6 @@
 #define BTN_GAMEPAD_RIGHT           0x223
 
 /*===========================================================================*/
-/*                         ABSOLUTE AXES                                     */
-/*===========================================================================*/
-
-#define ABS_X                       0x00
-#define ABS_Y                       0x01
-#define ABS_Z                       0x02
-#define ABS_RX                      0x03
-#define ABS_RY                      0x04
-#define ABS_RZ                      0x05
-#define ABS_THROTTLE                0x06
-#define ABS_RUDDER                0x07
-#define ABS_WHEEL                   0x08
-#define ABS_GAS                     0x09
-#define ABS_BRAKE                   0x0a
-#define ABS_HAT0X                   0x10
-#define ABS_HAT0Y                   0x11
-#define ABS_HAT1X                   0x12
-#define ABS_HAT1Y                   0x13
-#define ABS_HAT2X                   0x14
-#define ABS_HAT2Y                   0x15
-#define ABS_HAT3X                   0x16
-#define ABS_HAT3Y                   0x17
-#define ABS_PRESSURE                0x18
-#define ABS_DISTANCE                0x19
-#define ABS_TILT_X                  0x1a
-#define ABS_TILT_Y                  0x1b
-#define ABS_TOOL_WIDTH              0x1c
-#define ABS_VOLUME                  0x20
-#define ABS_MISC                    0x28
-
-/*===========================================================================*/
-/*                         LED CODES                                         */
-/*===========================================================================*/
-
-#define LED_NUML                    0x00
-#define LED_CAPSL                   0x01
-#define LED_SCROLLL                 0x02
-#define LED_COMPOSE                 0x03
-#define LED_KANA                    0x04
-#define LED_SLEEP                   0x05
-#define LED_SUSPEND                 0x06
-#define LED_MUTE                    0x07
-#define LED_MISC                    0x08
-#define LED_MAIL                    0x09
-#define LED_CHARGING                0x0a
-
-/*===========================================================================*/
 /*                         DATA STRUCTURES                                   */
 /*===========================================================================*/
 

@@ -157,7 +157,7 @@ bool dependency_check_file_exists(const char *path)
 /* Check File Integrity (Checksum) */
 bool dependency_check_integrity(const char *path, const char *expected_checksum)
 {
-    char actual_checksum[64];
+    char actual_checksum[64] = "";
     
     /* Calculate actual checksum */
     /* calculate_checksum(path, actual_checksum, 64); */
@@ -197,7 +197,7 @@ bool dependency_check_version(const char *path, const char *min_version)
 /* Check Dependency Permissions */
 bool dependency_check_permissions(const char *path, u32 required_perms)
 {
-    u32 actual_perms;
+    u32 actual_perms = 0;
     
     /* Get actual permissions */
     /* actual_perms = get_permissions(path); */

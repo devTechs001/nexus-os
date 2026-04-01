@@ -243,6 +243,7 @@ int dm_read_edid(u32 connector_id, u8 *edid, u32 *size)
 int dm_parse_edid(u32 connector_id, display_mode_t *modes, u32 *mode_count)
 {
     u8 edid[128];
+    memset(edid, 0, sizeof(edid));
     u32 size = 128;
     
     int ret = dm_read_edid(connector_id, edid, &size);
