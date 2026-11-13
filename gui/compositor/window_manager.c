@@ -635,8 +635,20 @@ static void window_manager_set_focus(window_t *window)
     g_window_manager.focused_window = window;
     g_window_manager.active_window = window;
 
-    /* Bring to front */
-    window_manager_update_z_order(window);
+    /*
+     * Bring the whole owning stack to front. Focusing a child used to raise
+     * only the child itself, leaving it drawn underneath unrelated top-level
+     * windows. Walking to the top-level ancestor is what this walk exists for.
+     */
+    {
+        window_t *top = window_manager_find_parent(window);
+
+        window_manager_update_z_order(top ? top : window);
+
+        if (top && top != window) {
+            top->dirty = true;
+        }
+    }
 
     window_manager_notify_event(window, EVENT_WINDOW_FOCUS, NULL);
     if (window->on_focus) {
@@ -801,6 +813,32 @@ int window_manager_register_class(const char *name,
 /*===========================================================================*/
 /*                         EVENT NOTIFICATION                                */
 /*===========================================================================*/
+
+/**
+ * window_manager_find_parent - Walk up from a window to its top-level owner
+ * @window: Window to start from
+ *
+ * Declared here and never defined, which is why nothing could reason about
+ * ownership: z-order promotion, focus and teardown all need to know which
+ * top-level window a child belongs to.
+ *
+ * Returns: The top-level ancestor, or @window itself if it has no parent.
+ */
+static window_t *window_manager_find_parent(window_t *window)
+{
+    window_t *cur = window;
+
+    if (!window) {
+        return NULL;
+    }
+
+    /* Bounded: a cycle in the parent chain must not hang the compositor. */
+    for (u32 depth = 0; cur->parent && depth < MAX_WINDOWS; depth++) {
+        cur = cur->parent;
+    }
+
+    return cur;
+}
 
 /**
  * window_manager_notify_event - Notify window of event

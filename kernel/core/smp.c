@@ -15,8 +15,12 @@ extern int arch_cpu_down(u32 cpu);
 extern void arch_send_ipi(u32 cpu, u32 vector);
 extern void arch_scheduler_enable(u32 cpu);
 
-/* Spinlock initializer */
-#define SPINLOCK_UNLOCKED  { .lock = 0 }
+/*
+ * SPINLOCK_UNLOCKED comes from kernel/sync/sync.h and is the *scalar* form
+ * (0), because spin_lock()/spin_unlock() compare lock->lock against it. A
+ * local copy here redefined it as a braced initialiser, which is not valid in
+ * those comparisons - remove it and use the shared definition.
+ */
 
 /*===========================================================================*/
 /*                         SMP CONFIGURATION                                 */
@@ -75,7 +79,7 @@ static u32 num_present_cpus = 0;
 static u32 num_online_cpus = 0;
 static u32 boot_cpu = 0;
 
-static spinlock_t cpu_lock = SPINLOCK_UNLOCKED;
+static spinlock_t cpu_lock = { .lock = SPINLOCK_UNLOCKED };
 
 /*===========================================================================*/
 /*                         SMP INITIALIZATION                                */

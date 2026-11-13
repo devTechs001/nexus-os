@@ -8,6 +8,7 @@
 
 #include "../gui.h"
 #include "compositor.h"
+#include "../../drivers/display/display.h"
 #include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
@@ -556,21 +557,123 @@ int compositor_animate_maximize(u32 window_id)
 /*                         COMPOSITING                                       */
 /*===========================================================================*/
 
-static void render_shadow(comp_window_decor_t *decor, void *surface)
+/*
+ * Fill an axis-aligned rectangle into a 32-bpp surface.
+ *
+ * Returns early on a null surface so the compositor degrades to doing nothing
+ * rather than faulting when no framebuffer has been registered yet.
+ */
+static void comp_fill_rect(void *surface, s32 x, s32 y, s32 w, s32 h,
+                           color_t color, u8 alpha)
 {
-    if (!decor->has_shadow) return;
-    
-    /* In real implementation, would render blurred shadow */
-    /* For now, just a placeholder */
-    (void)decor; (void)surface;
+    display_framebuffer_t *fb = (display_framebuffer_t *)surface;
+    u32 *base;
+    u32 fb_w, fb_h, stride;
+    u32 rgba;
+    s32 row, col;
+
+    if (!fb || !fb->base || w <= 0 || h <= 0) {
+        return;
+    }
+
+    base = (u32 *)fb->base;
+    fb_w = fb->width;
+    fb_h = fb->height;
+    stride = fb->stride ? fb->stride / 4 : fb_w;
+
+    rgba = ((u32)color.r << 16) | ((u32)color.g << 8) | (u32)color.b;
+
+    for (row = y; row < y + h; row++) {
+        if (row < 0 || (u32)row >= fb_h) {
+            continue;
+        }
+
+        for (col = x; col < x + w; col++) {
+            if (col < 0 || (u32)col >= fb_w) {
+                continue;
+            }
+
+            if (alpha >= 255) {
+                base[row * stride + col] = rgba;
+            } else {
+                u32 dst = base[row * stride + col];
+                u32 r = (((dst >> 16) & 0xFF) * (255 - alpha) +
+                         ((rgba >> 16) & 0xFF) * alpha) / 255;
+                u32 g = (((dst >> 8) & 0xFF) * (255 - alpha) +
+                         ((rgba >> 8) & 0xFF) * alpha) / 255;
+                u32 b = ((dst & 0xFF) * (255 - alpha) +
+                         (rgba & 0xFF) * alpha) / 255;
+
+                base[row * stride + col] = (r << 16) | (g << 8) | b;
+            }
+        }
+    }
 }
 
-static void render_border(comp_window_decor_t *decor, void *surface)
+/*
+ * Shadow and border used to be empty placeholders ("would render ..."), so a
+ * window with decorations drew nothing but its content. Both now paint, and
+ * both take the animated opacity so a fade actually fades.
+ */
+static void render_shadow(comp_window_decor_t *decor, void *surface,
+                          u32 scale, u32 opacity)
 {
-    if (!decor->has_border) return;
-    
-    /* In real implementation, would render border */
-    (void)decor; (void)surface;
+    rect_t r;
+    s32 grow;
+    u8 alpha;
+
+    if (!decor || !decor->has_shadow) return;
+
+    /* Scale offsets the shadow box around the window centre. */
+    grow = (s32)(decor->shadow_blur * scale / 256);
+
+    r.x = decor->shadow_rect.x - grow;
+    r.y = decor->shadow_rect.y - grow;
+    r.width  = (decor->shadow_rect.width  * (s32)scale / 256) + grow * 2;
+    r.height = (decor->shadow_rect.height * (s32)scale / 256) + grow * 2;
+
+    /*
+     * Shadow strength follows opacity. Decorations are semi-transparent by
+     * design, so cap at ~60% of the requested alpha.
+     */
+    alpha = (u8)((opacity * 3u) / 5u);
+
+    comp_fill_rect(surface, r.x, r.y, r.width, r.height,
+                   decor->shadow_color, alpha);
+}
+
+static void render_border(comp_window_decor_t *decor, void *surface,
+                          u32 scale, u32 opacity)
+{
+    rect_t r;
+    s32 w;
+    u8 alpha;
+
+    if (!decor || !decor->has_border || decor->border_width == 0) return;
+
+    w = (s32)(decor->border_width * scale / 256);
+
+    if (w <= 0) {
+        w = 1;
+    }
+
+    /* The border box is the window geometry scaled about its own origin. */
+    r.x = decor->geometry.x;
+    r.y = decor->geometry.y;
+    r.width  = decor->geometry.width  * (s32)scale / 256;
+    r.height = decor->geometry.height * (s32)scale / 256;
+
+    alpha = (u8)opacity;
+
+    /* Four edges rather than one outline primitive. */
+    comp_fill_rect(surface, r.x, r.y, r.width, w,
+                   decor->border_color, alpha);
+    comp_fill_rect(surface, r.x, r.y + r.height - w, r.width, w,
+                   decor->border_color, alpha);
+    comp_fill_rect(surface, r.x, r.y, w, r.height,
+                   decor->border_color, alpha);
+    comp_fill_rect(surface, r.x + r.width - w, r.y, w, r.height,
+                   decor->border_color, alpha);
 }
 
 int compositor_composite(void *output_surface)
@@ -612,14 +715,18 @@ int compositor_composite(void *output_surface)
             }
         }
         
-        /* Render shadow */
-        render_shadow(decor, g_comp.output_surface);
-        
+        /*
+         * Apply the animated transform. scale and opacity were computed here
+         * and then discarded, so scale/zoom/fade animations had no visible
+         * effect whatsoever.
+         */
+        render_shadow(decor, g_comp.output_surface, scale, opacity);
+
         /* Render window content */
         /* In real implementation, would composite window texture */
         
         /* Render border */
-        render_border(decor, g_comp.output_surface);
+        render_border(decor, g_comp.output_surface, scale, opacity);
     }
     
     /* Update frame timing */

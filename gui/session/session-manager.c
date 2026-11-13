@@ -184,6 +184,43 @@ int session_manager_run(session_manager_t *manager)
 }
 
 /**
+ * session_manager_tick - Periodic session maintenance
+ * @manager: Pointer to session manager structure
+ *
+ * Intended to be called from the desktop/compositor frame loop. It runs the
+ * idle checks and service health monitoring.
+ *
+ * check_idle_state() implemented the full ladder - idle, then lock, then
+ * sleep - but nothing ever called it, so auto-lock, screen blanking and sleep
+ * never fired no matter how long the machine sat untouched.
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int session_manager_tick(session_manager_t *manager)
+{
+    if (!manager || !manager->initialized || !manager->running) {
+        return -EINVAL;
+    }
+
+    if (!manager->current_session) {
+        return -ENODEV;
+    }
+
+    check_idle_state(manager);
+
+    /* Poll the services that registered a monitor callback. */
+    for (u32 i = 0; i < manager->service_count; i++) {
+        session_service_t *svc = &manager->services[i];
+
+        if (svc->is_enabled) {
+            service_monitor_callback(svc);
+        }
+    }
+
+    return 0;
+}
+
+/**
  * session_manager_shutdown - Shutdown the session manager
  * @manager: Pointer to session manager structure
  *
@@ -1186,6 +1223,41 @@ u64 session_manager_get_idle_time(session_manager_t *manager)
 }
 
 /**
+ * service_monitor_callback - Health-check one service
+ * @service: Service to inspect
+ *
+ * Declared next to the other service helpers but never defined, and nothing
+ * looked at a service's health after it started: a service that exited left
+ * the manager believing it was up.
+ */
+static void service_monitor_callback(session_service_t *service)
+{
+    if (!service || !service->is_enabled) {
+        return;
+    }
+
+    /*
+     * A service that stopped running without going through stop_service()
+     * crashed. Report it through the crash hook and give up once it has used
+     * its restart budget.
+     */
+    if (!service->is_running) {
+        if (service->restart_count >= service->max_restarts) {
+            printk("[SESSION] Service '%s' exceeded restart limit (%u)\n",
+                   service->name, service->restart_count);
+            service->is_enabled = false;
+            return;
+        }
+
+        printk("[SESSION] Service '%s' is not running\n", service->name);
+
+        if (service->on_crash) {
+            service->on_crash(service);
+        }
+    }
+}
+
+/**
  * check_idle_state - Check and handle idle state
  * @manager: Pointer to session manager structure
  */
@@ -1259,15 +1331,48 @@ static int setup_session_environment(session_manager_t *manager, user_session_t 
     
     printk("[SESSION] Setting up environment for session %d\n", session->session_id);
     
-    /* Set basic environment variables */
-    /* In real implementation, would use setenv */
-    
-    char **env = &session->environment[0];
+    /*
+     * Build the session environment. This used to leave idx at 0 and store
+     * nothing, so every process the session started inherited an empty
+     * environment despite the session recording a username, home directory
+     * and shell.
+     */
+    if (!session->environment) {
+        return -EINVAL;
+    }
+
     u32 idx = 0;
-    
-    /* USER */
+    u32 max = session->env_count ? session->env_count : SESSION_MAX_ENV;
+
+    /* The caller supplies the array and its capacity in env_count. */
+    session->env_count = 0;
+
+    if (session->username[0] && idx < max) {
+        session->environment[idx++] = session->username;
+    }
+
+    if (session->home_dir[0] && idx < max) {
+        session->environment[idx++] = session->home_dir;
+    }
+
+    if (session->shell[0] && idx < max) {
+        session->environment[idx++] = session->shell;
+    }
+
+    if (session->current_dir[0] && idx < max) {
+        session->environment[idx++] = session->current_dir;
+    }
+
+    if (session->locale[0] && idx < max) {
+        session->environment[idx++] = session->locale;
+    }
+
+    if (session->timezone[0] && idx < max) {
+        session->environment[idx++] = session->timezone;
+    }
+
     session->env_count = idx;
-    
+
     return 0;
 }
 

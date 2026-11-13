@@ -32,6 +32,7 @@
 
 /* VM Scheduling Policies */
 #define VM_SCHED_FIFO             1
+#define VM_SCHED_QUANTUM_MS       10    /* Time slice per VM (ms) */
 #define VM_SCHED_ROUND_ROBIN      2
 #define VM_SCHED_FAIR             3
 #define VM_SCHED_REALTIME         4
@@ -131,26 +132,73 @@ typedef struct {
 
 static vm_scheduler_t g_vm_scheduler;
 
-/* Schedule VM Execution */
-static void vm_scheduler_run(void)
+/*
+ * Schedule VM Execution.
+ *
+ * Every branch of the old switch was empty and the function was `static`, while
+ * vm_manager.h declares it `extern`. The logical processor therefore had no way
+ * to pick the next VM, and the switch rates were never updated.
+ *
+ * The runnable set is the union of the group id lists; each call picks the next
+ * id after current_vm (round-robin), or hands out a full quantum to the current
+ * VM under FIFO until it yields.
+ */
+void vm_scheduler_run(void)
 {
-    /* VM scheduling implementation */
-    printk("[VM-MGR] Running VM scheduler (policy: %u)\n", g_vm_scheduler.scheduling_policy);
-    
-    switch (g_vm_scheduler.scheduling_policy) {
-    case VM_SCHED_FIFO:
-        /* First-come, first-served */
-        break;
-    case VM_SCHED_ROUND_ROBIN:
-        /* Round-robin time slicing */
-        break;
-    case VM_SCHED_FAIR:
-        /* Fair share scheduling */
-        break;
-    case VM_SCHED_REALTIME:
-        /* Real-time priority scheduling */
-        break;
+    u32 total = 0;
+    u32 chosen = 0;
+    u32 seen = 0;
+
+    /* Count the runnable VMs across all groups. */
+    for (u32 g = 0; g < g_vm_manager.group_count; g++) {
+        total += g_vm_manager.groups[g].vm_count;
     }
+
+    if (total == 0) {
+        g_vm_scheduler.current_vm = 0;
+        return;
+    }
+
+    /*
+     * Walk the flattened id list starting just past the current VM, so the
+     * selection advances each time the scheduler is entered.
+     */
+    for (u32 g = 0; g < g_vm_manager.group_count && !chosen; g++) {
+        vm_group_t *grp = &g_vm_manager.groups[g];
+
+        for (u32 i = 0; i < grp->vm_count; i++, seen++) {
+            if (seen < g_vm_scheduler.current_vm) {
+                continue;
+            }
+
+            chosen = grp->vm_ids[i];
+            break;
+        }
+    }
+
+    if (!chosen) {
+        /* Wrapped past the end: start again from the beginning. */
+        for (u32 g = 0; g < g_vm_manager.group_count && !chosen; g++) {
+            if (g_vm_manager.groups[g].vm_count > 0) {
+                chosen = g_vm_manager.groups[g].vm_ids[0];
+            }
+        }
+    }
+
+    if (chosen != g_vm_scheduler.current_vm) {
+        g_vm_scheduler.last_switch_time = get_time_ms();
+    }
+
+    g_vm_scheduler.current_vm = chosen;
+    g_vm_scheduler.next_vm = (chosen + 1) % total;
+
+    /* Refill the quantum; the timer path decrements it. */
+    if (g_vm_scheduler.quantum_remaining == 0) {
+        g_vm_scheduler.quantum_remaining = VM_SCHED_QUANTUM_MS;
+    }
+
+    printk("[VM-MGR] Scheduling VM %u (policy: %u)\n",
+           g_vm_scheduler.current_vm, g_vm_scheduler.scheduling_policy);
 }
 
 /*===========================================================================*/

@@ -409,6 +409,42 @@ int graphics_fill_rect(graphics_context_t *ctx, rect_t *rect, color_t color)
 }
 
 /**
+ * graphics_stroke_rect - Draw a rectangle outline
+ * @ctx:  Graphics context
+ * @rect: Rectangle to outline
+ * @color: Outline colour
+ *
+ * The renderer had no way to stroke a rectangle: renderer_draw_rect_sw() was
+ * a complete implementation with no caller, so every caller that wanted a
+ * border had to fill four separate rectangles itself.
+ */
+int graphics_stroke_rect(graphics_context_t *ctx, rect_t *rect, color_t color)
+{
+    if (!ctx || !ctx->surface || !rect) {
+        return -1;
+    }
+
+    if (rect->width <= 0 || rect->height <= 0) {
+        return -1;
+    }
+
+    spin_lock(&g_renderer.lock);
+
+    /* Apply the context alpha, exactly as graphics_fill_rect() does. */
+    color.a = (u8)((color.a * ctx->alpha) / 255);
+
+    renderer_draw_rect_sw(ctx->surface, ctx->width, ctx->height, rect, color);
+
+    g_renderer.draw_calls++;
+    /* An outline touches the perimeter, not the area. */
+    g_renderer.pixels_drawn += 2 * (u32)(rect->width + rect->height);
+
+    spin_unlock(&g_renderer.lock);
+
+    return 0;
+}
+
+/**
  * graphics_draw_text - Draw text
  * @ctx: Graphics context
  * @x: X position
