@@ -77,6 +77,14 @@ void nexus_app_redraw(void)
 {
     switch (g_active_app) {
     case NEXUS_APP_VM_MANAGER:
+        /*
+         * Poll input before repainting. Nothing dispatched pointer events to
+         * this app - apps_nexus.c had no mouse handling at all - so the
+         * manager rendered a full UI that could never respond to a click.
+         * Polling here keeps the call site in one place and makes the action
+         * bar's buttons reachable.
+         */
+        virt_manager_poll_input();
         virt_manager_refresh_vm_list();
         virt_manager_gui_render();
         break;

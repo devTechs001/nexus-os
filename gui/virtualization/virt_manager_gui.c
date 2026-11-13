@@ -12,6 +12,7 @@
 #include "../../drivers/video/font8x16.h"
 #include "virt_render.h"
 #include "virt_manager_gui.h"
+#include "../../drivers/input/input.h"
 
 /* Execution modes (mirrors the hypervisor's VM_MODE_* values) */
 #define VIRT_MODE_NATIVE        0
@@ -33,6 +34,7 @@ extern void virt_manager_update_status_bar(const char *left, const char *right);
 #define VM_DETAILS_WIDTH            880
 #define TOOLBAR_HEIGHT              60
 #define STATUS_BAR_HEIGHT           30
+#define ACTION_BAR_HEIGHT           46
 #define VM_ICON_SIZE                48
 #define MAX_VISIBLE_VMS             20
 
@@ -56,26 +58,26 @@ extern void virt_manager_update_status_bar(const char *left, const char *right);
 #define COLOR_VM_ERROR              0xE74C3C  /* Red */
 
 /* Icons (Unicode/Simple Graphics) */
-#define ICON_VM_DESKTOP             "🖥️"
-#define ICON_VM_SERVER              "🖧"
-#define ICON_VM_CLOUD               "☁️"
-#define ICON_CONTAINER              "📦"
-#define ICON_NETWORK                "🌐"
-#define ICON_STORAGE                "💾"
-#define ICON_SETTINGS               "⚙️"
-#define ICON_PLAY                   "▶️"
-#define ICON_PAUSE                  "⏸️"
-#define ICON_STOP                   "⏹️"
-#define ICON_RESTART                "🔄"
-#define ICON_SNAPSHOT               "📸"
-#define ICON_CLONE                  "👥"
-#define ICON_DELETE                 "🗑️"
-#define ICON_ADD                    "➕"
-#define ICON_REFRESH                "🔄"
-#define ICON_SEARCH                 "🔍"
-#define ICON_FILTER                 "🔽"
-#define ICON_CPU                    "🖳"
-#define ICON_MEMORY                 "💾"
+#define ICON_VM_DESKTOP             "PC"
+#define ICON_VM_SERVER              "SRV"
+#define ICON_VM_CLOUD               "CLD"
+#define ICON_CONTAINER              "BOX"
+#define ICON_NETWORK                "NET"
+#define ICON_STORAGE                "DSK"
+#define ICON_SETTINGS               "CFG"
+#define ICON_PLAY                   "RUN"
+#define ICON_PAUSE                  "II"
+#define ICON_STOP                   "STP"
+#define ICON_RESTART                "RST"
+#define ICON_SNAPSHOT               "SNP"
+#define ICON_CLONE                  "CLN"
+#define ICON_DELETE                 "DEL"
+#define ICON_ADD                    "NEW"
+#define ICON_REFRESH                "REF"
+#define ICON_SEARCH                 "FND"
+#define ICON_FILTER                 "FLT"
+#define ICON_CPU                    "CPU"
+#define ICON_MEMORY                 "MEM"
 #define ICON_DISK                   "💿"
 #define ICON_NETWORK_NET            "🌐"
 #define ICON_GPU                    "🎮"
@@ -165,6 +167,10 @@ typedef struct {
     /* Action Buttons */
     action_button_t buttons[16];
     u32 button_count;
+    u32 hovered_button;             /* index, or 0xFFFFFFFF for none */
+    u32 pressed_button;
+    s32 cursor_x, cursor_y;         /* last known pointer position */
+    bool mouse_was_down;            /* previous left-button state */
     
     /* Configuration Panels */
     network_config_t network_config;
@@ -489,6 +495,11 @@ int virt_manager_gui_init(void)
     
     /* Action buttons */
     g_virt_manager.button_count = 0;
+    g_virt_manager.hovered_button = 0xFFFFFFFFu;
+    g_virt_manager.pressed_button = 0xFFFFFFFFu;
+    g_virt_manager.cursor_x = 0;
+    g_virt_manager.cursor_y = 0;
+    g_virt_manager.mouse_was_down = false;
     
     /* Resource optimization defaults */
     g_virt_manager.resource_opt.auto_optimize = true;
@@ -753,6 +764,63 @@ void virt_manager_gui_render(void)
         gui_draw_text(det_x + 20, 80, "Select a VM to inspect it", COLOR_VM_STOPPED, 14);
     }
 
+    /* Render Action Button Bar.
+     *
+     * g_virt_manager.buttons[] was populated by virt_manager_add_action() and
+     * then never read by anything: the ten actions (New VM, Start, Pause, Stop,
+     * Restart, Snapshot, Clone, Settings, Console, Delete) were registered at
+     * init, printed to the log, and never laid out, drawn or hit-tested. The
+     * manager therefore had no usable buttons at all.
+     */
+    {
+        u32 bar_h = ACTION_BAR_HEIGHT;
+        u32 bar_y = g_virt_manager.height - STATUS_BAR_HEIGHT - bar_h;
+
+        gui_draw_rounded_rect(0, bar_y, g_virt_manager.width, bar_h, 0, COLOR_TOOLBAR_BG);
+        gui_draw_rounded_rect(0, bar_y, g_virt_manager.width, 1, 0, COLOR_SIDEBAR_BG);
+
+        u32 pad = 6;
+        u32 x = 10;
+        u32 bh = bar_h - 2 * pad;
+        if (bh < 18) {
+            bh = 18;
+        }
+
+        for (u32 i = 0; i < g_virt_manager.button_count; i++) {
+            action_button_t *btn = &g_virt_manager.buttons[i];
+
+            /* Measure the label so wide entries get the room they need. */
+            u32 text_w = virt_text_width(btn->label, 1);
+            u32 bw = text_w + 34;
+            if (bw < 74) {
+                bw = 74;
+            }
+
+            if (x + bw > g_virt_manager.width) {
+                /* No room left; stop rather than draw past the edge. */
+                btn->width = 0;
+                continue;
+            }
+
+            btn->x = x;
+            btn->y = bar_y + pad;
+            btn->width = bw;
+            btn->height = bh;
+
+            bool hot = btn->enabled && (i == g_virt_manager.hovered_button);
+            u32 bg = hot ? COLOR_SIDEBAR_SELECTED : COLOR_CARD_BG;
+            u32 fg = btn->enabled ? COLOR_TITLE_TEXT : COLOR_VM_STOPPED;
+
+            gui_draw_rounded_rect(x, btn->y, bw, bh, 4, bg);
+            gui_draw_text(x + 8, btn->y + (bh > 14 ? (bh - 12) / 2 : 2),
+                          btn->icon, fg, 10);
+            gui_draw_text(x + 24, btn->y + (bh > 14 ? (bh - 12) / 2 : 2),
+                          btn->label, fg, 10);
+
+            x += bw + 5;
+        }
+    }
+
     /* Draw status bar */
     gui_draw_rounded_rect(0, g_virt_manager.height - 30, g_virt_manager.width, 30, 0, COLOR_TITLE_BAR);
     gui_draw_text(10, g_virt_manager.height - 22, g_virt_manager.status_message, COLOR_TITLE_TEXT, 14);
@@ -847,6 +915,155 @@ int virt_manager_handle_toolbar_click(u32 x, u32 y)
     }
     
     return -1;
+}
+
+/*===========================================================================*/
+/*                        ACTION BUTTON INPUT                                */
+/*===========================================================================*/
+
+/*
+ * The action bar occupies a fixed strip just above the status bar. These two
+ * helpers are the missing other half of virt_manager_add_action(): the buttons
+ * were being registered with geometry that was never computed, so there was
+ * nothing to hover and nothing to click.
+ */
+
+/**
+ * virt_manager_button_at - Find the action button under a point
+ * @x: Screen x
+ * @y: Screen y
+ *
+ * Returns: Button index, or -1 if the point is not over an enabled button
+ */
+int virt_manager_button_at(u32 x, u32 y)
+{
+    for (u32 i = 0; i < g_virt_manager.button_count; i++) {
+        action_button_t *btn = &g_virt_manager.buttons[i];
+
+        if (btn->width == 0) {
+            continue;
+        }
+        if (x >= btn->x && x < btn->x + btn->width &&
+            y >= btn->y && y < btn->y + btn->height) {
+            return (int)i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * virt_manager_handle_button_hover - Track which button the cursor is over
+ * @x: Screen x
+ * @y: Screen y
+ */
+void virt_manager_handle_button_hover(u32 x, u32 y)
+{
+    int idx = virt_manager_button_at(x, y);
+
+    g_virt_manager.hovered_button = (idx >= 0) ? (u32)idx : 0xFFFFFFFFu;
+}
+
+/**
+ * virt_manager_handle_button_press - Activate the button under a point
+ * @x: Screen x
+ * @y: Screen y
+ *
+ * Returns: 0 if a button handled the click, -1 otherwise
+ *
+ * Hit-testing only. The action dispatch already lives in
+ * virt_manager_handle_button_click(u32 button_id); this exists so a pointer
+ * event can be translated into that id, which is what was missing - the
+ * buttons were registered but never had geometry, so nothing could ever call
+ * the dispatcher with a real button.
+ */
+int virt_manager_handle_button_press(u32 x, u32 y)
+{
+    int idx = virt_manager_button_at(x, y);
+    if (idx < 0) {
+        return -1;
+    }
+
+    g_virt_manager.pressed_button = (u32)idx;
+    virt_manager_handle_button_click((u32)idx);
+
+    virt_manager_refresh_vm_list();
+    virt_manager_gui_render();
+
+    return 0;
+}
+
+/**
+ * virt_manager_poll_input - Feed pointer events into the manager
+ *
+ * Returns: 0 if the manager consumed an event, -1 otherwise
+ *
+ * Nothing dispatched input to this app at all: apps_nexus.c has no mouse or
+ * keyboard handling, so the manager could render a full UI and never react to
+ * a click. Rather than require an event loop that does not exist yet, this
+ * drains the driver's event queue itself and tracks the cursor.
+ *
+ * Left-button edges are detected here (press on the transition to down), so a
+ * held button does not fire the action every frame.
+ */
+int virt_manager_poll_input(void)
+{
+    input_event_t ev;
+    bool consumed = false;
+
+    /* Drain everything queued, remembering the latest cursor position. */
+    while (input_read_event(&ev) == 0) {
+        if (ev.type == EV_REL || ev.type == EV_ABS) {
+            if (ev.code == ABS_X || ev.code == REL_X) {
+                g_virt_manager.cursor_x += ev.value;
+            } else if (ev.code == ABS_Y || ev.code == REL_Y) {
+                g_virt_manager.cursor_y += ev.value;
+            }
+        }
+        consumed = true;
+    }
+
+    /* Absolute position from the driver is more trustworthy than integrating
+     * deltas ourselves; use it when the device provides one. */
+    s32 mx, my;
+    if (input_get_mouse_position(&mx, &my) == 0 && (mx || my)) {
+        g_virt_manager.cursor_x = mx;
+        g_virt_manager.cursor_y = my;
+    }
+
+    /* Clamp to the window so a stray delta cannot put the cursor off-screen. */
+    if (g_virt_manager.cursor_x < 0) g_virt_manager.cursor_x = 0;
+    if (g_virt_manager.cursor_y < 0) g_virt_manager.cursor_y = 0;
+    if (g_virt_manager.cursor_x >= (s32)g_virt_manager.width)
+        g_virt_manager.cursor_x = (s32)g_virt_manager.width - 1;
+    if (g_virt_manager.cursor_y >= (s32)g_virt_manager.height)
+        g_virt_manager.cursor_y = (s32)g_virt_manager.height - 1;
+
+    /* Hover follows the cursor even without a click. */
+    virt_manager_handle_button_hover((u32)g_virt_manager.cursor_x,
+                                     (u32)g_virt_manager.cursor_y);
+
+    /* Left-button edge detection. */
+    bool down = input_is_key_pressed(BTN_LEFT);
+
+    if (down && !g_virt_manager.mouse_was_down) {
+        u32 cx = (u32)g_virt_manager.cursor_x;
+        u32 cy = (u32)g_virt_manager.cursor_y;
+
+        if (virt_manager_handle_button_press(cx, cy) == 0) {
+            consumed = true;
+        } else if (virt_manager_handle_toolbar_click(cx, cy) == 0) {
+            virt_manager_gui_render();
+            consumed = true;
+        } else if (virt_manager_handle_menu_click(cx, cy) == 0) {
+            virt_manager_gui_render();
+            consumed = true;
+        }
+    }
+
+    g_virt_manager.mouse_was_down = down;
+
+    return consumed ? 0 : -1;
 }
 
 /* Update Status Bar */

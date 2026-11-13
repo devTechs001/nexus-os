@@ -77,6 +77,15 @@ typedef struct {
 /* Initialization */
 extern int virt_gui_init(void);
 extern void virt_manager_gui_render(void);
+
+/* Pointer input. The action buttons are registered by virt_manager_add_action()
+ * but nothing dispatched events to them; this drains the input queue, tracks
+ * the cursor, and activates the button under it. Returns 0 if an event was
+ * consumed. */
+extern int virt_manager_poll_input(void);
+extern int virt_manager_button_at(u32 x, u32 y);
+extern void virt_manager_handle_button_hover(u32 x, u32 y);
+extern int virt_manager_handle_button_press(u32 x, u32 y);
 extern void virt_manager_update_status(void);
 extern void virt_manager_refresh_vm_list(void);
 
