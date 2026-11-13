@@ -825,6 +825,13 @@ struct address_space *vmm_create_as(void)
     as->size = 0;
     as->flags = 0;
     as->private = pml4;
+    /*
+     * Record the physical address, which is what CR3 actually takes when the
+     * address space is switched in. It used to be computed and thrown away,
+     * so nothing could load this table into CR3 without re-walking it.
+     */
+    as->cr3 = pml4_paddr;
+    as->pml4 = pml4;
     spin_lock_init(&as->lock);
 
     return as;
@@ -933,6 +940,8 @@ static void vmm_init_kernel_as(void)
     kernel_as->private = kernel_pml4;
     kernel_as->vmas = NULL;
     kernel_as->size = 0;
+    kernel_as->pml4 = kernel_pml4;
+    kernel_as->cr3 = vmm_virt_to_phys((virt_addr_t)kernel_pml4);
 
     /* Adopt boot.asm identity mapping (0-4GB) into the new page table */
     u64 current_cr3;

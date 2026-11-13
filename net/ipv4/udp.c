@@ -50,6 +50,7 @@ struct udp_sock {
     u32 flags;                  /* UDP flags */
     u32 recv_saddr;             /* Receive source address */
     u32 recv_daddr;             /* Receive destination address */
+    u16 recv_sport;             /* Receive source port (for replies) */
 
     /* Statistics */
     u64 datagrams_in;           /* Datagrams received */
@@ -499,9 +500,15 @@ int udp_rcv(struct sk_buff *skb)
         skb_pull(skb, sizeof(struct udphdr));
     }
 
-    /* Store source info for recvfrom */
+    /*
+     * Store the source info recvfrom() reports back. This line used to be
+     * "up->recv_daddr = dport", i.e. a *port* stored in an address field, and
+     * the source port was read from the header into `sport` and then dropped -
+     * so a server could never reply to the peer that actually sent the packet.
+     */
     up->recv_saddr = saddr;
-    up->recv_daddr = dport;
+    up->recv_daddr = daddr;
+    up->recv_sport = sport;
 
     /* Queue to socket */
     sock = up->sock;

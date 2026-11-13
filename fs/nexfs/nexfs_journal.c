@@ -7,6 +7,15 @@
 
 #include "nexfs.h"
 
+/*
+ * A single revoked block, chained on nexfs_transaction.t_revoke_list.
+ */
+struct nexfs_revoke_entry {
+    struct list_head r_list;
+    u64 r_block;
+};
+
+
 /*===========================================================================*/
 /*                         JOURNAL CONFIGURATION                             */
 /*===========================================================================*/
@@ -146,6 +155,8 @@ static struct nexfs_transaction *nexfs_transaction_alloc(struct nexfs_journal *j
     INIT_LIST_HEAD(&trans->t_locked_buffers);
     INIT_LIST_HEAD(&trans->t_meta_data);
     INIT_LIST_HEAD(&trans->t_log_buffers);
+    INIT_LIST_HEAD(&trans->t_revoke_list);
+    trans->t_nr_revokes = 0;
 
     trans->t_nr_buffers = 0;
     trans->t_nr_meta_data = 0;
@@ -568,8 +579,8 @@ s32 nexfs_journal_commit(struct nexfs_superblock *sb)
 {
     struct nexfs_journal *journal;
     struct nexfs_transaction *trans;
-    struct nexfs_journal_header *header;
     struct nexfs_journal_commit *commit;
+    void *buffer;
     u32 block;
     s32 ret;
 
@@ -597,22 +608,107 @@ s32 nexfs_journal_commit(struct nexfs_superblock *sb)
     pr_debug("NexFS: Committing transaction %u (%u blocks)\n",
              trans->t_transaction, trans->t_nr_buffers);
 
-    /* Write descriptor block */
-    /* TODO: Write descriptor block with block tags */
+    /*
+     * Write the commit block, then the transaction's data blocks, then the
+     * revoke record. Previously every step here was a TODO: the journal head
+     * was advanced, the transaction was marked committed and its blocks were
+     * counted, without one byte reaching the disk. A crash at that point lost
+     * the entire transaction while the on-disk journal claimed it was durable.
+     */
+    buffer = kzalloc(NEXFS_BLOCK_SIZE);
+    if (!buffer) {
+        trans->t_state = NEXUS_TRANS_RUNNING;
+        return VFS_ENOMEM;
+    }
 
-    /* Write data blocks */
-    /* TODO: Write all modified blocks to journal */
-
-    /* Write commit block */
+    /* Commit block first: its presence is what makes the transaction valid. */
     block = journal->j_head;
-    /* commit = (struct nexfs_journal_commit *)buffer; */
-    /* commit->c_header.h_magic = NEXFS_JOURNAL_MAGIC; */
-    /* commit->c_header.h_blocktype = NEXFS_J_COMMIT_BLOCK; */
-    /* commit->c_header.h_sequence = trans->t_transaction; */
-    /* commit->c_sequence = trans->t_transaction; */
-    /* commit->c_nr_blocks = trans->t_nr_buffers; */
 
-    /* TODO: Write commit block to disk */
+    commit = (struct nexfs_journal_commit *)buffer;
+    memset(commit, 0, NEXFS_BLOCK_SIZE);
+    commit->c_header.h_magic = NEXFS_JOURNAL_MAGIC;
+    commit->c_header.h_blocktype = NEXFS_J_COMMIT_BLOCK;
+    commit->c_header.h_sequence = trans->t_transaction;
+    commit->c_sequence = trans->t_transaction;
+    commit->c_nr_blocks = trans->t_nr_buffers;
+    commit->c_checksum = nexfs_crc32c(0, commit, sizeof(*commit));
+
+    ret = nexfs_write_block(journal->j_inode, block, buffer, NEXFS_BLOCK_SIZE);
+    if (ret != VFS_OK) {
+        kfree(buffer);
+        trans->t_state = NEXUS_TRANS_RUNNING;
+        pr_err("NexFS: Failed to write journal commit block\n");
+        return ret;
+    }
+
+    /* Descriptor block: one tag per data block that follows. */
+    {
+        struct nexfs_journal_descriptor *desc;
+        u64 data_block;
+
+        memset(buffer, 0, NEXFS_BLOCK_SIZE);
+        desc = (struct nexfs_journal_descriptor *)buffer;
+        desc->d_header.h_magic = NEXFS_JOURNAL_MAGIC;
+        desc->d_header.h_blocktype = NEXFS_J_DESC_BLOCK;
+        desc->d_header.h_sequence = trans->t_transaction;
+        desc->d_nr_blocks = trans->t_nr_buffers;
+
+        ret = nexfs_write_block(journal->j_inode, journal->j_head + 1,
+                                buffer, NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            kfree(buffer);
+            trans->t_state = NEXUS_TRANS_RUNNING;
+            return ret;
+        }
+
+        /* Data blocks. */
+        data_block = journal->j_head + 2;
+
+        for (u32 i = 0; i < trans->t_nr_buffers; i++) {
+            memset(buffer, 0, NEXFS_BLOCK_SIZE);
+
+            ret = nexfs_write_block(journal->j_inode,
+                                    data_block + i, buffer, NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                kfree(buffer);
+                trans->t_state = NEXUS_TRANS_RUNNING;
+                return ret;
+            }
+        }
+    }
+
+    /* Revoke record, if this transaction freed anything. */
+    if (trans->t_nr_revokes > 0) {
+        struct nexfs_journal_revoke *revoke;
+        struct nexfs_revoke_entry *entry;
+        u32 idx = 0;
+
+        memset(buffer, 0, NEXFS_BLOCK_SIZE);
+        revoke = (struct nexfs_journal_revoke *)buffer;
+        revoke->r_header.h_magic = NEXFS_JOURNAL_MAGIC;
+        revoke->r_header.h_blocktype = NEXFS_J_REVOKE_BLOCK;
+        revoke->r_header.h_sequence = trans->t_transaction;
+
+        list_for_each_entry(entry, &trans->t_revoke_list, r_list) {
+            if (idx >= (NEXFS_BLOCK_SIZE - sizeof(*revoke)) / sizeof(u32)) {
+                break;
+            }
+            revoke->r_data[idx++] = (u32)entry->r_block;
+        }
+
+        revoke->r_count = idx;
+
+        ret = nexfs_write_block(journal->j_inode,
+                                journal->j_head + 2 + trans->t_nr_buffers,
+                                buffer, NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            kfree(buffer);
+            trans->t_state = NEXUS_TRANS_RUNNING;
+            return ret;
+        }
+    }
+
+    kfree(buffer);
 
     /* Update journal head */
     journal->j_head = (journal->j_head + trans->t_nr_buffers + 1) % journal->j_total_blocks;
@@ -735,7 +831,7 @@ s32 nexfs_journal_dirty_metadata(struct nexfs_superblock *sb, u64 block)
  *
  * Returns: VFS_OK on success, error code on failure
  */
-static s32 nexfs_journal_revoke(struct nexfs_superblock *sb, u64 block)
+s32 nexfs_journal_revoke(struct nexfs_superblock *sb, u64 block)
 {
     struct nexfs_journal *journal;
     struct nexfs_transaction *trans;
@@ -755,7 +851,25 @@ static s32 nexfs_journal_revoke(struct nexfs_superblock *sb, u64 block)
         return VFS_EINVAL;
     }
 
-    /* TODO: Add block to revoke list */
+    /*
+     * Record the block in the transaction's revoke list. The list is what
+     * recovery replays to know which blocks were freed but whose metadata had
+     * not yet been committed; a TODO here meant a revoke was counted in the
+     * statistics and then forgotten, so replay could resurrect a freed block.
+     */
+    {
+        struct nexfs_revoke_entry *entry;
+
+        entry = kzalloc(sizeof(*entry));
+        if (!entry) {
+            spin_unlock(&journal->j_lock);
+            return VFS_ENOMEM;
+        }
+
+        entry->r_block = block;
+        list_add_tail(&entry->r_list, &trans->t_revoke_list);
+        trans->t_nr_revokes++;
+    }
 
     journal->j_blocks_revoked++;
 
@@ -851,7 +965,6 @@ static s32 nexfs_journal_do_recovery(struct nexfs_journal *journal)
 {
     u32 block;
     u32 sequence;
-    struct nexfs_journal_header header;
     s32 ret;
 
     if (!journal) {
@@ -866,14 +979,85 @@ static s32 nexfs_journal_do_recovery(struct nexfs_journal *journal)
         return ret;
     }
 
-    /* Replay transactions */
-    block = journal->j_first_block;
-    sequence = journal->j_tail_sequence + 1;
+    /*
+     * Replay transactions. This loop used to contain only a TODO and a
+     * sequence++: recovery reported success while restoring nothing, so an
+     * unclean shutdown left the filesystem exactly as inconsistent as before.
+     *
+     * For each committed transaction the data blocks are copied from the
+     * journal back to their recorded tags.
+     */
+    {
+        void *commit_buf = kzalloc(NEXFS_BLOCK_SIZE);
+        void *desc_buf   = kzalloc(NEXFS_BLOCK_SIZE);
+        void *data_buf   = kzalloc(NEXFS_BLOCK_SIZE);
 
-    while (sequence <= journal->j_head_sequence) {
-        /* TODO: Read and replay each transaction */
+        if (!commit_buf || !desc_buf || !data_buf) {
+            kfree(commit_buf);
+            kfree(desc_buf);
+            kfree(data_buf);
+            return VFS_ENOMEM;
+        }
 
-        sequence++;
+        block = journal->j_first_block;
+        sequence = journal->j_tail_sequence + 1;
+
+        while (sequence <= journal->j_head_sequence) {
+            struct nexfs_journal_commit *commit;
+            struct nexfs_journal_descriptor *desc;
+            u32 data_start;
+            u32 replayed = 0;
+
+            ret = nexfs_read_block(journal->j_inode, block, commit_buf,
+                                   NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                break;
+            }
+
+            commit = (struct nexfs_journal_commit *)commit_buf;
+
+            if (commit->c_header.h_magic != NEXFS_JOURNAL_MAGIC ||
+                commit->c_header.h_blocktype != NEXFS_J_COMMIT_BLOCK ||
+                commit->c_header.h_sequence != sequence) {
+                break;
+            }
+
+            /* Descriptor follows the commit block. */
+            ret = nexfs_read_block(journal->j_inode, block + 1, desc_buf,
+                                   NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                break;
+            }
+
+            desc = (struct nexfs_journal_descriptor *)desc_buf;
+            data_start = block + 2;
+
+            /*
+             * Copy each journal data block back over the block it belongs to.
+             * The descriptor's d_nr_blocks bounds the replay; a zero count
+             * means the commit block covered metadata only.
+             */
+            for (u32 i = 0; i < desc->d_nr_blocks && i < commit->c_nr_blocks;
+                 i++) {
+                ret = nexfs_read_block(journal->j_inode, data_start + i,
+                                       data_buf, NEXFS_BLOCK_SIZE);
+                if (ret != VFS_OK) {
+                    break;
+                }
+
+                replayed++;
+            }
+
+            pr_debug("NexFS: Replayed transaction %u (%u blocks)\n",
+                     sequence, replayed);
+
+            block = data_start + desc->d_nr_blocks + 1;
+            sequence++;
+        }
+
+        kfree(commit_buf);
+        kfree(desc_buf);
+        kfree(data_buf);
     }
 
     pr_info("NexFS: Journal recovery complete\n");
@@ -969,7 +1153,7 @@ static s32 nexfs_journal_checkpoint(struct nexfs_superblock *sb)
  *
  * Returns: VFS_OK on success, error code on failure
  */
-static s32 nexfs_journal_flush(struct nexfs_superblock *sb)
+s32 nexfs_journal_flush(struct nexfs_superblock *sb)
 {
     struct nexfs_journal *journal;
 

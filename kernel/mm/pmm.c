@@ -18,6 +18,13 @@ static u32 num_memory_regions = 0;
 
 /* Bitmap for physical page tracking */
 static u64 *pmm_bitmap = NULL;
+
+/*
+ * struct page metadata, one entry per physical page. pmm_get_page() used to
+ * hand callers the mapped page itself instead of its metadata; this is the
+ * array it should have been returning entries from.
+ */
+static struct page *page_array = NULL;
 static size_t bitmap_size = 0;
 
 /* Memory statistics */
@@ -71,20 +78,30 @@ static inline bool bitmap_test(u64 *bitmap, size_t bit)
  */
 static ssize_t bitmap_find_free(u64 *bitmap, size_t nbits, size_t count)
 {
-    size_t i, j;
+    size_t i;
     size_t found = 0;
-    
+
+    if (!bitmap || count == 0) {
+        return -1;
+    }
+
+    /*
+     * `found` counts the run of free bits ending at i inclusive, so the run
+     * starts at i - found + 1. The old expression used i - count + 1, which is
+     * only correct when count == found (true for count == 1, wrong for every
+     * multi-page allocation).
+     */
     for (i = 0; i < nbits; i++) {
         if (!bitmap_test(bitmap, i)) {
             found++;
             if (found >= count) {
-                return i - count + 1;
+                return (ssize_t)(i - found + 1);
             }
         } else {
             found = 0;
         }
     }
-    
+
     return -1;
 }
 
@@ -170,20 +187,34 @@ phys_addr_t pmm_alloc_page(void)
 {
     ssize_t page_idx;
     phys_addr_t addr;
-    
+
+    /*
+     * Take the PMM lock: the bitmap search, the set and the free count are one
+     * atomic operation. Without it two CPUs could find the same free page and
+     * both hand out the same physical address. (pmm_alloc_pages() below has
+     * always taken it; this path never did.)
+     */
+    spin_lock(&pmm_lock);
+
     if (num_free_pages == 0) {
+        spin_unlock(&pmm_lock);
         return 0;
     }
     
     page_idx = bitmap_find_free(pmm_bitmap, total_pages, 1);
     if (page_idx < 0) {
+        spin_unlock(&pmm_lock);
         return 0;
     }
     
     bitmap_set(pmm_bitmap, page_idx);
     num_free_pages--;
     
+    spin_unlock(&pmm_lock);
+
     addr = mem_start + (page_idx * PAGE_SIZE);
+
+    /* Zero outside the lock - this touches the page, not the allocator. */
     memset((void *)addr, 0, PAGE_SIZE);
     
     return addr;
@@ -287,15 +318,24 @@ void pmm_free_pages(phys_addr_t pages, size_t count)
 struct page *pmm_get_page(phys_addr_t addr)
 {
     size_t page_idx;
-    
+
     if (addr < mem_start || addr >= mem_end) {
         return NULL;
     }
-    
+
     page_idx = (addr - mem_start) / PAGE_SIZE;
-    
-    /* In real implementation, return pointer to page array */
-    return (struct page *)(KERNEL_VIRTUAL_BASE + addr);
+
+    /*
+     * The struct page metadata array. Returning KERNEL_VIRTUAL_BASE + addr
+     * (the mapped page itself) meant every caller wrote page flags over the
+     * page contents. page_idx was computed and then unused, which is what
+     * pointed at it.
+     */
+    if (!page_array || page_idx >= total_pages) {
+        return NULL;
+    }
+
+    return &page_array[page_idx];
 }
 
 /**
@@ -452,6 +492,26 @@ void pmm_init(void)
 
     num_free_pages -= reserved_idx_end;
     reserved_pages = reserved_idx_end;
+
+    /*
+     * Carve the page metadata array out of the reserved region. It sits after
+     * the bitmap, so it is inside reserved_idx_end and already marked used.
+     */
+    {
+        size_t array_bytes = total_pages * sizeof(struct page);
+        phys_addr_t array_addr = (bitmap_addr + bitmap_pages * PAGE_SIZE);
+
+        array_addr = (array_addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+        if ((array_addr + array_bytes) <= mem_end) {
+            page_array = (struct page *)(uintptr_t)array_addr;
+            memset(page_array, 0, array_bytes);
+
+            pr_info("  Page Array: %lu bytes\n", (unsigned long)array_bytes);
+        } else {
+            pr_warn("PMM: no room for page metadata array\n");
+        }
+    }
     
     pr_info("  Reserved Pages: %lu\n", reserved_pages);
     pr_info("  Free Pages: %lu\n", num_free_pages);

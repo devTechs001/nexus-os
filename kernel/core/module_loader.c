@@ -232,7 +232,19 @@ static int parse_elf(module_t *mod, const void *elf_data, u32 elf_size)
         u32 sym_count = symtab_size / sizeof(elf_symbol_t);
         for (i = 0; i < sym_count; i++) {
             if (symtab[i].value != 0 && symtab[i].size > 0) {
-                char *name = &strtab[symtab[i].name];
+                char *name;
+
+                /*
+                 * strtab_size was read from section 3 and never used, so
+                 * symtab[i].name was used to index strtab unchecked. A
+                 * malformed module could point the offset past the table and
+                 * get the kernel to read arbitrary memory as a symbol name.
+                 */
+                if (symtab[i].name >= strtab_size) {
+                    continue;
+                }
+
+                name = &strtab[symtab[i].name];
                 void *addr = (void *)((u8 *)mod->base + symtab[i].value);
                 module_add_symbol(mod, name, addr, symtab[i].size);
             }

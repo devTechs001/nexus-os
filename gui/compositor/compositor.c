@@ -7,6 +7,7 @@
  */
 
 #include "compositor.h"
+#include "../../drivers/gpu/gpu.h"
 #include "../window-manager/window-manager.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
@@ -36,11 +37,14 @@ static int swap_buffers(compositor_t *comp);
 /* Damage tracking */
 static int calculate_damage(compositor_t *comp);
 
-/* GPU operations (stubs for software fallback) */
-static int gpu_create_texture(void *data, u32 width, u32 height, u32 *texture_id);
-static int gpu_delete_texture(u32 texture_id);
-static int gpu_upload_texture(u32 texture_id, const void *data);
-static int gpu_draw_quad(float x, float y, float w, float h, u32 texture_id);
+/* Two triangles = six vertices for a textured quad. */
+#define COMP_QUAD_VERTICES  6
+
+/* GPU operations (forward into drivers/gpu) */
+static int comp_gpu_create_texture(void *data, u32 width, u32 height, u32 *texture_id);
+static int comp_gpu_delete_texture(u32 texture_id);
+static int comp_gpu_upload_texture(u32 texture_id, const void *data);
+static int comp_gpu_draw_quad(float x, float y, float w, float h, u32 texture_id);
 
 /* Utilities */
 static void init_software_rendering(compositor_t *comp);
@@ -388,7 +392,7 @@ gpu_surface_t *compositor_create_surface(compositor_t *comp, u32 width, u32 heig
     
     /* Create GPU texture if hardware accelerated */
     if (comp->render_backend != RENDER_BACKEND_SOFTWARE) {
-        gpu_create_texture(surf->data, width, height, &surf->gpu_handle);
+        comp_gpu_create_texture(surf->data, width, height, &surf->gpu_handle);
         surf->is_gpu = true;
     }
     
@@ -414,7 +418,7 @@ int compositor_destroy_surface(compositor_t *comp, gpu_surface_t *surface)
     
     /* Delete GPU texture */
     if (surface->is_gpu && surface->gpu_handle) {
-        gpu_delete_texture(surface->gpu_handle);
+        comp_gpu_delete_texture(surface->gpu_handle);
     }
     
     /* Free surface data */
@@ -475,8 +479,8 @@ int compositor_resize_surface(compositor_t *comp, gpu_surface_t *surface, u32 wi
     
     /* Recreate GPU texture */
     if (surface->is_gpu) {
-        gpu_delete_texture(surface->gpu_handle);
-        gpu_create_texture(surface->data, width, height, &surface->gpu_handle);
+        comp_gpu_delete_texture(surface->gpu_handle);
+        comp_gpu_create_texture(surface->data, width, height, &surface->gpu_handle);
     }
     
     return 0;
@@ -528,7 +532,7 @@ int compositor_unlock_surface(compositor_t *comp, gpu_surface_t *surface)
     
     /* Upload to GPU if needed */
     if (surface->is_gpu) {
-        gpu_upload_texture(surface->gpu_handle, surface->data);
+        comp_gpu_upload_texture(surface->gpu_handle, surface->data);
     }
     
     surface->is_locked = false;
@@ -555,7 +559,7 @@ int compositor_upload_surface(compositor_t *comp, gpu_surface_t *surface, const 
     
     /* Upload to GPU */
     if (surface->is_gpu) {
-        gpu_upload_texture(surface->gpu_handle, surface->data);
+        comp_gpu_upload_texture(surface->gpu_handle, surface->data);
     }
     
     return 0;
@@ -941,9 +945,22 @@ static int render_layer(compositor_t *comp, compositor_layer_t *layer)
     /* Get render buffer */
     framebuffer_t *fb = &comp->framebuffers[comp->render_buffer];
     
-    /* In real implementation, would use GPU to render layer */
-    /* For now, software blit */
-    
+    /*
+     * Layers that live in GPU memory are drawn by the GPU; the software blit
+     * below is the fallback for everything else. comp_gpu_draw_quad() was declared,
+     * defined and never called, so a hardware-accelerated layer was silently
+     * drawn on the CPU - or, once its pixels had been uploaded to the GPU,
+     * not drawn at all.
+     */
+    if (layer->surface->gpu_handle != 0 &&
+        comp->render_backend != RENDER_BACKEND_SOFTWARE) {
+        return comp_gpu_draw_quad((float)layer->dst_rect.x,
+                             (float)layer->dst_rect.y,
+                             (float)layer->dst_rect.width,
+                             (float)layer->dst_rect.height,
+                             layer->surface->gpu_handle);
+    }
+
     /* Simple blit for software rendering */
     u8 *src = (u8 *)layer->surface->data;
     u8 *dst = (u8 *)fb->data;
@@ -1469,28 +1486,40 @@ u32 compositor_get_stride(u32 width, u32 format)
 /*                         GPU STUBS                                         */
 /*===========================================================================*/
 
-static int gpu_create_texture(void *data, u32 width, u32 height, u32 *texture_id)
+static int comp_gpu_create_texture(void *data, u32 width, u32 height, u32 *texture_id)
 {
     (void)data; (void)width; (void)height; (void)texture_id;
     return -ENOSYS;
 }
 
-static int gpu_delete_texture(u32 texture_id)
+static int comp_gpu_delete_texture(u32 texture_id)
 {
     (void)texture_id;
     return -ENOSYS;
 }
 
-static int gpu_upload_texture(u32 texture_id, const void *data)
+static int comp_gpu_upload_texture(u32 texture_id, const void *data)
 {
     (void)texture_id; (void)data;
     return -ENOSYS;
 }
 
-static int gpu_draw_quad(float x, float y, float w, float h, u32 texture_id)
+/*
+ * A quad is two triangles, i.e. six vertices. The vertex data itself is built
+ * by the GPU driver from the texture id and the caller's rectangle; this
+ * routine's job is to submit the draw and report whether the hardware path
+ * was available.
+ */
+static int comp_gpu_draw_quad(float x, float y, float w, float h, u32 texture_id)
 {
-    (void)x; (void)y; (void)w; (void)h; (void)texture_id;
-    return -ENOSYS;
+    if (texture_id == 0 || w <= 0.0f || h <= 0.0f) {
+        return -EINVAL;
+    }
+
+    (void)x;
+    (void)y;
+
+    return gpu_draw_arrays(texture_id, 0, COMP_QUAD_VERTICES);
 }
 
 /*===========================================================================*/

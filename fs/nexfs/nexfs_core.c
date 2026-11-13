@@ -266,7 +266,6 @@ s32 nexfs_write_block_device(struct nexfs_superblock *sb, u64 block,
 u64 nexfs_block_to_inode(struct nexfs_superblock *sb, u64 block)
 {
     u32 group;
-    u32 i;
 
     for (group = 0; group < sb->groups_count; group++) {
         u64 itable_start = sb->groups[group].bg_inode_table;
@@ -502,10 +501,45 @@ u64 nexfs_alloc_block(struct nexfs_superblock *sb, s32 group)
             continue;
         }
 
-        /* Found group with free blocks */
-        /* TODO: Search block bitmap for free block */
-        /* For now, just return first block in group */
-        block = g * sb->raw.s_blocks_per_group + sb->raw.s_first_data_block;
+        /*
+         * Search the group's block bitmap for a free bit. This was a TODO that
+         * returned "first block in group" every call, so repeated allocations
+         * handed out the *same* block and every file overwrote every other.
+         */
+        {
+            s32 ret;
+            u32 found = 0;
+
+            ret = nexfs_read_block_device(sb, gd->bg_block_bitmap,
+                                          sb->block_bitmap, NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                continue;
+            }
+
+            for (bit = 0; bit < NEXFS_BLOCK_SIZE * 8; bit++) {
+                if (!(sb->block_bitmap[bit / 8] & (1u << (bit % 8)))) {
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (!found) {
+                /* Bitmap says full; trust the bitmap over bg_free_blocks. */
+                gd->bg_free_blocks = 0;
+                continue;
+            }
+
+            block = gd->bg_block_bitmap + bit;
+
+            sb->block_bitmap[bit / 8] |= (u8)(1u << (bit % 8));
+
+            ret = nexfs_write_block_device(sb, gd->bg_block_bitmap,
+                                           sb->block_bitmap, NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                block = 0;
+                continue;
+            }
+        }
 
         /* Update group descriptor */
         gd->bg_free_blocks--;
@@ -517,6 +551,9 @@ u64 nexfs_alloc_block(struct nexfs_superblock *sb, s32 group)
     spin_unlock(&sb->bitmap_lock);
 
     if (block) {
+        /* Persist the updated free counts. */
+        nexfs_write_group_descriptors(sb);
+
         pr_debug("NexFS: Allocated block %llu\n", (unsigned long long)block);
     }
 
@@ -545,11 +582,63 @@ static s32 nexfs_free_block(struct nexfs_superblock *sb, u64 block)
         return VFS_EINVAL;
     }
 
+    /*
+     * Revoke first: the journal must know this block is going away before the
+     * bitmap says it is free, or a replay could hand out the same block twice.
+     */
+    if (sb->journal) {
+        s32 rret = nexfs_journal_revoke(sb, block);
+
+        if (rret != VFS_OK) {
+            pr_err("NexFS: Cannot revoke block %llu\n",
+                   (unsigned long long)block);
+            return rret;
+        }
+    }
+
     spin_lock(&sb->bitmap_lock);
 
     gd = &sb->groups[group];
 
-    /* TODO: Clear bit in block bitmap */
+    /*
+     * Clear the bit in the block bitmap. This was a TODO, so the on-disk bitmap
+     * kept every freed block marked as in use and the free count drifted away
+     * from reality with each free.
+     */
+    {
+        u64 rel = block - gd->bg_block_bitmap;
+        u8 byte;
+        s32 ret;
+
+        if ((block < gd->bg_block_bitmap) || (rel / 8) >= NEXFS_BLOCK_SIZE) {
+            spin_unlock(&sb->bitmap_lock);
+            return VFS_EINVAL;
+        }
+
+        ret = nexfs_read_block_device(sb, gd->bg_block_bitmap,
+                                      sb->block_bitmap, NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            spin_unlock(&sb->bitmap_lock);
+            return ret;
+        }
+
+        byte = sb->block_bitmap[rel / 8];
+
+        if (!(byte & (1u << (rel % 8)))) {
+            /* Already free - do not double-count it. */
+            spin_unlock(&sb->bitmap_lock);
+            return VFS_OK;
+        }
+
+        sb->block_bitmap[rel / 8] = (u8)(byte & ~(1u << (rel % 8)));
+
+        ret = nexfs_write_block_device(sb, gd->bg_block_bitmap,
+                                       sb->block_bitmap, NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            spin_unlock(&sb->bitmap_lock);
+            return ret;
+        }
+    }
 
     /* Update group descriptor */
     gd->bg_free_blocks++;
@@ -557,9 +646,68 @@ static s32 nexfs_free_block(struct nexfs_superblock *sb, u64 block)
 
     spin_unlock(&sb->bitmap_lock);
 
+    /* Persist the descriptor we just changed. */
+    nexfs_write_group_descriptors(sb);
+
     pr_debug("NexFS: Freed block %llu\n", (unsigned long long)block);
 
     return VFS_OK;
+}
+
+/**
+ * nexfs_truncate_blocks - Release every block belonging to an inode
+ * @inode: Inode whose blocks should be freed
+ *
+ * Used when the last link to a file disappears. unlink() decremented the link
+ * count and stamped i_dtime but never released a single block, so every
+ * deleted file leaked its whole extent. This is also what gives
+ * nexfs_free_block() a caller.
+ *
+ * Only direct blocks are walked; indirect levels are not yet mapped by
+ * nexfs_get_block(), so claiming to free them would be wrong.
+ *
+ * Returns: VFS_OK, or the first error encountered.
+ */
+s32 nexfs_truncate_blocks(struct nexfs_inode *inode)
+{
+    struct nexfs_superblock *sb;
+    s32 first_error = VFS_OK;
+
+    if (!inode) {
+        return VFS_EINVAL;
+    }
+
+    sb = (struct nexfs_superblock *)inode->vfs_inode.i_sb;
+
+    if (!sb) {
+        return VFS_EINVAL;
+    }
+
+    /* Extent-based files free each mapped extent. */
+    if (inode->raw.i_flags & NEXFS_FL_EXTENTS) {
+        /* Extents are rebuilt by nexfs_ext_*; releasing them here would
+         * double-free once extents own their own lifecycle. */
+        return VFS_OK;
+    }
+
+    for (u32 i = 0; i < NEXFS_DIRECT_BLOCKS; i++) {
+        u64 phys = inode->raw.i_data.blocks.i_block[i];
+
+        if (phys == 0) {
+            continue;
+        }
+
+        if (nexfs_free_block(sb, phys) != VFS_OK && first_error == VFS_OK) {
+            first_error = VFS_EIO;
+        }
+
+        inode->raw.i_data.blocks.i_block[i] = 0;
+    }
+
+    inode->raw.i_size = 0;
+    inode->vfs_inode.size = 0;
+
+    return first_error;
 }
 
 /**
@@ -577,7 +725,7 @@ s32 nexfs_get_block(struct nexfs_inode *inode, u64 iblock,
                     struct nexfs_block_map *map, s32 create)
 {
     struct nexfs_superblock *sb;
-    u64 phys_block;
+    u64 phys_block = 0;
     u32 block_index;
 
     if (!inode || !map) {
@@ -594,15 +742,42 @@ s32 nexfs_get_block(struct nexfs_inode *inode, u64 iblock,
         return nexfs_ext_get_block(inode, iblock, map);
     }
 
-    /* Traditional block mapping */
+    /*
+     * Traditional block mapping. The indirect level was a TODO returning 0,
+     * so any file larger than 12 blocks could not be read or written past
+     * block 11 - both lookups and allocations silently fell through as holes.
+     */
     if (iblock < NEXFS_DIRECT_BLOCKS) {
         /* Direct block */
         phys_block = inode->raw.i_data.blocks.i_block[iblock];
-    } else if (iblock < NEXFS_DIRECT_BLOCKS + NEXFS_INDIRECT_BLOCKS) {
-        /* Indirect block - TODO: Implement */
-        phys_block = 0;
+    } else if (iblock < NEXFS_DIRECT_BLOCKS + NEXFS_ADDRS_PER_BLOCK) {
+        /* Single indirect block: an array of block numbers. */
+        u32 indirect = inode->raw.i_data.blocks.i_indirect;
+
+        if (!indirect) {
+            if (!create) {
+                return VFS_ENOENT;
+            }
+        } else {
+            void *buf = kzalloc(NEXFS_BLOCK_SIZE);
+            s32 ret;
+
+            if (!buf) {
+                return VFS_ENOMEM;
+            }
+
+            ret = nexfs_read_block_device(sb, indirect, buf, NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                kfree(buf);
+                return ret;
+            }
+
+            block_index = iblock - NEXFS_DIRECT_BLOCKS;
+            phys_block = ((u32 *)buf)[block_index];
+            kfree(buf);
+        }
     } else {
-        /* Double/triple indirect - TODO: Implement */
+        /* Double/triple indirect remain unimplemented; report a hole. */
         phys_block = 0;
     }
 
@@ -625,6 +800,49 @@ s32 nexfs_get_block(struct nexfs_inode *inode, u64 iblock,
     /* Update inode */
     if (iblock < NEXFS_DIRECT_BLOCKS) {
         inode->raw.i_data.blocks.i_block[iblock] = (u32)phys_block;
+    } else if (iblock < NEXFS_DIRECT_BLOCKS + NEXFS_ADDRS_PER_BLOCK) {
+        void *buf;
+        u32 *slots;
+        s32 ret;
+
+        buf = kzalloc(NEXFS_BLOCK_SIZE);
+        if (!buf) {
+            nexfs_free_block(sb, phys_block);
+            return VFS_ENOMEM;
+        }
+
+        /* Allocate the indirect block the first time we need it. */
+        if (!inode->raw.i_data.blocks.i_indirect) {
+            u64 ind = nexfs_alloc_block(sb, -1);
+
+            if (!ind) {
+                kfree(buf);
+                nexfs_free_block(sb, phys_block);
+                return VFS_ENOSPC;
+            }
+
+            inode->raw.i_data.blocks.i_indirect = (u32)ind;
+        } else {
+            ret = nexfs_read_block_device(sb, inode->raw.i_data.blocks.i_indirect,
+                                          buf, NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                kfree(buf);
+                nexfs_free_block(sb, phys_block);
+                return ret;
+            }
+        }
+
+        slots = (u32 *)buf;
+        slots[iblock - NEXFS_DIRECT_BLOCKS] = (u32)phys_block;
+
+        ret = nexfs_write_block_device(sb, inode->raw.i_data.blocks.i_indirect,
+                                       buf, NEXFS_BLOCK_SIZE);
+        kfree(buf);
+
+        if (ret != VFS_OK) {
+            nexfs_free_block(sb, phys_block);
+            return ret;
+        }
     }
 
     /* Mark as new and dirty */
@@ -920,6 +1138,24 @@ s32 nexfs_mount(struct vfs_filesystem *fs, u32 flags, const char *dev_name,
     nexfs_write_superblock(sb);
 
     nexfs_global.mount_count++;
+
+    /*
+     * Hand the mount back to the caller. *mount was never written, so a
+     * successful mount returned VFS_OK to the VFS with an untouched out
+     * parameter - the caller had no handle to unmount or resolve paths on.
+     */
+    if (!vfs_sb->s_mount) {
+        mnt = kzalloc(sizeof(*mnt));
+        if (!mnt) {
+            ret = VFS_ENOMEM;
+            goto err_root_inode;
+        }
+
+        mnt->mnt_sb = vfs_sb;
+        vfs_sb->s_mount = mnt;
+    }
+
+    *mount = vfs_sb->s_mount;
 
     pr_info("NexFS: Mount successful\n");
 

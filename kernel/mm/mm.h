@@ -179,6 +179,8 @@ struct address_space {
     u32 flags;
     spinlock_t lock;
     void *private;
+    phys_addr_t   cr3;      /* Physical address of the PML4 (CR3 value) */
+    u64 *         pml4;     /* Virtual address of the same table */
 };
 
 /**

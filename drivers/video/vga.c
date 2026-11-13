@@ -74,6 +74,7 @@ typedef struct {
     u8 saved_seq[5];
     u8 saved_gdc[9];
     spinlock_t lock;
+    u32 last_mode_change_ms;        /* Duration of the last mode switch */
 } vga_driver_t;
 
 static vga_driver_t g_vga;
@@ -129,6 +130,20 @@ static void vga_load_palette(const u8 *palette)
         vga_outb(VGA_PEL_PORT + 1, palette[i]);
     }
     memcpy(g_vga.current_palette, palette, 768);
+}
+
+/**
+ * vga_active_scanlines - Read back the vertical display end from the CRTC
+ *
+ * Used to confirm a mode switch actually took effect, and is the reason
+ * vga_read_crtc() exists at all.
+ */
+static u32 vga_active_scanlines(void)
+{
+    u8 lo = vga_read_crtc(0x12);
+    u8 hi = vga_read_crtc(0x07);
+
+    return (u32)lo | ((u32)(hi & 0x02) << 7) | ((u32)(hi & 0x40) << 3);
 }
 
 static void vga_save_palette(void)
@@ -221,6 +236,78 @@ static int vga_set_mode_svga(u32 width, u32 height, u32 bpp)
     g_vga.current_mode.phys_base = VGA_MEMORY_BASE;
     
     printk("[VGA] SVGA mode: %dx%dx%d (linear)\n", width, height, bpp);
+    return 0;
+}
+
+/**
+ * vga_set_mode - Switch the adapter into a graphics mode
+ * @width:  Horizontal resolution
+ * @height: Vertical resolution
+ * @bpp:    Bits per pixel
+ *
+ * VGA text modes are 720x400/720x480; anything else needs SVGA. vga_set_mode_vga()
+ * and vga_set_mode_svga() existed but nothing ever called either, so the driver
+ * could not actually change mode - it only ever described one.
+ */
+int vga_set_mode(u32 width, u32 height, u32 bpp)
+{
+    u32 start;
+    int ret;
+
+    if (!g_vga.initialized) {
+        return -ENODEV;
+    }
+
+    if (width == 0 || height == 0 || bpp == 0) {
+        return -EINVAL;
+    }
+
+    start = (u32)arch_get_ticks();
+
+    if (width == 320 && height == 200 && bpp == 8) {
+        /* Mode 13h is the one mode this driver sets up faithfully. */
+        ret = vga_set_mode_vga(width, height, bpp);
+
+        /* Mode 13h uses the standard 256-colour DAC ramp. */
+        vga_set_palette(0, 0, 0, 0);
+    } else {
+        ret = vga_set_mode_svga(width, height, bpp);
+    }
+
+    g_vga.last_mode_change_ms = (u32)arch_get_ticks() - start;
+
+    if (ret == 0) {
+        /*
+         * Read the CRTC back so a switch that silently did nothing is logged
+         * rather than reported as success.
+         */
+        u32 lines = vga_active_scanlines();
+
+        if (lines != height) {
+            printk("[VGA] mode %ux%ux%u: CRTC reports %u lines\n",
+                   width, height, bpp, lines);
+        }
+    }
+
+    return ret;
+}
+
+/**
+ * vga_get_mode - Report the current mode
+ * @width:  Output horizontal resolution
+ * @height: Output vertical resolution
+ * @bpp:    Output bits per pixel
+ */
+int vga_get_mode(u32 *width, u32 *height, u32 *bpp)
+{
+    if (!width || !height || !bpp) {
+        return -EINVAL;
+    }
+
+    *width = g_vga.current_mode.width;
+    *height = g_vga.current_mode.height;
+    *bpp = g_vga.current_mode.bpp;
+
     return 0;
 }
 

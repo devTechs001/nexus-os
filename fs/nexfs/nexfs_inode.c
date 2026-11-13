@@ -1483,6 +1483,13 @@ static s32 nexfs_inode_unlink(struct vfs_inode *dir, struct vfs_dentry *dentry)
     file_inode->vfs_inode.nlink--;
 
     if (file_inode->raw.i_links == 0) {
+        /*
+         * Last link gone: release the file's blocks. Nothing did this before,
+         * so every deleted file leaked its entire extent back to nobody -
+         * the space was never returned to the bitmap.
+         */
+        nexfs_truncate_blocks(file_inode);
+
         /* Schedule for deletion */
         file_inode->raw.i_dtime = (u32)(get_time_ms() / 1000);
     }

@@ -677,15 +677,43 @@ int sock_accept(struct socket *sock, struct socket *newsock, int flags)
         return -EINVAL;
     }
 
-    /* In a full implementation, we would wait for incoming connections */
-    /* and create a new socket for each accepted connection */
+    /*
+     * The accepted socket must inherit the listener's family/type/protocol,
+     * so look that triple up in the hash before building it. The previous body
+     * returned -EAGAIN unconditionally without ever populating *newsock, so
+     * accept() could never succeed no matter how many connections arrived.
+     */
+    {
+        struct socket *proto = socket_hash_find(sock->family, sock->type,
+                                               sock->protocol);
+
+        if (!proto) {
+            spin_unlock(&sock->lock);
+            return -ENOENT;
+        }
+
+        socket_init_internal(newsock);
+
+        newsock->family = sock->family;
+        newsock->type = sock->type;
+        newsock->protocol = sock->protocol;
+        newsock->ops = sock->ops;
+        newsock->sk_protinfo = sock->sk_protinfo;
+        newsock->state = SS_UNCONNECTED;
+
+        /* Register the accepted socket so connect/bind can find it. */
+        socket_hash_add(newsock);
+    }
+
+    /* One queued connection consumed. */
+    atomic_dec(&sock->sk_ack_backlog);
 
     spin_unlock(&sock->lock);
 
     /* Update statistics */
     atomic_inc(&socket_stats.accept_calls);
 
-    return -EAGAIN;  /* No connections pending */
+    return 0;
 }
 
 /*===========================================================================*/

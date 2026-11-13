@@ -222,6 +222,7 @@ struct window {
     u32 layer_id;               /* Layer ID */
     
     /* Children */
+    window_t *parent;           /* Parent window (NULL for top level) */
     window_t *children;         /* Child windows */
     window_t *next_sibling;     /* Next sibling */
     window_t *prev_sibling;     /* Previous sibling */
@@ -476,6 +477,7 @@ int graphics_draw_pixel(graphics_context_t *ctx, s32 x, s32 y, color_t color);
 int graphics_draw_line(graphics_context_t *ctx, s32 x1, s32 y1, s32 x2, s32 y2);
 int graphics_draw_rect(graphics_context_t *ctx, rect_t *rect);
 int graphics_fill_rect(graphics_context_t *ctx, rect_t *rect, color_t color);
+int graphics_stroke_rect(graphics_context_t *ctx, rect_t *rect, color_t color);
 int graphics_draw_text(graphics_context_t *ctx, s32 x, s32 y, const char *text);
 int graphics_blit(graphics_context_t *ctx, void *src, rect_t *src_rect, s32 dst_x, s32 dst_y);
 int graphics_present(void *surface, rect_t *dirty_rects, u32 num_rects);

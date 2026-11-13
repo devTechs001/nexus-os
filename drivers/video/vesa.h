@@ -192,6 +192,8 @@ int vesa_get_current_mode(void);
 int vesa_list_modes(vesa_mode_info_t *modes, u32 *count);
 
 /* VGA functions */
+int vga_set_mode(u32 width, u32 height, u32 bpp);
+int vga_get_mode(u32 *width, u32 *height, u32 *bpp);
 int vga_save_state(vga_registers_t *regs);
 int vga_restore_state(vga_registers_t *regs);
 int vga_set_palette(u8 index, u8 r, u8 g, u8 b);

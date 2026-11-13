@@ -22,6 +22,7 @@
 #define SESSION_MAX_USERS           32
 #define SESSION_MAX_ACTIVE          16
 #define SESSION_MAX_SERVICES        64
+#define SESSION_MAX_ENV             32      /* Environment variables per session */
 #define SESSION_NAME_MAX            64
 #define SESSION_PATH_MAX            512
 

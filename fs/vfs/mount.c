@@ -395,6 +395,9 @@ s32 vfs_mount(const char *dev_name, const char *dir_name, const char *type,
     return VFS_OK;
 }
 
+/* Lookup by id is defined with the mount-iteration helpers below. */
+struct vfs_mount *vfs_find_mount_by_id(u32 id);
+
 /**
  * vfs_do_umount - Perform filesystem unmount
  * @mount: Mount to unmount
@@ -526,6 +529,30 @@ s32 vfs_umount(const char *dir_name)
 }
 
 /**
+ * vfs_umount_by_id - Unmount by mount ID
+ * @id: Mount ID as returned by vfs_mount()
+ *
+ * Mount IDs were assigned in vfs_alloc_mount() and printed in messages but
+ * could never be resolved back to a mount, so nothing above the VFS could act
+ * on a mount it had just created by id.
+ */
+s32 vfs_umount_by_id(u32 id)
+{
+    struct vfs_mount *mount;
+
+    if (id == 0) {
+        return VFS_EINVAL;
+    }
+
+    mount = vfs_find_mount_by_id(id);
+    if (!mount) {
+        return VFS_ENOENT;
+    }
+
+    return vfs_do_umount(mount);
+}
+
+/**
  * vfs_umount_all - Unmount all filesystems
  *
  * Unmounts all mounted filesystems. Called during shutdown.
@@ -611,7 +638,7 @@ struct vfs_mount *vfs_lookup_mount(const char *path)
  *
  * Returns: Mount structure or NULL
  */
-static struct vfs_mount *vfs_find_mount_by_id(u32 id)
+struct vfs_mount *vfs_find_mount_by_id(u32 id)
 {
     struct vfs_mount *mount;
     u32 i;

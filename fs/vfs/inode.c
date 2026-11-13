@@ -342,6 +342,10 @@ void vfs_iput(struct vfs_inode *inode)
 /*                         INODE HASH TABLE                                  */
 /*===========================================================================*/
 
+static struct vfs_inode *vfs_find_inode_locked(struct vfs_superblock *sb,
+                                              u64 ino);
+static struct vfs_inode *vfs_find_inode(struct vfs_superblock *sb, u64 ino);
+
 /**
  * vfs_iget_locked - Get or create locked inode
  * @sb: Superblock
@@ -365,19 +369,10 @@ struct vfs_inode *vfs_iget_locked(struct vfs_superblock *sb, u64 ino)
 
     spin_lock(&vfs_global.inode_hash_lock);
 
-    /* Search hash table */
-    list_for_each_entry(inode, &vfs_global.inode_hash[bucket], hash_list) {
-        if (inode->i_sb != sb) {
-            continue;
-        }
-        if (inode->ino != ino) {
-            continue;
-        }
-
-        /* Found - increment refcount */
-        vfs_iget(inode);
+    /* Search hash table - shared with vfs_find_inode(). */
+    inode = vfs_find_inode_locked(sb, ino);
+    if (inode) {
         spin_unlock(&vfs_global.inode_hash_lock);
-
         return inode;
     }
 
@@ -396,18 +391,22 @@ struct vfs_inode *vfs_iget_locked(struct vfs_superblock *sb, u64 ino)
         sb->s_op->read_inode(inode);
     }
 
-    /* Add to hash table */
-    spin_lock(&vfs_global.inode_hash_lock);
+    /*
+     * Double-check that nobody added this inode while we were allocating. The
+     * locking lookup wrapper is used here rather than taking the lock by hand,
+     * so there is exactly one hash-walk implementation.
+     */
+    {
+        struct vfs_inode *existing = vfs_find_inode(sb, ino);
 
-    /* Double-check it wasn't added while we were allocating */
-    list_for_each_entry(inode, &vfs_global.inode_hash[bucket], hash_list) {
-        if (inode->i_sb == sb && inode->ino == ino) {
-            vfs_iget(inode);
-            spin_unlock(&vfs_global.inode_hash_lock);
+        if (existing) {
             vfs_destroy_inode(inode);
-            return inode;
+            return existing;    /* already referenced for the caller */
         }
     }
+
+    /* Add to hash table */
+    spin_lock(&vfs_global.inode_hash_lock);
 
     /* Add new inode to hash */
     list_add(&inode->hash_list, &vfs_global.inode_hash[bucket]);
@@ -424,7 +423,8 @@ struct vfs_inode *vfs_iget_locked(struct vfs_superblock *sb, u64 ino)
  *
  * Returns: Inode or NULL if not found
  */
-static struct vfs_inode *vfs_find_inode(struct vfs_superblock *sb, u64 ino)
+static struct vfs_inode *vfs_find_inode_locked(struct vfs_superblock *sb,
+                                              u64 ino)
 {
     struct vfs_inode *inode;
     u32 bucket;
@@ -435,19 +435,29 @@ static struct vfs_inode *vfs_find_inode(struct vfs_superblock *sb, u64 ino)
 
     bucket = vfs_inode_hash(sb->s_dev, ino);
 
-    spin_lock(&vfs_global.inode_hash_lock);
-
     list_for_each_entry(inode, &vfs_global.inode_hash[bucket], hash_list) {
         if (inode->i_sb == sb && inode->ino == ino) {
             vfs_iget(inode);
-            spin_unlock(&vfs_global.inode_hash_lock);
             return inode;
         }
     }
 
+    return NULL;
+}
+
+static struct vfs_inode *vfs_find_inode(struct vfs_superblock *sb, u64 ino)
+{
+    struct vfs_inode *inode;
+
+    if (!sb) {
+        return NULL;
+    }
+
+    spin_lock(&vfs_global.inode_hash_lock);
+    inode = vfs_find_inode_locked(sb, ino);
     spin_unlock(&vfs_global.inode_hash_lock);
 
-    return NULL;
+    return inode;
 }
 
 /*===========================================================================*/
@@ -595,7 +605,6 @@ void vfs_dirty_inode(struct vfs_inode *inode)
 void vfs_evict_inode(struct vfs_inode *inode)
 {
     struct vfs_superblock *sb;
-    u32 bucket;
 
     if (!inode || inode->magic != VFS_MAGIC) {
         return;
@@ -615,9 +624,7 @@ void vfs_evict_inode(struct vfs_inode *inode)
         sb->s_op->evict_inode(inode);
     }
 
-    /* Remove from hash table */
-    bucket = vfs_inode_hash(inode->dev, inode->ino);
-
+    /* Remove from hash table (list_del works from the node's own links). */
     spin_lock(&vfs_global.inode_hash_lock);
 
     if (!list_empty(&inode->hash_list)) {
