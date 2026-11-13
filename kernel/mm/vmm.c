@@ -53,6 +53,75 @@ static spinlock_t vmm_lock = { .lock = 0 };
 /* Page Table Cache */
 static u64 *kernel_pml4 = NULL;
 
+/*
+ * NX support.
+ *
+ * pte_create() stamps PTE_NX (bit 63) on every mapping that is not
+ * requested with VMA_EXEC. Bit 63 is only a valid "no execute" marker when
+ * EFER.NXE is set; otherwise it is a reserved bit and touching such a page
+ * raises #PF with the RSVD flag (error code bit 3, e.g. 0xa).
+ *
+ * boot.asm sets EFER.NXE, but we do not rely on that alone: if the CPU
+ * lacks NX entirely, or the bit somehow did not stick, we must stop
+ * emitting PTE_NX rather than fault on every heap write.
+ */
+static bool vmm_nx_enabled = false;
+
+#define MSR_EFER            0xC0000080
+#define EFER_NXE            (1 << 11)
+
+static inline u64 vmm_read_msr(u32 msr)
+{
+    u32 lo, hi;
+    __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((u64)hi << 32) | lo;
+}
+
+static inline void vmm_write_msr(u32 msr, u64 value)
+{
+    __asm__ __volatile__("wrmsr"
+                         :: "c"(msr), "a"((u32)value), "d"((u32)(value >> 32)));
+}
+
+/**
+ * vmm_nx_detect - Determine whether NX page-table bits are usable
+ *
+ * Returns true if EFER.NXE is (or can be made) active. Called before any
+ * mapping is created.
+ */
+static bool vmm_nx_detect(void)
+{
+    /* 1. CPU support: CPUID.80000001H:EDX[20] */
+    u32 eax, ebx, ecx, edx;
+    __asm__ __volatile__("cpuid"
+                         : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                         : "a"(0x80000000));
+    if (eax < 0x80000001) {
+        return false;
+    }
+    __asm__ __volatile__("cpuid"
+                         : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                         : "a"(0x80000001));
+    if (!(edx & (1 << 20))) {
+        pr_warn("VMM: CPU reports no NX support, not using PTE_NX\n");
+        return false;
+    }
+
+    /* 2. Ensure EFER.NXE is actually set */
+    u64 efer = vmm_read_msr(MSR_EFER);
+    if (!(efer & EFER_NXE)) {
+        vmm_write_msr(MSR_EFER, efer | EFER_NXE);
+        efer = vmm_read_msr(MSR_EFER);
+        if (!(efer & EFER_NXE)) {
+            pr_warn("VMM: EFER.NXE would not stick, not using PTE_NX\n");
+            return false;
+        }
+    }
+
+    pr_info("VMM: NX (no-execute) enabled\n");
+    return true;
+}
+
 /*===========================================================================*/
 /*                         PAGE TABLE OPERATIONS                             */
 /*===========================================================================*/
@@ -72,7 +141,13 @@ static inline u64 pte_create(phys_addr_t paddr, u32 flags)
         entry |= PTE_USER;
     if (flags & VMA_IO)
         entry |= PTE_NOCACHE;
-    if (!(flags & VMA_EXEC))
+
+    /*
+     * Only stamp the NX bit when the CPU/EFER actually support it.
+     * Setting bit 63 with EFER.NXE clear is a reserved-bit violation and
+     * faults on first touch (error code 0xa).
+     */
+    if (vmm_nx_enabled && !(flags & VMA_EXEC))
         entry |= PTE_NX;
 
     entry |= PTE_ACCESSED;
@@ -884,6 +959,12 @@ void vmm_init(void)
 
     /* Initialize lock */
     spin_lock_init(&vmm_lock);
+
+    /*
+     * Decide whether PTE_NX may be used BEFORE creating any mapping.
+     * Emitting bit 63 with EFER.NXE clear is a reserved-bit violation.
+     */
+    vmm_nx_enabled = vmm_nx_detect();
 
     /* Initialize kernel address space */
     vmm_init_kernel_as();

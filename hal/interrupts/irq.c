@@ -260,6 +260,26 @@ void interrupt_init(void)
 {
     pr_info("IRQ: Initializing interrupt subsystem...\n");
 
+    /*
+     * Make sure the IRQ descriptor array and, critically, the interrupt
+     * controllers (PIC remap / local APIC enable) are set up before any
+     * interrupt can be delivered.
+     *
+     * interrupt_early_init() used to be the only caller of pic_init() and
+     * apic_init(), but nothing ever called it. The PIC therefore stayed in
+     * its BIOS configuration, where IRQ0 (the PIT tick) is delivered on
+     * vector 0x08 - which the IDT maps as a double-fault exception. The
+     * first timer tick after arch_enable_interrupts() in the last init
+     * phase would then panic the kernel, and because no handler ever sent
+     * an EOI, the PIC would keep the line asserted and re-panic.
+     *
+     * IRQ descriptor initialization is idempotent, so it is safe to call
+     * here and again from early arch code if that is added later.
+     */
+    if (!irq_manager.initialized) {
+        interrupt_early_init();
+    }
+
     /* Initialize architecture-specific IDT */
     arch_init_idt();
 

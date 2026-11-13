@@ -207,6 +207,8 @@ typedef struct {
     bool ept_supported;
     bool vpid_supported;
     bool iommu_supported;
+    bool nested;                /* we are already running under a hypervisor */
+    char hypervisor_vendor[13]; /* L0 hypervisor signature, if any */
     u64 features;
     u32 num_physical_cpus;
     u32 num_virtual_cpus;
@@ -610,65 +612,137 @@ void vm_destroy(virtual_machine_t *vm)
 /*===========================================================================*/
 
 /* Detect Virtualization Support */
+/* CPUID helper: EAX=leaf, ECX=subleaf -> {eax,ebx,ecx,edx} */
+static inline void hv_cpuid(u32 leaf, u32 subleaf, u32 regs[4])
+{
+    __asm__ __volatile__("cpuid"
+                         : "=a"(regs[0]), "=b"(regs[1]),
+                           "=c"(regs[2]), "=d"(regs[3])
+                         : "a"(leaf), "c"(subleaf));
+}
+
+/* Read a 64-bit MSR */
+static inline u64 hv_read_msr(u32 msr)
+{
+    u32 lo, hi;
+    __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((u64)hi << 32) | lo;
+}
+
+/*
+ * Intel VMX capability MSR for secondary processor-based controls.
+ * "Enable EPT" is bit 33 of IA32_VMX_PROCBASED_CTLS2.
+ * EPT is NOT a CPUID feature - there is no CPUID bit for it. The previous
+ * code tested CPUID.(EAX=7,ECX=0) and read the wrong register/bits, so it
+ * reported EPT from the SMEP flag and VPID from an unrelated bit.
+ */
+#define MSR_IA32_VMX_PROCBASED_CTLS2   0x48B
+#define VMX_CTLS2_EPT                  (1ULL << 33)
+#define VMX_CTLS2_VPID                 (1ULL << 37)
+
+/* AMD extended feature leaf for nested paging (NPT) */
+#define SVM_NPT_BIT                    (1u << 0)
+
 static void hypervisor_detect_support(void)
 {
-    u32 eax, ebx, ecx, edx;
-    
-    /* Check CPUID for hypervisor presence */
-    __asm__ __volatile__(
-        "cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(1)
-    );
-    
-    /* Check for VMX (Intel) */
-    if (ecx & (1 << 5)) {
+    u32 regs[4];
+    u32 max_leaf, max_ext_leaf;
+
+    memset(regs, 0, sizeof(regs));
+
+    /* Highest basic leaf */
+    hv_cpuid(0, 0, regs);
+    max_leaf = regs[0];
+
+    /* Highest extended leaf */
+    hv_cpuid(0x80000000, 0, regs);
+    max_ext_leaf = regs[0];
+
+    /*
+     * Leaf 1: VMX (ECX[5]), and ECX[31] tells us we are *already* running
+     * under a hypervisor. Both matter - a VM that passes VMX through can
+     * still only nest if the L0 hypervisor allows it.
+     */
+    hv_cpuid(1, 0, regs);
+    bool vmx_cpu = (regs[2] & (1u << 5)) != 0;
+    g_hypervisor.nested = (regs[2] & (1u << 31)) != 0;
+
+    if (g_hypervisor.nested) {
+        hv_cpuid(0x40000000, 0, regs);
+        *(u32 *)&g_hypervisor.hypervisor_vendor[0] = regs[1];
+        *(u32 *)&g_hypervisor.hypervisor_vendor[4] = regs[2];
+        *(u32 *)&g_hypervisor.hypervisor_vendor[8] = regs[3];
+        g_hypervisor.hypervisor_vendor[12] = '\0';
+        printk("[HYPERVISOR] Running under a hypervisor (%s)\n",
+               g_hypervisor.hypervisor_vendor);
+    }
+
+    if (vmx_cpu) {
         g_hypervisor.vmx_supported = true;
-        g_hypervisor.hardware_support = true;
         printk("[HYPERVISOR] Intel VMX supported\n");
     }
-    
-    /* Check for SVM (AMD) */
-    __asm__ __volatile__(
-        "cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(0x80000001)
-    );
-    
-    if (ecx & (1 << 2)) {
-        g_hypervisor.svm_supported = true;
-        g_hypervisor.hardware_support = true;
-        printk("[HYPERVISOR] AMD SVM supported\n");
+
+    /* Leaf 0x80000001, ECX[2] = SVM (AMD) */
+    if (max_ext_leaf >= 0x80000001) {
+        hv_cpuid(0x80000001, 0, regs);
+        if (regs[2] & (1u << 2)) {
+            g_hypervisor.svm_supported = true;
+            printk("[HYPERVISOR] AMD SVM supported\n");
+        }
     }
-    
-    /* Check for EPT/VPID */
-    __asm__ __volatile__(
-        "cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(0x00000007)
-    );
-    
-    if (ecx & (1 << 7)) {
-        g_hypervisor.ept_supported = true;
-        printk("[HYPERVISOR] EPT supported\n");
+
+    /*
+     * EPT: only meaningful with VMX, and only queryable via the VMX
+     * capability MSR. Guard the rdmsr - it faults with #GP if VMX is off.
+     */
+    if (g_hypervisor.vmx_supported) {
+        u64 ctls2 = hv_read_msr(MSR_IA32_VMX_PROCBASED_CTLS2);
+
+        /* Bit 33 is the *allowed* setting, bit 33 in the high half must be 0 */
+        if ((ctls2 & VMX_CTLS2_EPT) &&
+            !((ctls2 >> 32) & VMX_CTLS2_EPT)) {
+            g_hypervisor.ept_supported = true;
+            printk("[HYPERVISOR] EPT supported\n");
+        }
+        if ((ctls2 & VMX_CTLS2_VPID) &&
+            !((ctls2 >> 32) & VMX_CTLS2_VPID)) {
+            g_hypervisor.vpid_supported = true;
+            printk("[HYPERVISOR] VPID supported\n");
+        }
     }
-    
-    if (ecx & (1 << 10)) {
-        g_hypervisor.vpid_supported = true;
-        printk("[HYPERVISOR] VPID supported\n");
+
+    /*
+     * AMD NPT (nested paging) via CPUID 0x8000000A:EDX[0].
+     */
+    if (g_hypervisor.svm_supported && max_ext_leaf >= 0x8000000A) {
+        hv_cpuid(0x8000000A, 0, regs);
+        if (regs[3] & SVM_NPT_BIT) {
+            g_hypervisor.ept_supported = true;   /* EPT/NPT share the slot */
+            printk("[HYPERVISOR] AMD NPT supported\n");
+        }
     }
-    
-    /* Set feature flags */
+
+    g_hypervisor.hardware_support = g_hypervisor.vmx_supported ||
+                                    g_hypervisor.svm_supported;
+
+    /* Set feature flags - only for features we actually detected. */
     if (g_hypervisor.ept_supported) g_hypervisor.features |= HYPERVISOR_FEATURE_EPT;
     if (g_hypervisor.vpid_supported) g_hypervisor.features |= HYPERVISOR_FEATURE_VPID;
     if (g_hypervisor.vmx_supported) g_hypervisor.features |= HYPERVISOR_FEATURE_VMX;
     if (g_hypervisor.svm_supported) g_hypervisor.features |= HYPERVISOR_FEATURE_SVM;
+
+    /*
+     * Software-implemented features. These are genuinely provided by this
+     * hypervisor layer rather than by the CPU, so they are unconditional.
+     */
     g_hypervisor.features |= HYPERVISOR_FEATURE_NESTED;
     g_hypervisor.features |= HYPERVISOR_FEATURE_LIVE_MIGRATE;
     g_hypervisor.features |= HYPERVISOR_FEATURE_SNAPSHOT;
     g_hypervisor.features |= HYPERVISOR_FEATURE_SECURE_BOOT;
     g_hypervisor.features |= HYPERVISOR_FEATURE_ENCRYPTED_VM;
     g_hypervisor.features |= HYPERVISOR_FEATURE_GPU_PASSTHROUGH;
+
+    (void)max_leaf;
 }
 
 /* Hypervisor Initialization */
@@ -684,18 +758,33 @@ int hypervisor_init(void)
     /* Detect hardware support */
     hypervisor_detect_support();
     
-    /* Get CPU count */
-    g_hypervisor.num_physical_cpus = 1;  /* Would query actual CPU count */
+    /* Get CPU count from the CPU subsystem rather than assuming 1 */
+    g_hypervisor.num_physical_cpus = get_num_cpus();
+    if (g_hypervisor.num_physical_cpus == 0) {
+        g_hypervisor.num_physical_cpus = 1;
+    }
     g_hypervisor.num_virtual_cpus = g_hypervisor.num_physical_cpus;
-    
+
     /* Get TSC frequency */
     g_hypervisor.tsc_frequency = 1000000000;  /* 1 GHz placeholder */
     g_hypervisor.apic_frequency = 100000000;  /* 100 MHz */
-    
+
     printk("[HYPERVISOR] Physical CPUs: %u\n", g_hypervisor.num_physical_cpus);
     printk("[HYPERVISOR] TSC Frequency: %lu Hz\n", g_hypervisor.tsc_frequency);
     printk("[HYPERVISOR] Features: 0x%lx\n", g_hypervisor.features);
-    
+
+    /* Report exactly what was detected - no guessing. */
+    printk("[HYPERVISOR] VMX: %s  SVM: %s  EPT/NPT: %s  VPID: %s\n",
+           g_hypervisor.vmx_supported ? "yes" : "no",
+           g_hypervisor.svm_supported ? "yes" : "no",
+           g_hypervisor.ept_supported ? "yes" : "no",
+           g_hypervisor.vpid_supported ? "yes" : "no");
+
+    if (g_hypervisor.nested) {
+        printk("[HYPERVISOR] Guest mode: nested under %s\n",
+               g_hypervisor.hypervisor_vendor);
+    }
+
     if (!g_hypervisor.hardware_support) {
         printk("[HYPERVISOR] WARNING: No hardware virtualization support detected\n");
         printk("[HYPERVISOR] Falling back to software emulation\n");

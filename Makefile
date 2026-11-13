@@ -1117,7 +1117,7 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo '' >> $@
 	@echo 'menuentry "🖥️  NEXUS OS - Graphical Mode (Default)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
-	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash virt=vmware' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash virt=auto' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "📟  NEXUS OS - Text Mode (VGA Console)" {' >> $@
