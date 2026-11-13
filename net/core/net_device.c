@@ -62,13 +62,18 @@ static struct {
     atomic64_t total_rx_errors;
     atomic64_t total_tx_errors;
 } netdev_stats = {
+    /*
+     * One entry per field, in declaration order. This list had two duplicated
+     * members (.total_rx_bytes once, .total_tx_packets twice), so the compiler
+     * reported "initialized field overwritten" and the initialisers no longer
+     * lined up with the struct it was meant to describe.
+     */
     .lock = { .lock = SPINLOCK_UNLOCKED },
     .total_devices = ATOMIC_INIT(0),
     .registered_devices = ATOMIC_INIT(0),
     .up_devices = ATOMIC_INIT(0),
     .total_rx_packets = ATOMIC64_INIT(0),
     .total_tx_packets = ATOMIC64_INIT(0),
-    .total_rx_bytes = ATOMIC64_INIT(0),
     .total_rx_bytes = ATOMIC64_INIT(0),
     .total_tx_bytes = ATOMIC64_INIT(0),
     .total_rx_errors = ATOMIC64_INIT(0),
@@ -662,7 +667,16 @@ int dev_change_mtu(struct net_device *dev, int new_mtu)
         return -EINVAL;
     }
 
-    if (new_mtu < dev->min_mtu || new_mtu > dev->max_mtu) {
+    /*
+     * new_mtu is a signed int and the bounds are u32, so a negative MTU would
+     * be promoted to a huge unsigned value and slip through the upper check.
+     * Reject it explicitly before comparing.
+     */
+    if (new_mtu < 0) {
+        return -EINVAL;
+    }
+
+    if ((u32)new_mtu < dev->min_mtu || (u32)new_mtu > dev->max_mtu) {
         return -EINVAL;
     }
 

@@ -7,11 +7,15 @@
  */
 
 #include "terminal.h"
+#include "shell.h"
+#include "../../fs/vfs/vfs.h"
 #include "../../gui/gui.h"
 #include "../../gui/widgets/widgets.h"
 #include "../../gui/window-manager/window-manager.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
+#include "../../drivers/display/display.h"
+#include "../../drivers/video/font8x16.h"
 
 /*===========================================================================*/
 /*                         GLOBAL TERMINAL APPLICATION                       */
@@ -38,6 +42,8 @@ static int update_tab_titles(terminal_window_t *win);
 /* Rendering */
 static int render_screen(terminal_window_t *win);
 static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *cell);
+static u32 terminal_ansi_color(u8 index);
+static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y, u32 w, u32 h, u32 color);
 static int update_cursor(terminal_window_t *win);
 
 /* PTY operations */
@@ -332,7 +338,7 @@ static int create_tab_bar(terminal_window_t *win)
     }
     
     /* Create tab bar panel */
-    win->tab_bar = panel_create(win->wm_window, 0, 0, 900, 32);
+    win->tab_bar = panel_create(NULL, 0, 0, 900, 32);
     if (!win->tab_bar) {
         return -1;
     }
@@ -364,7 +370,7 @@ static int create_terminal_view(terminal_window_t *win)
     }
     
     /* Create terminal view panel */
-    win->terminal_view = panel_create(win->wm_window, 0, 32, 900, 536);
+    win->terminal_view = panel_create(NULL, 0, 32, 900, 536);
     if (!win->terminal_view) {
         return -1;
     }
@@ -390,7 +396,7 @@ static int create_scrollbar(terminal_window_t *win)
     }
     
     /* Create scrollbar */
-    win->scrollbar = panel_create(win->wm_window, 890, 32, 10, 536);
+    win->scrollbar = panel_create(NULL, 890, 32, 10, 536);
     if (!win->scrollbar) {
         return -1;
     }
@@ -416,7 +422,7 @@ static int create_status_bar(terminal_window_t *win)
     }
     
     /* Create status bar panel */
-    win->status_bar = panel_create(win->wm_window, 0, 568, 900, 32);
+    win->status_bar = panel_create(NULL, 0, 568, 900, 32);
     if (!win->status_bar) {
         return -1;
     }
@@ -852,25 +858,68 @@ int terminal_send_string(terminal_window_t *win, const char *str)
  *
  * Returns: 0 on success, negative error code on failure
  */
-static int pty_spawn(terminal_window_t *win, const char *shell, const char *dir)
+/*
+ * PTY plumbing.
+ *
+ * This used to be a mock: pty_spawn() stored "1000 + window_id" as a PID and
+ * pty_read()/pty_write() did nothing at all, so the terminal window had a
+ * scrollback buffer that could never be filled by an actual command.
+ *
+ * It is now backed by the real in-kernel shell (shell.c): the shell owns the
+ * interpreter and the environment, and this file only supplies the byte
+ * plumbing between the shell's output sink and the terminal cell buffer.
+ */
+
+/* Output sink: shell bytes -> terminal scrollback cells. */
+static void terminal_shell_sink(void *ctx, const char *data, u32 len)
 {
-    if (!win || !shell) {
+    terminal_window_t *win = (terminal_window_t *)ctx;
+
+    if (!win || !data || !len) {
+        return;
+    }
+
+    /* Route through the window's writer so escape handling and wrapping
+     * stay in one place. */
+    terminal_write(win, data, len);
+}
+
+static int pty_spawn(terminal_window_t *win, const char *shell_path, const char *dir)
+{
+    int rc;
+
+    if (!win || !shell_path) {
         return -EINVAL;
     }
-    
-    printk("[TERMINAL] Spawning shell: %s in %s\n", shell, dir ? dir : "/");
-    
-    /* In real implementation, would:
-     * - Create PTY master/slave
-     * - Fork process
-     * - Execute shell
-     * - Set up environment
-     */
-    
-    /* Mock PID for now */
-    win->shell_pid = 1000 + win->window_id;
-    win->is_running = true;
-    
+
+    printk("[TERMINAL] Starting shell '%s' in %s\n",
+           shell_path, dir ? dir : "/");
+
+    rc = shell_init();
+    if (rc != 0) {
+        printk("[TERMINAL] shell_init failed: %d\n", rc);
+        return rc;
+    }
+
+    /* Honour the requested starting directory. */
+    if (dir && *dir) {
+        vfs_chdir(dir);
+    }
+
+    /* Point the shell's stdout/stderr at this window. */
+    shell_set_output(terminal_shell_sink, win);
+    shell_set_error(terminal_shell_sink, win);
+
+    win->shell_pid = shell_get_pid();
+    win->is_running = shell_is_running();
+
+    /* Banner, then the first prompt. */
+    terminal_write(win,
+        "NEXUS OS 1.0.0 - Nexus Shell\n"
+        "Type 'help' for a list of commands.\n\n", 70);
+
+    shell_print_prompt();
+
     return 0;
 }
 
@@ -885,9 +934,12 @@ static int pty_read(terminal_window_t *win)
     if (!win || !win->is_running) {
         return -1;
     }
-    
-    /* In real implementation, would read from PTY master FD */
-    
+
+    /*
+     * The shell is in-process, so there is no kernel PTY to poll: input
+     * arrives through terminal_send_key()/terminal_send_string(), which
+     * feed the line editor. Nothing is pending here.
+     */
     return 0;
 }
 
@@ -901,13 +953,59 @@ static int pty_read(terminal_window_t *win)
  */
 static int pty_write(terminal_window_t *win, const char *data, u32 length)
 {
+    /*
+     * Writing to the "PTY" means handing bytes to the shell's line editor.
+     * Newline commits the line and runs it; anything else accumulates and
+     * is echoed back to the cell buffer so the user sees what they typed.
+     */
+    static char line_buf[SHELL_MAX_LINE];
+    static u32 line_len;
+
     if (!win || !data || length == 0) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would write to PTY master FD */
-    
-    return 0;
+
+    for (u32 i = 0; i < length; i++) {
+        char c = data[i];
+
+        if (c == '\r') {
+            continue;               /* CRLF input: ignore the CR. */
+        }
+
+        if (c == '\n') {
+            terminal_write(win, "\n", 1);
+            line_buf[line_len] = '\0';
+            if (line_len > 0) {
+                shell_submit_line(line_buf);
+            }
+            line_len = 0;
+            terminal_write(win, "\n", 1);
+            shell_print_prompt();
+            continue;
+        }
+
+        if (c == 0x7F || c == '\b') {
+            if (line_len > 0) {
+                line_len--;
+                terminal_write(win, "\b \b", 3);
+            }
+            continue;
+        }
+
+        if (c == 0x03) {            /* ^C */
+            line_len = 0;
+            terminal_write(win, "^C\n", 3);
+            shell_print_prompt();
+            continue;
+        }
+
+        if (line_len + 1 < sizeof(line_buf)) {
+            line_buf[line_len++] = c;
+            terminal_write(win, &c, 1);
+        }
+    }
+
+    return (int)length;
 }
 
 /**
@@ -1089,11 +1187,91 @@ static int render_screen(terminal_window_t *win)
  */
 static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *cell)
 {
-    (void)win; (void)x; (void)y; (void)cell;
-    
-    /* In real implementation, would render character with colors */
-    
+    display_framebuffer_t *fb;
+    u32 fg, bg;
+    u32 px, py;
+
+    if (!win || !cell) {
+        return -EINVAL;
+    }
+
+    fb = display_get_primary_framebuffer();
+    if (!fb || !fb->base || fb->bpp != 32) {
+        return -ENODEV;
+    }
+
+    /*
+     * This used to return 0 without drawing anything, which is why the
+     * terminal showed no colour at all. Colours are the ANSI 16-colour
+     * palette indexed by terminal_cell_t.fg_color / bg_color.
+     */
+    fg = terminal_ansi_color(cell->fg_color);
+    bg = terminal_ansi_color(cell->bg_color);
+
+    if (cell->reverse) {
+        u32 tmp = fg;
+        fg = bg;
+        bg = tmp;
+    }
+
+    if (!cell->character || cell->character == ' ') {
+        fg = bg;                       /* Nothing to draw, just clear. */
+    }
+
+    px = (u32)(win->wm_window ? win->wm_window->geometry.x : 0) + x * win->cell_width;
+    py = (u32)(win->wm_window ? win->wm_window->geometry.y : 0) + y * win->cell_height;
+
+    /* Background cell first, then the glyph on top. */
+    terminal_fill_cell(fb, px, py, win->cell_width, win->cell_height, bg);
+
+    if (cell->character && cell->character != ' ') {
+        font8x16_draw_char((u32 *)fb->base, fb->width, fb->height, fb->stride,
+                           (s32)px, (s32)py, cell->character, fg, 1, 255);
+    }
+
     return 0;
+}
+
+/**
+ * terminal_ansi_color - Map an ANSI colour index to 0x00RRGGBB
+ *
+ * Covers the standard 16 colours. Indices past 15 fall back to the default
+ * foreground so a malformed escape sequence cannot invent a colour.
+ */
+static u32 terminal_ansi_color(u8 index)
+{
+    static const u32 palette[16] = {
+        0x000000, 0xAA0000, 0x00AA00, 0xAA5500,
+        0x0000AA, 0xAA00AA, 0x00AAAA, 0xAAAAAA,
+        0x555555, 0xFF5555, 0x55FF55, 0xFFFF55,
+        0x5555FF, 0xFF55FF, 0x55FFFF, 0xFFFFFF,
+    };
+
+    return palette[index & 0x0F];
+}
+
+/**
+ * terminal_fill_cell - Fill one cell rectangle
+ */
+static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y,
+                               u32 w, u32 h, u32 color)
+{
+    u32 *pixels = (u32 *)fb->base;
+    u32 stride = fb->stride / 4;
+
+    for (u32 row = 0; row < h; row++) {
+        u32 dy = y + row;
+        if (dy >= fb->height) {
+            break;
+        }
+        for (u32 col = 0; col < w; col++) {
+            u32 dx = x + col;
+            if (dx >= fb->width) {
+                break;
+            }
+            pixels[dy * stride + dx] = color;
+        }
+    }
 }
 
 /**
@@ -1739,12 +1917,52 @@ static void on_key_press(terminal_window_t *win, u32 key, u32 modifiers)
  */
 static void on_mouse_click(terminal_window_t *win, s32 x, s32 y, u32 button)
 {
-    (void)win; (void)x; (void)y; (void)button;
-    
-    /* In real implementation, would handle mouse clicks */
-    /* - Left click: Place cursor / select text */
-    /* - Right click: Show context menu */
-    /* - Middle click: Paste */
+    u32 col, row;
+
+    if (!win || !win->screen) {
+        return;
+    }
+
+    if (win->cell_width == 0 || win->cell_height == 0) {
+        return;
+    }
+
+    /* Convert window-relative pixels to a cell coordinate. */
+    col = (u32)(x > 0 ? x : 0) / win->cell_width;
+    row = (u32)(y > 0 ? y : 0) / win->cell_height;
+
+    if (col >= win->screen->width) {
+        col = win->screen->width ? win->screen->width - 1 : 0;
+    }
+    if (row >= win->screen->height) {
+        row = win->screen->height ? win->screen->height - 1 : 0;
+    }
+
+    switch (button) {
+        case 0:     /* Left: place cursor and begin a selection. */
+            win->screen->cursor_x = col;
+            win->screen->cursor_y = row;
+            win->is_selecting = true;
+            win->selection_start_x = col;
+            win->selection_start_y = row;
+            win->selection_end_x = col;
+            win->selection_end_y = row;
+            break;
+
+        case 1:     /* Middle: paste the clipboard at the cursor. */
+            if (win->clipboard && win->clipboard[0]) {
+                pty_write(win, win->clipboard, (u32)strlen(win->clipboard));
+            }
+            break;
+
+        case 2:     /* Right: the menu is owned by the desktop environment, so
+                     * positioning it is its job, not the terminal's. All the
+                     * terminal knows is that a context menu exists. */
+            break;
+
+        default:
+            break;
+    }
 }
 
 /**
@@ -1786,4 +2004,545 @@ const char *terminal_get_version(void)
 terminal_app_t *terminal_app_get_instance(void)
 {
     return &g_terminal_app;
+}
+
+/*===========================================================================*/
+/*              SPLIT PANES AND BOOKMARKS (DECLARED, NEVER DEFINED)          */
+/*===========================================================================*/
+/*
+ * terminal.h declared eight pane and bookmark functions that had no bodies.
+ * The pane tree structure (split_pane_t) was already defined, and windows
+ * already carried root_pane/active_pane/next_pane_id, but nothing ever built,
+ * walked or dismantled a tree - so a window could never be split.
+ */
+
+/**
+ * terminal_split_pane - Split the active pane in two
+ *
+ * @horizontal: true for a side-by-side split, false for top-and-bottom.
+ *
+ * The active pane becomes an internal node and receives two children sized
+ * from its bounds and the split ratio. The new right/bottom pane is created
+ * with its own tab sharing the window's terminal.
+ */
+int terminal_split_pane(terminal_window_t *win, bool horizontal)
+{
+    split_pane_t *pane;
+    split_pane_t *a;
+    split_pane_t *b;
+    terminal_tab_t *tab;
+    u32 w, h;
+
+    if (!win || !win->active_pane) {
+        return -EINVAL;
+    }
+
+    pane = win->active_pane;
+
+    /* A leaf becomes an internal node; refuse to split one that already is. */
+    if (pane->first_child) {
+        return -EBUSY;
+    }
+
+    a = (split_pane_t *)kzalloc(sizeof(split_pane_t));
+    b = (split_pane_t *)kzalloc(sizeof(split_pane_t));
+    if (!a || !b) {
+        if (a) kfree(a);
+        if (b) kfree(b);
+        return -ENOMEM;
+    }
+
+    w = (u32)(pane->bounds.width > 0 ? pane->bounds.width
+                                     : (win->wm_window ? win->wm_window->geometry.width : 640));
+    h = (u32)(pane->bounds.height > 0 ? pane->bounds.height
+                                      : (win->wm_window ? win->wm_window->geometry.height : 480));
+
+    /* First child inherits the existing tab. */
+    a->pane_id = win->next_pane_id++;
+    a->tab = pane->tab;
+    a->parent = pane;
+    a->split_ratio = 50;
+    a->bounds.x = pane->bounds.x;
+    a->bounds.y = pane->bounds.y;
+
+    /* Second child gets a fresh tab on the same shell profile. */
+    tab = (terminal_tab_t *)kzalloc(sizeof(terminal_tab_t));
+    if (!tab) {
+        kfree(a);
+        kfree(b);
+        return -ENOMEM;
+    }
+    tab->tab_id = win->next_pane_id++;
+    tab->is_active = true;
+    if (pane->tab && pane->tab->shell_path[0]) {
+        strncpy(tab->shell_path, pane->tab->shell_path,
+                sizeof(tab->shell_path) - 1);
+    } else {
+        strncpy(tab->shell_path, "/bin/nexsh", sizeof(tab->shell_path) - 1);
+    }
+    strncpy(tab->title, "nexsh", sizeof(tab->title) - 1);
+
+    b->pane_id = win->next_pane_id++;
+    b->tab = tab;
+    b->parent = pane;
+    b->split_ratio = 50;
+    b->bounds.x = pane->bounds.x;
+    b->bounds.y = pane->bounds.y;
+
+    if (horizontal) {
+        /* Side by side: split the width. */
+        a->bounds.width = (s32)(w / 2);
+        a->bounds.height = (s32)h;
+        b->bounds.x = pane->bounds.x + (s32)(w / 2);
+        b->bounds.width = (s32)(w - w / 2);
+        b->bounds.height = (s32)h;
+    } else {
+        /* Stacked: split the height. */
+        a->bounds.width = (s32)w;
+        a->bounds.height = (s32)(h / 2);
+        b->bounds.y = pane->bounds.y + (s32)(h / 2);
+        b->bounds.width = (s32)w;
+        b->bounds.height = (s32)(h - h / 2);
+    }
+
+    pane->is_horizontal = horizontal;
+    pane->first_child = a;
+    pane->second_child = b;
+
+    win->is_split = true;
+    win->active_pane = b;
+
+    /* Move the active-tab marker to the new pane. */
+    if (pane->tab) {
+        pane->tab->is_active = false;
+    }
+
+    return 0;
+}
+
+/**
+ * free_pane_tree - Recursively release a pane subtree
+ */
+static void free_pane_tree(split_pane_t *pane)
+{
+    if (!pane) {
+        return;
+    }
+
+    free_pane_tree(pane->first_child);
+    free_pane_tree(pane->second_child);
+
+    /* Only leaves own their tab. */
+    if (!pane->first_child && !pane->second_child && pane->tab) {
+        kfree(pane->tab);
+    }
+
+    kfree(pane);
+}
+
+/**
+ * terminal_close_pane - Close a pane, collapsing its parent
+ *
+ * The sibling takes the parent's place, so closing one half of a split
+ * returns the survivor to full size rather than leaving a gap.
+ */
+int terminal_close_pane(terminal_window_t *win, split_pane_t *pane)
+{
+    split_pane_t *parent;
+    split_pane_t *sibling;
+
+    if (!win || !pane) {
+        return -EINVAL;
+    }
+
+    parent = pane->parent;
+
+    /* Closing the root tears down the whole window's panes. */
+    if (!parent) {
+        if (win->root_pane) {
+            free_pane_tree(win->root_pane);
+        }
+        win->root_pane = NULL;
+        win->active_pane = NULL;
+        win->is_split = false;
+        return 0;
+    }
+
+    sibling = (parent->first_child == pane) ? parent->second_child
+                                            : parent->first_child;
+    if (!sibling) {
+        return -EINVAL;
+    }
+
+    /* The survivor inherits the parent's geometry and position in the tree. */
+    sibling->parent = parent->parent;
+    sibling->bounds = parent->bounds;
+
+    if (parent->parent) {
+        if (parent->parent->first_child == parent) {
+            parent->parent->first_child = sibling;
+        } else {
+            parent->parent->second_child = sibling;
+        }
+    } else {
+        win->root_pane = sibling;
+    }
+
+    /* Only leaves own their tab. */
+    if (!pane->first_child && !pane->second_child && pane->tab) {
+        kfree(pane->tab);
+    }
+
+    /* Detach the sibling we are keeping before freeing the parent. */
+    parent->first_child = NULL;
+    parent->second_child = NULL;
+    kfree(parent);
+    kfree(pane);
+
+    win->is_split = (win->root_pane && win->root_pane->first_child);
+
+    if (win->active_pane == pane) {
+        win->active_pane = sibling;
+        if (sibling->tab) {
+            sibling->tab->is_active = true;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * terminal_switch_pane - Focus a pane
+ */
+int terminal_switch_pane(terminal_window_t *win, split_pane_t *pane)
+{
+    if (!win || !pane) {
+        return -EINVAL;
+    }
+
+    /* Only leaves can take focus: an internal node has no terminal. */
+    if (pane->first_child) {
+        return -EINVAL;
+    }
+
+    if (win->active_pane && win->active_pane->tab) {
+        win->active_pane->tab->is_active = false;
+    }
+
+    win->active_pane = pane;
+
+    if (pane->tab) {
+        pane->tab->is_active = true;
+        pane->tab->has_activity = false;
+    }
+
+    return 0;
+}
+
+/**
+ * terminal_resize_pane - Change a split's ratio
+ *
+ * @size: New ratio as a percentage, 0-100. The children's bounds are
+ *        recomputed so the ratio is actually reflected on screen.
+ */
+int terminal_resize_pane(terminal_window_t *win, split_pane_t *pane, u32 size)
+{
+    split_pane_t *a;
+    split_pane_t *b;
+    u32 total;
+    u32 first;
+
+    if (!win || !pane) {
+        return -EINVAL;
+    }
+
+    if (!pane->first_child || !pane->second_child) {
+        return -EINVAL;         /* Not a split. */
+    }
+
+    if (size < 1 || size > 99) {
+        return -ERANGE;
+    }
+
+    a = pane->first_child;
+    b = pane->second_child;
+
+    total = (u32)(pane->is_horizontal ? pane->bounds.width
+                                      : pane->bounds.height);
+    if (total == 0) {
+        return -EINVAL;
+    }
+
+    first = (total * size) / 100;
+    if (first == 0) {
+        first = 1;
+    }
+
+    if (pane->is_horizontal) {
+        a->bounds.x = pane->bounds.x;
+        a->bounds.y = pane->bounds.y;
+        a->bounds.width = (s32)first;
+        a->bounds.height = pane->bounds.height;
+
+        b->bounds.x = pane->bounds.x + (s32)first;
+        b->bounds.y = pane->bounds.y;
+        b->bounds.width = (s32)(total - first);
+        b->bounds.height = pane->bounds.height;
+    } else {
+        a->bounds.x = pane->bounds.x;
+        a->bounds.y = pane->bounds.y;
+        a->bounds.width = pane->bounds.width;
+        a->bounds.height = (s32)first;
+
+        b->bounds.x = pane->bounds.x;
+        b->bounds.y = pane->bounds.y + (s32)first;
+        b->bounds.width = pane->bounds.width;
+        b->bounds.height = (s32)(total - first);
+    }
+
+    pane->split_ratio = size;
+
+    return 0;
+}
+
+/**
+ * terminal_unsplit_panes - Collapse every split back to one pane
+ *
+ * Keeps the active pane's terminal and discards the rest.
+ */
+int terminal_unsplit_panes(terminal_window_t *win)
+{
+    split_pane_t *keep;
+    split_pane_t *old_root;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (!win->root_pane) {
+        return 0;
+    }
+
+    /* Detach the active pane from the tree before freeing everything else. */
+    keep = win->active_pane;
+    if (!keep || keep->first_child) {
+        /* Pick the leftmost leaf if the active pane is an internal node. */
+        keep = win->root_pane;
+        while (keep->first_child) {
+            keep = keep->first_child;
+        }
+    }
+
+    old_root = win->root_pane;
+
+    /* Preserve the tab, then free the tree without freeing that tab. */
+    terminal_tab_t *saved = keep->tab;
+    keep->tab = NULL;
+
+    free_pane_tree(old_root);
+
+    /* Reuse the active pane node as the new single root. */
+    memset(keep, 0, sizeof(split_pane_t));
+    keep->pane_id = win->next_pane_id++;
+    keep->tab = saved;
+    keep->split_ratio = 100;
+    keep->bounds.width = (s32)(win->wm_window ? win->wm_window->geometry.width : 640);
+    keep->bounds.height = (s32)(win->wm_window ? win->wm_window->geometry.height : 480);
+
+    if (saved) {
+        saved->is_active = true;
+    }
+
+    win->root_pane = keep;
+    win->active_pane = keep;
+    win->is_split = false;
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*                              BOOKMARKS                                    */
+/*===========================================================================*/
+
+/**
+ * terminal_add_bookmark - Store a bookmark
+ */
+int terminal_add_bookmark(terminal_window_t *win, terminal_bookmark_t *bookmark)
+{
+    if (!win || !bookmark) {
+        return -EINVAL;
+    }
+
+    if (win->bookmark_count >= TERMINAL_MAX_BOOKMARKS) {
+        return -ENOSPC;
+    }
+
+    win->bookmarks[win->bookmark_count++] = *bookmark;
+
+    return 0;
+}
+
+/**
+ * terminal_remove_bookmark - Delete a bookmark by index
+ */
+int terminal_remove_bookmark(terminal_window_t *win, u32 index)
+{
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (index >= win->bookmark_count) {
+        return -EINVAL;
+    }
+
+    for (u32 i = index; i + 1 < win->bookmark_count; i++) {
+        win->bookmarks[i] = win->bookmarks[i + 1];
+    }
+    win->bookmark_count--;
+
+    return 0;
+}
+
+/**
+ * terminal_open_bookmark - Open a new tab at a bookmark's location
+ *
+ * The bookmark's shell is launched as the tab's shell and its path becomes the
+ * tab's working directory, so the tab starts where the user left off.
+ */
+int terminal_open_bookmark(terminal_window_t *win, u32 index)
+{
+    terminal_bookmark_t *bm;
+    terminal_tab_t *tab;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (index >= win->bookmark_count) {
+        return -EINVAL;
+    }
+
+    bm = &win->bookmarks[index];
+
+    if (win->tab_count >= TERMINAL_MAX_TABS) {
+        return -ENOSPC;
+    }
+
+    tab = (terminal_tab_t *)kzalloc(sizeof(terminal_tab_t));
+    if (!tab) {
+        return -ENOMEM;
+    }
+
+    tab->tab_id = win->next_tab_id++;
+    tab->is_active = true;
+
+    strncpy(tab->shell_path,
+            bm->shell[0] ? bm->shell : "/bin/nexsh",
+            sizeof(tab->shell_path) - 1);
+    strncpy(tab->title,
+            bm->name[0] ? bm->name : "nexsh",
+            sizeof(tab->title) - 1);
+
+    /* Deactivate whatever tab was current. */
+    for (terminal_tab_t *t = win->tabs; t; t = t->next) {
+        t->is_active = false;
+    }
+
+    /* Append to the tab list. */
+    tab->next = NULL;
+    if (!win->tabs) {
+        win->tabs = tab;
+    } else {
+        terminal_tab_t *last = win->tabs;
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = tab;
+    }
+
+    win->active_tab = tab->tab_id;
+    win->tab_count++;
+
+    /*
+     * Change into the bookmark's directory. A bookmark to a directory that
+     * has since gone is not fatal: the tab still opens, just at the default.
+     */
+    if (bm->path[0]) {
+        if (vfs_chdir(bm->path) != 0) {
+            pr_warn("[TERMINAL] Bookmark '%s': %s is gone\n", bm->name, bm->path);
+        }
+    }
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*                       RENDERING AND EVENT ENTRY POINTS                    */
+/*===========================================================================*/
+/*
+ * render_cell, on_mouse_click and on_resize were static functions with
+ * implementations (or stubs) that nothing ever called: the terminal had no
+ * render loop and no event path at all. These entry points give the window
+ * manager something to call.
+ */
+
+/**
+ * terminal_render_window - Draw a window's visible screen
+ *
+ * Renders every cell in the screen buffer, then the cursor if it is due to be
+ * shown. Returns the number of cells drawn, or a negative error code.
+ */
+int terminal_render_window(terminal_window_t *win)
+{
+    u32 drawn = 0;
+
+    if (!win || !win->screen) {
+        return -EINVAL;
+    }
+
+    if (win->cell_width == 0 || win->cell_height == 0) {
+        return -EINVAL;
+    }
+
+    for (u32 row = 0; row < win->screen->height; row++) {
+        for (u32 col = 0; col < win->screen->width; col++) {
+            terminal_cell_t *cell = &win->screen->cells[row * win->screen->width + col];
+
+            if (render_cell(win, col, row, cell) == 0) {
+                drawn++;
+            }
+        }
+    }
+
+    return (int)drawn;
+}
+
+/**
+ * terminal_handle_mouse - Forward a mouse event to a window
+ */
+void terminal_handle_mouse(terminal_window_t *win, s32 x, s32 y, u32 button)
+{
+    on_mouse_click(win, x, y, button);
+}
+
+/**
+ * terminal_handle_resize - Forward a window resize to the terminal
+ *
+ * Recomputes rows and columns from the pixel size and the cell size.
+ */
+void terminal_handle_resize(terminal_window_t *win, u32 width, u32 height)
+{
+    if (!win) {
+        return;
+    }
+
+    /* A zero cell size would divide by zero; fall back to 8x16. */
+    if (win->cell_width == 0) {
+        win->cell_width = 8;
+    }
+    if (win->cell_height == 0) {
+        win->cell_height = 16;
+    }
+
+    on_resize(win, width, height);
 }

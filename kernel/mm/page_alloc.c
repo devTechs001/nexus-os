@@ -545,7 +545,7 @@ struct page *alloc_pages(u32 order, u32 flags)
         page->first = page;
 
         /* Initialize tail pages */
-        for (i = 1; i < (1 << order); i++) {
+        for (i = 1; i < (1U << order); i++) {
             struct page *tail = page + i;
             page_set_flag(tail, PAGE_FLAG_TAIL);
             page_set_flag(tail, PAGE_FLAG_COMPOUND);
@@ -623,7 +623,7 @@ void free_pages(struct page *page, u32 order)
         page_clear_flag(page, PAGE_FLAG_HEAD);
         page_clear_flag(page, PAGE_FLAG_COMPOUND);
 
-        for (i = 1; i < (1 << order); i++) {
+        for (i = 1; i < (1U << order); i++) {
             struct page *tail = page + i;
             page_clear_flag(tail, PAGE_FLAG_TAIL);
             page_clear_flag(tail, PAGE_FLAG_COMPOUND);

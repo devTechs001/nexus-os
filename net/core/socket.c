@@ -899,7 +899,7 @@ int sock_setsockopt(struct socket *sock, int level, int optname, void *optval, i
         return -EINVAL;
     }
 
-    if (optlen < sizeof(u32)) {
+    if (optlen < (int)sizeof(u32)) {
         return -EINVAL;
     }
 
@@ -994,7 +994,7 @@ int sock_getsockopt(struct socket *sock, int level, int optname, void *optval, i
         return -EINVAL;
     }
 
-    if (*optlen < sizeof(u32)) {
+    if (*optlen < (int)sizeof(u32)) {
         return -EINVAL;
     }
 

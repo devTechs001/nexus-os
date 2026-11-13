@@ -300,6 +300,12 @@ struct radix_tree_root {
 #ifndef E2BIG
 #define E2BIG       (-7)
 #endif
+#ifndef EROFS
+#define EROFS       (-30)       /* Read-only filesystem */
+#endif
+#ifndef ENOEXEC
+#define ENOEXEC     (-8)        /* Not a valid executable format */
+#endif
 #ifndef ENXIO
 #define ENXIO       (-6)
 #endif

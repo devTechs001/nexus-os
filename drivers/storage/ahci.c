@@ -124,6 +124,143 @@ static void ahci_free_contiguous(void *virt, phys_addr_t phys, u32 size)
 }
 
 /*===========================================================================*/
+/*                   COMMAND CONSTRUCTION AND ISSUE                          */
+/*===========================================================================*/
+
+/*
+ * These three helpers were declared at the top of this file and never defined.
+ * In the meantime ahci_read_sector() built a command FIS by hand, left a
+ * comment reading "would submit through hardware", and then memcpy()'d the
+ * caller's buffer out of a freshly allocated DMA buffer the device had never
+ * written to - so every block read returned uninitialised memory. These are
+ * the missing halves.
+ */
+
+/**
+ * ahci_build_command - Fill in the command header/table for a transfer
+ * @port:   AHCI port
+ * @cmd:    ATA command (READ/WRITE DMA EXT)
+ * @lba:    Starting logical block address
+ * @count:  Number of 512-byte sectors
+ * @buffer: Caller buffer (DMA is set up from @phys)
+ * @phys:   Physical address of the DMA buffer
+ */
+static int ahci_build_command(ahci_port_t *port, u8 cmd, u64 lba, u32 count,
+                              void *buffer, phys_addr_t phys)
+{
+    ahci_cmd_header_t *hdr;
+    ahci_cmd_table_t *tbl;
+
+    (void)buffer;
+
+    if (!port || !port->cmd_list || !port->cmd_table || count == 0) {
+        return -EINVAL;
+    }
+
+    hdr = &port->cmd_list[port->port_id];
+    tbl = port->cmd_table;
+
+    memset(hdr, 0, sizeof(*hdr));
+    memset(tbl, 0, sizeof(*tbl) + sizeof(ahci_prdt_entry_t));
+
+    /* CFL = 1 dword; bit 6 marks a device write (memory -> disk). */
+    hdr->flags = (1u << 16) |
+                 ((cmd == ATA_CMD_WRITE_DMA_EXT) ? (1u << 6) : 0u);
+    hdr->prdtl  = 1;
+    hdr->prdbc  = 0;
+    hdr->ctba   = (u32)(port->cmd_table_phys & 0xFFFFFFFFu);
+    hdr->ctbau  = (u32)((port->cmd_table_phys >> 32) & 0xFFFFFFFFu);
+
+    /*
+     * Register H2D FIS. ahci_cmd_fis_t packs the low 28 bits of the LBA into
+     * one u32 and carries the top bits in lba_high; the "C" bit that tells the
+     * device to act on the command sits in the top bit of port_multiplier in
+     * this layout.
+     */
+    tbl->cfis.fis_type       = AHCI_FIS_TYPE_REG_H2D;
+    tbl->cfis.port_multiplier = 0x80;           /* C bit: update command */
+    tbl->cfis.command        = cmd;
+    tbl->cfis.features_low   = 0;
+    tbl->cfis.features_high  = 0;
+    tbl->cfis.lba_low        = (u32)(lba & 0x0FFFFFFFu);
+    tbl->cfis.lba_high       = (u8)((lba >> 24) & 0xFF);
+    tbl->cfis.count          = (u16)count;
+    tbl->cfis.control        = 0;
+
+    /* One PRDT entry covering the whole transfer */
+    tbl->prdt[0].dba = phys;
+    tbl->prdt[0].dbc = (count * 512) - 1;       /* byte count minus one */
+
+    return 0;
+}
+
+/**
+ * ahci_issue_command - Ring the command-issue doorbell for this slot
+ * @port: AHCI port
+ */
+static int ahci_issue_command(ahci_port_t *port)
+{
+    u32 cmd;
+
+    if (!port || !port->ctrl) {
+        return -EINVAL;
+    }
+
+    /* The engine has to be running before a command can be issued. */
+    cmd = ahci_port_read(port->ctrl, port->port_num, AHCI_PX_REG_CMD);
+    if (!(cmd & AHCI_PX_CMD_ST) || !(cmd & AHCI_PX_CMD_FRE)) {
+        return -EIO;
+    }
+
+    ahci_port_write(port->ctrl, port->port_num, AHCI_PX_REG_CI,
+                    (u32)(1u << port->port_id));
+
+    return 0;
+}
+
+/**
+ * ahci_wait_command_complete - Poll until the issued command clears
+ * @port:       AHCI port
+ * @timeout_ms: Give up after this many milliseconds
+ */
+static int ahci_wait_command_complete(ahci_port_t *port, u32 timeout_ms)
+{
+    u32 ci_bit;
+    u64 start;
+
+    if (!port || !port->ctrl) {
+        return -EINVAL;
+    }
+
+    ci_bit = (u32)(1u << port->port_id);
+    start = get_time_ms();
+
+    while (1) {
+        u32 ci = ahci_port_read(port->ctrl, port->port_num, AHCI_PX_REG_CI);
+
+        if (!(ci & ci_bit)) {
+            u32 tfd = ahci_port_read(port->ctrl, port->port_num,
+                                     AHCI_PX_REG_TFD);
+
+            if (tfd & 0x01) {       /* ERR bit */
+                port->has_error = true;
+                port->last_error = tfd;
+                port->error_count++;
+                return -EIO;
+            }
+
+            return 0;
+        }
+
+        if (get_time_ms() - start >= timeout_ms) {
+            port->has_error = true;
+            port->error_count++;
+            return -ETIMEDOUT;
+        }
+    }
+}
+
+/*===========================================================================*/
 /*                         DRIVER INITIALIZATION                             */
 /*===========================================================================*/
 
@@ -800,6 +937,8 @@ int ahci_identify_device(ahci_port_t *port)
  */
 int ahci_read_sector(ahci_port_t *port, u64 lba, u32 count, void *buffer)
 {
+    int ret;
+
     if (!port || !buffer) {
         return -EINVAL;
     }
@@ -814,34 +953,39 @@ int ahci_read_sector(ahci_port_t *port, u64 lba, u32 count, void *buffer)
         return -ENOMEM;
     }
     
-    /* Build command FIS */
-    ahci_cmd_fis_t *cfis = &port->cmd_list[port->port_id].cfis;
-    memset(cfis, 0, sizeof(ahci_cmd_fis_t));
-    cfis->fis_type = AHCI_FIS_TYPE_REG_H2D;
-    cfis->command = ATA_CMD_READ_DMA_EXT;
-    cfis->features_low = 0;
-    cfis->lba_low = (u32)lba;
-    cfis->lba_high = (u8)(lba >> 32);
-    cfis->count = count;
-    
-    /* Set PRDT */
-    port->cmd_list[port->port_id].prdtl = 1;
-    port->cmd_list[port->port_id].ctba = (u32)phys;
-    
-    /* Issue command */
-    /* In real implementation, would submit through hardware */
-    
-    memcpy(buffer, dma_buffer, count * 512);
-    
-    /* Update statistics */
-    port->host_reads++;
-    port->read_bytes += count * 512;
-    
+    /*
+     * Build, issue and wait for a real READ DMA EXT.
+     *
+     * This used to build the FIS, skip the submission with a comment, and then
+     * copy the caller's buffer straight out of dma_buffer - which the device had
+     * never written to. Every read returned uninitialised heap.
+     */
+    ret = ahci_build_command(port, ATA_CMD_READ_DMA_EXT, lba, count,
+                             buffer, phys);
+    if (ret != 0) {
+        ahci_free_contiguous(dma_buffer, phys, count * 512);
+        spin_unlock(&port->lock);
+        return ret;
+    }
+
+    ret = ahci_issue_command(port);
+    if (ret == 0) {
+        ret = ahci_wait_command_complete(port, AHCI_CMD_TIMEOUT_MS);
+    }
+
+    if (ret == 0) {
+        memcpy(buffer, dma_buffer, count * 512);
+
+        /* Update statistics */
+        port->host_reads++;
+        port->read_bytes += count * 512;
+    }
+
     ahci_free_contiguous(dma_buffer, phys, count * 512);
-    
+
     spin_unlock(&port->lock);
-    
-    return 0;
+
+    return ret;
 }
 
 /**
@@ -849,6 +993,8 @@ int ahci_read_sector(ahci_port_t *port, u64 lba, u32 count, void *buffer)
  */
 int ahci_write_sector(ahci_port_t *port, u64 lba, u32 count, const void *buffer)
 {
+    int ret;
+
     if (!port || !buffer) {
         return -EINVAL;
     }
@@ -865,32 +1011,31 @@ int ahci_write_sector(ahci_port_t *port, u64 lba, u32 count, const void *buffer)
     
     memcpy(dma_buffer, buffer, count * 512);
     
-    /* Build command FIS */
-    ahci_cmd_fis_t *cfis = &port->cmd_list[port->port_id].cfis;
-    memset(cfis, 0, sizeof(ahci_cmd_fis_t));
-    cfis->fis_type = AHCI_FIS_TYPE_REG_H2D;
-    cfis->command = ATA_CMD_WRITE_DMA_EXT;
-    cfis->features_low = 0;
-    cfis->lba_low = (u32)lba;
-    cfis->lba_high = (u8)(lba >> 32);
-    cfis->count = count;
-    
-    /* Set PRDT */
-    port->cmd_list[port->port_id].prdtl = 1;
-    port->cmd_list[port->port_id].ctba = (u32)phys;
-    
-    /* Issue command */
-    /* In real implementation, would submit through hardware */
-    
-    /* Update statistics */
-    port->host_writes++;
-    port->write_bytes += count * 512;
-    
+    /* Build, issue and wait for a real WRITE DMA EXT. */
+    ret = ahci_build_command(port, ATA_CMD_WRITE_DMA_EXT, lba, count,
+                             (void *)buffer, phys);
+    if (ret != 0) {
+        ahci_free_contiguous(dma_buffer, phys, count * 512);
+        spin_unlock(&port->lock);
+        return ret;
+    }
+
+    ret = ahci_issue_command(port);
+    if (ret == 0) {
+        ret = ahci_wait_command_complete(port, AHCI_CMD_TIMEOUT_MS);
+    }
+
+    if (ret == 0) {
+        /* Update statistics */
+        port->host_writes++;
+        port->write_bytes += count * 512;
+    }
+
     ahci_free_contiguous(dma_buffer, phys, count * 512);
-    
+
     spin_unlock(&port->lock);
-    
-    return 0;
+
+    return ret;
 }
 
 /**
@@ -1107,4 +1252,76 @@ void ahci_print_controller_info(ahci_controller_t *ctrl)
 ahci_driver_t *ahci_get_driver(void)
 {
     return &g_ahci_driver;
+}
+
+/*===========================================================================*/
+/*                 REGISTRATION WITH THE GENERIC BLOCK LAYER                 */
+/*===========================================================================*/
+/*
+ * AHCI only exposed ahci_block_read(controller, port, ...). Nothing above the
+ * driver could address a disk without knowing its controller and port, which
+ * is why NexFS carried a "void *bdev" it never dereferenced.
+ *
+ * The adapter below flattens (controller, port) into a single handle so the
+ * generic layer can treat an AHCI disk like any other.
+ */
+
+extern int storage_block_register(const char *name, u32 handle, u32 sub, u64 size,
+                                  u32 blk_size,
+                                  int (*read)(u32, u32, u64, u32, void *),
+                                  int (*write)(u32, u32, u64, u32, const void *));
+
+static int ahci_adapter_read(u32 handle, u32 sub, u64 lba, u32 count, void *buf)
+{
+    return ahci_block_read(handle, sub, lba, count, buf);
+}
+
+static int ahci_adapter_write(u32 handle, u32 sub, u64 lba, u32 count, const void *buf)
+{
+    return ahci_block_write(handle, sub, lba, count, buf);
+}
+
+/**
+ * ahci_register_block_devices - Publish every attached AHCI disk
+ *
+ * Called once after the controllers are up. Returns the number registered.
+ */
+int ahci_register_block_devices(void)
+{
+    u32 registered = 0;
+
+    for (u32 c = 0; c + 1 <= g_ahci_driver.controller_count; c++) {
+        ahci_controller_t *ctrl = ahci_get_controller(c);
+        if (!ctrl || !ctrl->ports) {
+            continue;
+        }
+
+        for (u32 p = 0; p < ctrl->active_ports; p++) {
+            ahci_port_t *port = &ctrl->ports[p];
+            char name[32];
+
+            if (port->size == 0) {
+                continue;             /* No disk behind this port. */
+            }
+
+            /* sda, sdb, ... per registered device. */
+            u32 n = 0;
+            name[n++] = 's';
+            name[n++] = 'd';
+            name[n++] = (char)('a' + registered);
+            name[n] = '\0';
+
+            if (storage_block_register(name, c, p, port->size,
+                                       port->block_size ? port->block_size : 512,
+                                       ahci_adapter_read, ahci_adapter_write) >= 0) {
+                registered++;
+            }
+        }
+    }
+
+    if (registered) {
+        pr_info("[AHCI] Registered %u block device(s)\n", registered);
+    }
+
+    return (int)registered;
 }

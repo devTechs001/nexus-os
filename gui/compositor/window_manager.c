@@ -120,7 +120,7 @@ int window_manager_init(void)
     strncpy(desktop_props.title, "Desktop", sizeof(desktop_props.title) - 1);
     desktop_props.type = WINDOW_TYPE_SYSTEM;
     desktop_props.flags = WINDOW_FLAG_VISIBLE;
-    desktop_props.background = (color_t){0, 100, 200, 255};  /* Blue desktop */
+    desktop_props.background = (color_t){{{0, 100, 200, 255}}};  /* Blue desktop */
     
     g_window_manager.desktop_window = window_manager_create_internal(&desktop_props);
 

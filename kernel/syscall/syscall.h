@@ -420,10 +420,13 @@ struct stat {
 /**
  * iovec - I/O vector
  */
+#ifndef _NEXUS_IOVEC_DEFINED
+#define _NEXUS_IOVEC_DEFINED
 struct iovec {
     void *iov_base;       /* Starting address */
     size_t iov_len;       /* Number of bytes */
 };
+#endif
 
 /**
  * pollfd - Poll file descriptor

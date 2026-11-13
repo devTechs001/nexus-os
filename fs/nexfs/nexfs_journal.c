@@ -155,6 +155,7 @@ static struct nexfs_transaction *nexfs_transaction_alloc(struct nexfs_journal *j
     INIT_LIST_HEAD(&trans->t_list);
 
     spin_lock_init(&trans->t_lock);
+    atomic_set(&trans->t_refcount, 0);
 
     return trans;
 }
@@ -194,9 +195,8 @@ static s32 nexfs_journal_read_superblock(struct nexfs_journal *journal)
 
     jsb = &journal->j_superblock;
 
-    /* TODO: Read journal superblock from disk */
-    /* ret = nexfs_read_block(journal->j_inode, 0, jsb, NEXFS_BLOCK_SIZE); */
-    ret = VFS_OK;
+    /* Read the journal superblock from disk. */
+    ret = nexfs_read_block(journal->j_inode, 0, jsb, NEXFS_BLOCK_SIZE);
 
     if (ret != VFS_OK) {
         return ret;
@@ -251,10 +251,79 @@ static s32 nexfs_journal_write_superblock(struct nexfs_journal *journal)
     jsb->s_start = journal->j_head;
 
     /* TODO: Write journal superblock to disk */
-    /* ret = nexfs_write_block(journal->j_inode, 0, jsb, NEXFS_BLOCK_SIZE); */
-    ret = VFS_OK;
+    ret = nexfs_write_block(journal->j_inode, 0, jsb, NEXFS_BLOCK_SIZE);
 
     return ret;
+}
+
+
+/*===========================================================================*/
+/*                            BLOCK I/O                                      */
+/*===========================================================================*/
+/*
+ * The journal was written against nexfs_read_block()/nexfs_write_block(), but
+ * neither existed - every call site was commented out and replaced with
+ * "ret = VFS_OK". Consequently the journal superblock was never read (so it
+ * was validated as a zeroed struct and rejected), and journal_scan walked
+ * uninitialised stack memory as if it were block headers.
+ *
+ * These go through the inode's file operations, which is the block layer the
+ * VFS actually provides.
+ */
+
+/**
+ * nexfs_read_block - Read one block of an inode into a buffer
+ *
+ * Returns VFS_OK, or a negative error code.
+ */
+s32 nexfs_read_block(struct nexfs_inode *inode, u64 block, void *buf, u32 size)
+{
+    struct vfs_file file;
+    s64 n;
+
+    if (!inode || !buf || size == 0) {
+        return VFS_EINVAL;
+    }
+
+    if (!inode->vfs_inode.i_fop || !inode->vfs_inode.i_fop->read) {
+        return VFS_EINVAL;
+    }
+
+    /* A stack-local file lets us reuse the inode's read op without allocating. */
+    memset(&file, 0, sizeof(file));
+    file.f_inode = &inode->vfs_inode;
+
+    u64 pos = block * NEXFS_BLOCK_SIZE;
+
+    n = inode->vfs_inode.i_fop->read(&file, (char *)buf, size, &pos);
+
+    return (n < 0) ? (s32)n : VFS_OK;
+}
+
+/**
+ * nexfs_write_block - Write one block of an inode from a buffer
+ */
+s32 nexfs_write_block(struct nexfs_inode *inode, u64 block, const void *buf, u32 size)
+{
+    struct vfs_file file;
+    s64 n;
+
+    if (!inode || !buf || size == 0) {
+        return VFS_EINVAL;
+    }
+
+    if (!inode->vfs_inode.i_fop || !inode->vfs_inode.i_fop->write) {
+        return VFS_EINVAL;
+    }
+
+    memset(&file, 0, sizeof(file));
+    file.f_inode = &inode->vfs_inode;
+
+    u64 pos = block * NEXFS_BLOCK_SIZE;
+
+    n = inode->vfs_inode.i_fop->write(&file, (const char *)buf, size, &pos);
+
+    return (n < 0) ? (s32)n : VFS_OK;
 }
 
 /**
@@ -441,7 +510,7 @@ s32 nexfs_journal_start(struct nexfs_superblock *sb, u32 blocks)
         journal->j_current_transaction = trans;
     }
 
-    atomic_inc(&trans->t_lock.counter);  /* Use as refcount */
+    atomic_inc(&trans->t_refcount);
 
     spin_unlock(&journal->j_lock);
 
@@ -474,9 +543,9 @@ s32 nexfs_journal_stop(struct nexfs_superblock *sb)
     trans = journal->j_current_transaction;
 
     if (trans) {
-        atomic_dec(&trans->t_lock.counter);
+        atomic_dec(&trans->t_refcount);
 
-        if (atomic_read(&trans->t_lock.counter) <= 0) {
+        if (atomic_read(&trans->t_refcount) <= 0) {
             /* Transaction complete */
             trans->t_state = NEXUS_TRANS_LOCKED;
         }
@@ -725,9 +794,8 @@ static s32 nexfs_journal_scan(struct nexfs_journal *journal)
 
     /* Scan journal blocks */
     while (block < journal->j_total_blocks) {
-        /* TODO: Read block header */
-        /* ret = nexfs_read_block(journal->j_inode, block, &header, sizeof(header)); */
-        ret = VFS_OK;
+        /* Read this block's header. */
+        ret = nexfs_read_block(journal->j_inode, block, &header, sizeof(header));
 
         if (ret != VFS_OK) {
             break;

@@ -78,6 +78,12 @@
 /**
  * Color Stop (for gradients)
  */
+/* Forward declarations for types owned by other GUI subsystems.
+ * desktop-env.h referenced compositor_t without declaring it, so the whole
+ * file failed to compile with "unknown type name". */
+struct compositor;
+typedef struct compositor compositor_t;
+
 typedef struct {
     float position;                 /* Position (0.0-1.0) */
     color_t color;                  /* Color */
@@ -543,3 +549,36 @@ color_t gradient_sample(gradient_t *gradient, float position);
 desktop_environment_t *desktop_env_get_instance(void);
 
 #endif /* _DESKTOP_ENV_H */
+
+/*===========================================================================*/
+/*                       KNOWN CONFLICT WITH desktop.h                        */
+/*===========================================================================*/
+/*
+ * WARNING - do not add desktop-env.c to the build alongside desktop.c.
+ *
+ * Two desktop implementations exist and neither is called by anything:
+ *
+ *   gui/desktop/desktop.{h,c}              desktop_t            (44 functions)
+ *   gui/desktop-environment/desktop-env.{h,c}  desktop_environment_t (75)
+ *
+ * Four symbols are defined by both, with incompatible signatures:
+ *
+ *   desktop_render             void (desktop_t *)
+ *                              int  (desktop_environment_t *)
+ *   desktop_show_context_menu  int  (desktop_t *, int, int)
+ *                              int  (desktop_environment_t *, s32, s32)
+ *   desktop_hide_context_menu  int  (desktop_t *)
+ *                              int  (desktop_environment_t *)
+ *   desktop_show_notification  defined in both
+ *
+ * Linking both fails with "multiple definition of desktop_render". desktop.c
+ * is the one in the build; this file is not. Resolving it needs a decision on
+ * which desktop is authoritative, because their state models differ
+ * (desktop_t keeps panels as a flat array; desktop_environment_t keeps a
+ * context_menu struct plus active_menu pointers). Do not paper over it by
+ * renaming one set - the two headers would still disagree.
+ *
+ * This file has been made to compile (compositor_t forward declaration,
+ * gradient_sample linkage, icon visibility field) so the work is not lost, and
+ * so whoever settles the question starts from a clean baseline.
+ */

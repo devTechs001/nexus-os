@@ -1246,3 +1246,417 @@ void vfs_drop_caches(void)
 
     pr_info("VFS: Cache drop complete.\n");
 }
+
+/*===========================================================================*/
+/*              PATH RESOLUTION FOR USERS OF THE SHELL                       */
+/*===========================================================================*/
+/*
+ * The following five entry points were declared in vfs.h and documented as
+ * part of the VFS API, but had no implementation anywhere in the tree. That
+ * left the filesystem unusable from user space: no way to change directory,
+ * read one, list a directory, create one, remove a file, or stat a path -
+ * i.e. exactly the operations a shell is built from.
+ */
+
+/**
+ * vfs_chdir - Change the working directory
+ * @pathname: Target directory (absolute, or relative to the current one)
+ *
+ * Returns: VFS_OK on success, negative error code on failure
+ */
+s32 vfs_chdir(const char *pathname)
+{
+    struct vfs_dentry *dentry;
+    struct vfs_inode *inode;
+    s32 ret;
+
+    if (!pathname || !*pathname) {
+        return VFS_EINVAL;
+    }
+
+    ret = vfs_path_lookup(pathname, 0, &dentry);
+    if (ret != VFS_OK) {
+        return ret;
+    }
+
+    if (!dentry->d_inode) {
+        vfs_d_put(dentry);
+        return VFS_ENOENT;
+    }
+
+    inode = dentry->d_inode;
+
+    /* Only directories can be entered. */
+    if (!(inode->mode & VFS_MODE_IFDIR)) {
+        vfs_d_put(dentry);
+        return VFS_ENOTDIR;
+    }
+
+    /* Drop the old pwd reference and take one on the new directory. */
+    if (vfs_global.pwd && vfs_global.pwd != dentry) {
+        vfs_d_put(vfs_global.pwd);
+    }
+
+    vfs_d_get(dentry);
+    vfs_global.pwd = dentry;
+
+    vfs_d_put(dentry);
+
+    return VFS_OK;
+}
+
+/**
+ * vfs_getcwd - Read the current working directory
+ * @buf: Destination buffer
+ * @size: Size of @buf
+ *
+ * Reconstructs the absolute path by walking up the dentry chain to the
+ * global root, then reversing the components.
+ *
+ * Returns: VFS_OK on success, negative error code on failure
+ */
+s32 vfs_getcwd(char *buf, u64 size)
+{
+    struct vfs_dentry *d;
+    const char *names[VFS_MAX_PATH_DEPTH];
+    u32 depth = 0;
+    u64 needed = 1;
+    u64 pos;
+    u32 i;
+
+    if (!buf || size == 0) {
+        return VFS_EINVAL;
+    }
+
+    d = vfs_global.pwd;
+    if (!d) {
+        d = vfs_global.root_dentry;
+    }
+
+    if (!d) {
+        /* Nothing mounted yet: still answer honestly. */
+        if (size < 2) {
+            return VFS_ERANGE;
+        }
+        buf[0] = '/';
+        buf[1] = '\0';
+        return VFS_OK;
+    }
+
+    /* Collect component names from the leaves up. */
+    while (d && d->d_parent && d->d_parent != d && depth < VFS_MAX_PATH_DEPTH) {
+        names[depth++] = d->d_name ? d->d_name : "";
+        needed += (u64)(d->d_name ? d->d_name_len : 0) + 1;
+        d = d->d_parent;
+    }
+
+    if (depth == 0) {
+        if (size < 2) {
+            return VFS_ERANGE;
+        }
+        buf[0] = '/';
+        buf[1] = '\0';
+        return VFS_OK;
+    }
+
+    if (needed + 1 > size) {
+        return VFS_ERANGE;
+    }
+
+    /* Emit root-to-leaf order. */
+    pos = 0;
+    for (i = depth; i > 0; i--) {
+        const char *n = names[i - 1];
+        if (!n || !*n) {
+            continue;
+        }
+        buf[pos++] = '/';
+        while (*n && pos + 1 < size) {
+            buf[pos++] = *n++;
+        }
+    }
+
+    if (pos == 0) {
+        buf[pos++] = '/';
+    }
+    buf[pos] = '\0';
+
+    return VFS_OK;
+}
+
+/**
+ * vfs_readdir - List the entries of a directory
+ * @pathname: Directory path
+ * @dirent: Opaque pointer passed through to @filldir
+ * @filldir: Callback invoked once per entry
+ *
+ * Returns: VFS_OK on success, negative error code on failure
+ */
+s32 vfs_readdir(const char *pathname, void *dirent, filldir_t filldir)
+{
+    struct vfs_dentry *dentry;
+    struct vfs_inode *inode;
+    struct vfs_dentry *child;
+    u64 offset = 0;
+    s32 ret;
+
+    if (!pathname || !filldir) {
+        return VFS_EINVAL;
+    }
+
+    ret = vfs_path_lookup(pathname, 0, &dentry);
+    if (ret != VFS_OK) {
+        return ret;
+    }
+
+    if (!dentry->d_inode) {
+        vfs_d_put(dentry);
+        return VFS_ENOENT;
+    }
+
+    inode = dentry->d_inode;
+
+    if (!(inode->mode & VFS_MODE_IFDIR)) {
+        vfs_d_put(dentry);
+        return VFS_ENOTDIR;
+    }
+
+    /*
+     * If the filesystem supplies its own readdir on the file operations,
+     * let it answer: it knows its on-disk layout better than the VFS does.
+     */
+    if (inode->i_fop && inode->i_fop->readdir) {
+        struct vfs_file file;
+
+        memset(&file, 0, sizeof(file));
+        file.f_inode = inode;
+        file.f_dentry = dentry;
+        file.f_flags = VFS_FO_READ;
+
+        ret = inode->i_fop->readdir(&file, dirent, filldir);
+        vfs_d_put(dentry);
+        return ret;
+    }
+
+    /* Fall back to the cached dentry children, if the FS populated them. */
+    list_for_each_entry(child, &dentry->d_children, d_child) {
+        const char *name = child->d_name ? child->d_name : "";
+        int len = (int)(child->d_name ? child->d_name_len : 0);
+        u32 dtype = (child->d_inode && (child->d_inode->mode & VFS_MODE_IFDIR))
+                        ? VFS_DT_DIR : VFS_DT_REG;
+
+        if (name[0] == '\0') {
+            continue;
+        }
+
+        ret = filldir(dirent, name, len, offset++, child->d_inode ? child->d_inode->ino : 0,
+                      dtype);
+        if (ret < 0) {
+            break;      /* Caller's buffer is full. */
+        }
+    }
+
+    vfs_d_put(dentry);
+
+    return VFS_OK;
+}
+
+/**
+ * vfs_stat - Retrieve inode attributes for a path
+ * @pathname: Path to inspect
+ * @stat: Output structure
+ *
+ * Returns: VFS_OK on success, negative error code on failure
+ */
+s32 vfs_stat(const char *pathname, struct vfs_stat *stat)
+{
+    struct vfs_dentry *dentry;
+    struct vfs_inode *inode;
+    s32 ret;
+
+    if (!pathname || !stat) {
+        return VFS_EINVAL;
+    }
+
+    ret = vfs_path_lookup(pathname, 0, &dentry);
+    if (ret != VFS_OK) {
+        return ret;
+    }
+
+    inode = dentry->d_inode;
+    if (!inode) {
+        vfs_d_put(dentry);
+        return VFS_ENOENT;
+    }
+
+    memset(stat, 0, sizeof(*stat));
+
+    stat->st_dev     = inode->dev;
+    stat->st_ino     = inode->ino;
+    stat->st_mode    = inode->mode;
+    stat->st_nlink   = inode->nlink;
+    stat->st_uid     = inode->uid;
+    stat->st_gid     = inode->gid;
+    stat->st_rdev    = inode->rdev;
+    stat->st_size    = (s64)inode->size;
+    stat->st_blksize = VFS_BLOCK_SIZE;
+    stat->st_blocks  = (s64)inode->blocks;
+    stat->st_atime   = inode->atime;
+    stat->st_mtime   = inode->mtime;
+    stat->st_ctime   = inode->ctime;
+
+    vfs_d_put(dentry);
+
+    return VFS_OK;
+}
+
+/**
+ * vfs_mkdir - Create a directory
+ * @pathname: Path of the directory to create
+ * @mode: Permission bits
+ *
+ * Returns: VFS_OK on success, negative error code on failure
+ */
+s32 vfs_mkdir(const char *pathname, mode_t mode)
+{
+    struct vfs_dentry *parent;
+    struct vfs_dentry *dentry = NULL;
+    char *copy;
+    char *slash;
+    const char *base;
+    s32 ret;
+
+    if (!pathname || !*pathname) {
+        return VFS_EINVAL;
+    }
+
+    copy = kstrdup(pathname);
+    if (!copy) {
+        return VFS_ENOMEM;
+    }
+
+    /* Split into parent directory and the new leaf name. */
+    slash = strrchr(copy, '/');
+    if (!slash || slash == copy) {
+        if (slash) {
+            base = slash + 1;
+            if (!*base) {
+                kfree(copy);
+                return VFS_EINVAL;
+            }
+            ret = vfs_path_lookup("/", 0, &parent);
+        } else {
+            base = copy;
+            if (!vfs_global.pwd) {
+                kfree(copy);
+                return VFS_ENOENT;
+            }
+            vfs_d_get(vfs_global.pwd);
+            parent = vfs_global.pwd;
+            ret = VFS_OK;
+        }
+    } else {
+        *slash = '\0';
+        base = slash + 1;
+        if (!*base) {
+            kfree(copy);
+            return VFS_EINVAL;
+        }
+        ret = vfs_path_lookup(copy, 0, &parent);
+    }
+
+    if (ret != VFS_OK) {
+        kfree(copy);
+        return ret;
+    }
+
+    if (!parent->d_inode) {
+        vfs_d_put(parent);
+        kfree(copy);
+        return VFS_ENOENT;
+    }
+
+    if (!parent->d_inode->i_op || !parent->d_inode->i_op->mkdir) {
+        vfs_d_put(parent);
+        kfree(copy);
+        return VFS_EROFS;
+    }
+
+    /* Refuse to shadow an existing entry. */
+    if (vfs_d_lookup(base, parent)) {
+        vfs_d_put(parent);
+        kfree(copy);
+        return VFS_EEXIST;
+    }
+
+    dentry = vfs_d_alloc(parent, base);
+    if (!dentry) {
+        vfs_d_put(parent);
+        kfree(copy);
+        return VFS_ENOMEM;
+    }
+
+    ret = parent->d_inode->i_op->mkdir(parent->d_inode, dentry, mode);
+    if (ret == VFS_OK) {
+        vfs_d_instantiate(dentry, NULL);
+    }
+
+    vfs_d_put(dentry);
+    vfs_d_put(parent);
+    kfree(copy);
+
+    return ret;
+}
+
+/**
+ * vfs_unlink - Remove a file
+ * @pathname: Path of the file to remove
+ *
+ * Returns: VFS_OK on success, negative error code on failure
+ */
+s32 vfs_unlink(const char *pathname)
+{
+    struct vfs_dentry *dentry;
+    struct vfs_inode *dir;
+    s32 ret;
+
+    if (!pathname || !*pathname) {
+        return VFS_EINVAL;
+    }
+
+    ret = vfs_path_lookup(pathname, 0, &dentry);
+    if (ret != VFS_OK) {
+        return ret;
+    }
+
+    if (!dentry->d_inode) {
+        vfs_d_put(dentry);
+        return VFS_ENOENT;
+    }
+
+    /* unlink() on a directory is an error; use rmdir semantics instead. */
+    if (dentry->d_inode->mode & VFS_MODE_IFDIR) {
+        vfs_d_put(dentry);
+        return VFS_EISDIR;
+    }
+
+    dir = dentry->d_parent ? dentry->d_parent->d_inode : NULL;
+    if (!dir || !dir->i_op || !dir->i_op->unlink) {
+        vfs_d_put(dentry);
+        return VFS_EROFS;
+    }
+
+    if (dir->i_op->unlink) {
+        ret = dir->i_op->unlink(dir, dentry);
+        if (ret != VFS_OK) {
+            vfs_d_put(dentry);
+            return ret;
+        }
+    }
+
+    /* Drop the cached dentry so the name is free for reuse. */
+    vfs_d_delete(dentry);
+    vfs_d_put(dentry);
+
+    return VFS_OK;
+}

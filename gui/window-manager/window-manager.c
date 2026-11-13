@@ -339,23 +339,28 @@ int wm_destroy_window(window_manager_t *wm, wm_window_t *win)
         wm->focused_window = NULL;
         wm->active_window = NULL;
     }
-    
-    /* Free window resources */
+
+    /* Free the window's own buffers before the structure goes away. */
     if (win->surface) {
         kfree(win->surface);
+        win->surface = NULL;
     }
     if (win->back_buffer) {
         kfree(win->back_buffer);
+        win->back_buffer = NULL;
     }
-    
-    /* Free window structure */
-    kfree(win);
-    
+
+    /*
+     * The manager-level notification must run before the window is freed: it
+     * used to be called after kfree(win), handing the handler a dangling
+     * pointer. destroy_window_internal() fires the per-window callback and
+     * does the free, so the ordering is now explicit.
+     */
     if (wm->on_window_destroyed) {
         wm->on_window_destroyed(win);
     }
-    
-    return 0;
+
+    return destroy_window_internal(wm, win);
 }
 
 /**
@@ -1103,7 +1108,30 @@ static int apply_snap_geometry(window_manager_t *wm, wm_window_t *win)
         return -EINVAL;
     }
     
-    win->geometry = win->snap_rect;
+    /*
+     * window_geometry_t carries min/max constraints that rect_t does not, so
+     * this is a field-wise copy rather than a struct assignment. Clamp the
+     * snapped rectangle to the window's own limits while we are here, so a
+     * snap can never produce an unusable geometry.
+     */
+    win->geometry.x      = win->snap_rect.x;
+    win->geometry.y      = win->snap_rect.y;
+    win->geometry.width  = win->snap_rect.width;
+    win->geometry.height = win->snap_rect.height;
+
+    if (win->geometry.min_width && win->geometry.width < win->geometry.min_width) {
+        win->geometry.width = win->geometry.min_width;
+    }
+    if (win->geometry.min_height && win->geometry.height < win->geometry.min_height) {
+        win->geometry.height = win->geometry.min_height;
+    }
+    if (win->geometry.max_width && win->geometry.width > win->geometry.max_width) {
+        win->geometry.width = win->geometry.max_width;
+    }
+    if (win->geometry.max_height && win->geometry.height > win->geometry.max_height) {
+        win->geometry.height = win->geometry.max_height;
+    }
+
     update_window_geometry(wm, win);
     
     return 0;
@@ -1704,4 +1732,611 @@ rect_t wm_get_snap_rect(window_manager_t *wm, u32 snap_state, wm_monitor_t *mon)
 window_manager_t *wm_get_instance(void)
 {
     return &g_window_manager;
+}
+
+/*===========================================================================*/
+/*        DECORATIONS, ANIMATION AND DRAGGING (PROTOTYPED, NEVER DEFINED)    */
+/*===========================================================================*/
+/*
+ * Eleven functions were declared at the top of this file and never written:
+ * no window could draw a title bar, border or shadow, none could animate, and
+ * neither dragging nor resizing worked. The prototypes made them look
+ * implemented; nothing referenced them, so the compiler's only complaint was
+ * "defined but not used" - which was exactly backwards.
+ */
+
+/*===========================================================================*/
+/*                              EASING                                       */
+/*===========================================================================*/
+
+/**
+ * ease_out_cubic - Decelerating curve, 0..1 in, 0..1 out
+ */
+static float ease_out_cubic(float t)
+{
+    if (t <= 0.0f) {
+        return 0.0f;
+    }
+    if (t >= 1.0f) {
+        return 1.0f;
+    }
+
+    float inv = 1.0f - t;
+    return 1.0f - (inv * inv * inv);
+}
+
+/**
+ * ease_in_out_quad - Symmetric acceleration then deceleration
+ */
+static float ease_in_out_quad(float t)
+{
+    if (t <= 0.0f) {
+        return 0.0f;
+    }
+    if (t >= 1.0f) {
+        return 1.0f;
+    }
+
+    if (t < 0.5f) {
+        return 2.0f * t * t;
+    }
+
+    float f = -2.0f * t + 2.0f;
+    return 1.0f - (f * f) / 2.0f;
+}
+
+/*===========================================================================*/
+/*                             ANIMATION                                     */
+/*===========================================================================*/
+
+/**
+ * start_animation - Begin a geometry transition on a window
+ *
+ * @type: Window animation type (see WINDOW_ANIM_*)
+ * @to:   Target geometry
+ *
+ * Returns 0 on success, -EINVAL if the arguments are unusable.
+ */
+static int start_animation(window_manager_t *wm, wm_window_t *win, u32 type,
+                           window_geometry_t *to)
+{
+    window_animation_t *a;
+
+    (void)wm;
+
+    if (!win || !to) {
+        return -EINVAL;
+    }
+
+    a = &win->animation;
+
+    a->type = type;
+    a->from = win->geometry;
+    a->to = *to;
+    a->duration = (a->duration > 0) ? a->duration : 180;   /* ms */
+    a->start_time = get_time_ms();
+    a->elapsed = 0;
+    a->progress = 0.0f;
+    a->running = true;
+
+    /* Open/close use different curves from a move or resize. */
+    switch (type) {
+        case 1:      /* WINDOW_ANIM_OPEN */
+        case 2:      /* WINDOW_ANIM_CLOSE */
+            a->easing = ease_out_cubic;
+            break;
+        default:
+            a->easing = ease_in_out_quad;
+            break;
+    }
+
+    return 0;
+}
+
+/**
+ * update_animation - Advance a running animation
+ *
+ * Interpolates the window's geometry between the animation's from/to rects.
+ * Returns 1 while the animation is still running, 0 when it has finished,
+ * and a negative error code on bad input.
+ */
+static int update_animation(window_manager_t *wm, wm_window_t *win)
+{
+    window_animation_t *a;
+    u64 now;
+    float t;
+    float e;
+
+    (void)wm;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    a = &win->animation;
+
+    if (!a->running) {
+        return 0;
+    }
+
+    now = get_time_ms();
+    a->elapsed = (now > a->start_time) ? (now - a->start_time) : 0;
+
+    if (a->duration == 0) {
+        t = 1.0f;
+    } else if (a->elapsed >= a->duration) {
+        t = 1.0f;
+    } else {
+        t = (float)a->elapsed / (float)a->duration;
+    }
+
+    a->progress = t;
+    e = a->easing ? a->easing(t) : t;
+
+    /* Interpolate each geometry field independently. */
+    s32 dx = a->to.x - a->from.x;
+    s32 dy = a->to.y - a->from.y;
+    s32 dw = (s32)a->to.width - (s32)a->from.width;
+    s32 dh = (s32)a->to.height - (s32)a->from.height;
+
+    win->geometry.x = a->from.x + (s32)((float)dx * e);
+    win->geometry.y = a->from.y + (s32)((float)dy * e);
+    win->geometry.width = (u32)((s32)a->from.width + (s32)((float)dw * e));
+    win->geometry.height = (u32)((s32)a->from.height + (s32)((float)dh * e));
+
+    if (t >= 1.0f) {
+        win->geometry = a->to;
+        a->running = false;
+        return 0;
+    }
+
+    return 1;
+}
+
+/*===========================================================================*/
+/*                            DECORATIONS                                     */
+/*===========================================================================*/
+
+/** decoration_draw_rect - Fill a rectangle through the renderer */
+static void decoration_draw_rect(s32 x, s32 y, s32 w, s32 h, color_t color)
+{
+    graphics_context_t *ctx = graphics_create_context(NULL);
+
+    if (!ctx || w <= 0 || h <= 0) {
+        if (ctx) {
+            graphics_destroy_context(ctx);
+        }
+        return;
+    }
+
+    rect_t r;
+    r.x = x;
+    r.y = y;
+    r.width = w;
+    r.height = h;
+
+    graphics_fill_rect(ctx, &r, color);
+    graphics_destroy_context(ctx);
+}
+
+/**
+ * render_title_bar - Draw a window's title bar and caption
+ *
+ * Uses the focused state to pick the active or inactive colour, so the focused
+ * window is visually distinct.
+ */
+static int render_title_bar(window_manager_t *wm, wm_window_t *win)
+{
+    window_decor_colors_t *c;
+    color_t bg;
+    s32 x, y, w, h;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    c = &win->decor_colors;
+    bg = win->focused ? c->title_bg : c->inactive;
+
+    x = win->geometry.x;
+    y = win->geometry.y;
+    w = (s32)win->geometry.width;
+    /* The manager carries the configured height; 32 is its documented default. */
+    h = (wm && wm->title_height) ? (s32)wm->title_height : 32;
+
+    if (w <= 0) {
+        return -EINVAL;
+    }
+
+    decoration_draw_rect(x, y, w, h, bg);
+
+    /* Accent stripe on the focused window. */
+    if (win->focused) {
+        decoration_draw_rect(x, y, w, 2, c->active);
+    }
+
+    (void)wm;
+
+    /* Title text, clipped to the bar width. */
+    if (win->title[0]) {
+        graphics_context_t *ctx = graphics_create_context(NULL);
+        if (ctx) {
+            graphics_draw_text(ctx, x + 8, y + (h - 8) / 2, win->title);
+            graphics_destroy_context(ctx);
+        }
+    }
+
+    (void)wm;
+    return 0;
+}
+
+/**
+ * render_border - Draw a one-pixel frame around a window
+ */
+static int render_border(window_manager_t *wm, wm_window_t *win)
+{
+    color_t col;
+    s32 x, y;
+    s32 w, h;
+
+    (void)wm;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    col = win->focused ? win->decor_colors.active : win->decor_colors.border;
+
+    x = win->geometry.x;
+    y = win->geometry.y;
+    w = (s32)win->geometry.width;
+    h = (s32)win->geometry.height;
+
+    if (w <= 0 || h <= 0) {
+        return -EINVAL;
+    }
+
+    decoration_draw_rect(x, y, w, 1, col);              /* top */
+    decoration_draw_rect(x, y + h - 1, w, 1, col);      /* bottom */
+    decoration_draw_rect(x, y, 1, h, col);              /* left */
+    decoration_draw_rect(x + w - 1, y, 1, h, col);      /* right */
+
+    return 0;
+}
+
+/**
+ * render_shadow - Draw the drop shadow behind a window
+ *
+ * Layered bands approximate a soft falloff without an alpha-blended surface.
+ */
+static int render_shadow(window_manager_t *wm, wm_window_t *win)
+{
+    window_shadow_t *s;
+    u32 bands;
+
+    (void)wm;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    s = &win->shadow;
+
+    if (!s->enabled || s->size == 0) {
+        return 0;
+    }
+
+    bands = (s->size > 8) ? 8 : s->size;
+
+    for (u32 i = 0; i < bands; i++) {
+        /* Outer bands are fainter: scale toward transparent. */
+        color_t c = s->color;
+        u32 step = 255 / (bands + 1);
+        u32 alpha = s->opacity * (bands - i) / (bands + 1);
+
+        c.a = (u8)((alpha * step) / 255 > 255 ? 255 : (alpha * step) / 255);
+
+        s32 grow = (s32)(i + 1);
+        decoration_draw_rect(win->geometry.x - grow + s->offset_x,
+                             win->geometry.y - grow + s->offset_y,
+                             (s32)win->geometry.width + grow * 2,
+                             (s32)win->geometry.height + grow * 2,
+                             c);
+    }
+
+    return 0;
+}
+
+/**
+ * render_window_decorations - Draw everything around a window's content
+ *
+ * Order matters: shadow, then the frame, then the title bar on top.
+ */
+static int render_window_decorations(window_manager_t *wm, wm_window_t *win)
+{
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (!win->visible) {
+        return 0;
+    }
+
+    /* Without a decoration flag, nothing is drawn - that is intentional. */
+    if (win->decorations == 0) {
+        return 0;
+    }
+
+    if (win->flags & 1) {           /* WINDOW_FLAG_SHADOW */
+        render_shadow(wm, win);
+    }
+
+    render_border(wm, win);
+
+    if (!(win->flags & 2)) {        /* WINDOW_FLAG_NO_TITLE */
+        render_title_bar(wm, win);
+    }
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*                              DRAGGING                                     */
+/*===========================================================================*/
+
+/**
+ * handle_title_bar_drag - Move a window with the title bar
+ *
+ * @x, @y: Pointer position in screen space
+ *
+ * Windows in the maximized, fullscreen or snapped state must not be dragged,
+ * so those are rejected rather than silently ignored by the caller.
+ */
+static int handle_title_bar_drag(window_manager_t *wm, wm_window_t *win,
+                                 s32 x, s32 y)
+{
+    (void)wm;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (win->state == WINDOW_STATE_MAXIMIZED ||
+        win->state == WINDOW_STATE_FULLSCREEN) {
+        return -EPERM;
+    }
+
+    if (win->snap_state != 0) {
+        return -EPERM;
+    }
+
+    win->geometry.x = x;
+    win->geometry.y = y;
+    win->dragging = true;
+    win->moving = true;
+
+    if (win->on_move) {
+        win->on_move(win, x, y);
+    }
+
+    return 0;
+}
+
+/**
+ * handle_resize_drag - Resize from the bottom-right corner
+ *
+ * Clamps to the window's own minimum and maximum dimensions.
+ */
+static int handle_resize_drag(window_manager_t *wm, wm_window_t *win,
+                              s32 x, s32 y)
+{
+    s32 w, h;
+
+    (void)wm;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (win->state == WINDOW_STATE_MAXIMIZED ||
+        win->state == WINDOW_STATE_FULLSCREEN) {
+        return -EPERM;
+    }
+
+    w = x - win->geometry.x;
+    h = y - win->geometry.y;
+
+    if (w < (s32)win->geometry.min_width) {
+        w = (s32)win->geometry.min_width;
+    }
+    if (w > (s32)win->geometry.max_width) {
+        w = (s32)win->geometry.max_width;
+    }
+    if (h < (s32)win->geometry.min_height) {
+        h = (s32)win->geometry.min_height;
+    }
+    if (h > (s32)win->geometry.max_height) {
+        h = (s32)win->geometry.max_height;
+    }
+
+    win->geometry.width = (u32)w;
+    win->geometry.height = (u32)h;
+    win->resizing = true;
+
+    if (win->on_resize) {
+        win->on_resize(win, w, h);
+    }
+
+    return 0;
+}
+
+/**
+ * destroy_window_internal - Release a window struct
+ *
+ * Callbacks fire before the structure is freed so a handler can still read it.
+ */
+static int destroy_window_internal(window_manager_t *wm, wm_window_t *win)
+{
+    if (!wm || !win) {
+        return -EINVAL;
+    }
+
+    if (win->on_destroy) {
+        win->on_destroy(win);
+    }
+
+    /* Children are owned by the manager; only drop our links to them. */
+    win->parent = NULL;
+    win->children = NULL;
+    win->next = NULL;
+
+    kfree(win);
+
+    if (wm->window_count > 0) {
+        wm->window_count--;
+    }
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*              WIRING: FRAME LOOP, DRAG AND DESTROY PATHS                   */
+/*===========================================================================*/
+/*
+ * The helpers above were written but unreachable. These are the entry points
+ * that use them, so window decorations are actually drawn, animations advance,
+ * dragging and resizing work, and destroy goes through the single teardown
+ * path that fires the callback.
+ */
+
+/**
+ * wm_render_frame - Draw every visible window's decorations
+ *
+ * Intended to be called once per frame from the compositor. Windows are drawn
+ * in z-order so overlaps stack correctly.
+ */
+int wm_render_frame(window_manager_t *wm)
+{
+    if (!wm || !wm->initialized) {
+        return -EINVAL;
+    }
+
+    /* Simple selection: repeatedly take the lowest unrendered z-order. */
+    wm_window_t *last = NULL;
+    u32 drawn = 0;
+
+    for (u32 pass = 0; pass < wm->window_count; pass++) {
+        wm_window_t *next = NULL;
+
+        for (u32 i = 0; i < wm->window_count; i++) {
+            wm_window_t *w = NULL;
+
+            /* Windows live in a list; index it without a second array. */
+            u32 idx = 0;
+            for (w = wm->windows; w; w = w->next) {
+                if (idx++ == i) {
+                    break;
+                }
+            }
+            if (!w) {
+                break;
+            }
+
+            if (last && w->z_order <= last->z_order) {
+                continue;
+            }
+            if (!next || w->z_order < next->z_order) {
+                next = w;
+            }
+        }
+
+        if (!next) {
+            break;
+        }
+
+        render_window_decorations(wm, next);
+        last = next;
+        drawn++;
+    }
+
+    wm->last_frame_time = get_time_ms();
+
+    return (int)drawn;
+}
+
+/**
+ * wm_update_animations - Advance every running window animation
+ *
+ * Returns the number of animations still running, so a caller can stop the
+ * frame loop when the desktop is idle.
+ */
+int wm_update_animations(window_manager_t *wm)
+{
+    u32 running = 0;
+
+    if (!wm || !wm->initialized) {
+        return -EINVAL;
+    }
+
+    for (wm_window_t *w = wm->windows; w; w = w->next) {
+        if (update_animation(wm, w) == 1) {
+            running++;
+        }
+    }
+
+    return (int)running;
+}
+
+/**
+ * wm_animate_to - Animate a window to a target geometry
+ *
+ * Falls back to an immediate move if animation is disabled.
+ */
+int wm_animate_to(window_manager_t *wm, wm_window_t *win,
+                  window_geometry_t *to, u32 type)
+{
+    if (!wm || !win || !to) {
+        return -EINVAL;
+    }
+
+    if (!wm->animations_enabled) {
+        win->geometry = *to;
+        return 0;
+    }
+
+    return start_animation(wm, win, type, to);
+}
+
+/**
+ * wm_begin_drag - Start dragging a window from a pointer position
+ *
+ * @corner: true when the drag began on a resize corner, false for the title bar
+ */
+int wm_begin_drag(window_manager_t *wm, wm_window_t *win, s32 x, s32 y,
+                  bool corner)
+{
+    if (!wm || !win) {
+        return -EINVAL;
+    }
+
+    return corner ? handle_resize_drag(wm, win, x, y)
+                  : handle_title_bar_drag(wm, win, x, y);
+}
+
+/**
+ * wm_end_drag - Finish a drag, leaving the window where it landed
+ */
+int wm_end_drag(window_manager_t *wm, wm_window_t *win)
+{
+    if (!wm || !win) {
+        return -EINVAL;
+    }
+
+    win->dragging = false;
+    win->moving = false;
+    win->resizing = false;
+
+    update_window_geometry(wm, win);
+
+    return 0;
 }

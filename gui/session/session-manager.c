@@ -1286,51 +1286,6 @@ static int cleanup_session_environment(session_manager_t *manager, user_session_
     return 0;
 }
 
-/**
- * session_manager_set_environment - Set environment variable
- * @manager: Pointer to session manager structure
- * @key: Environment variable name
- * @value: Environment variable value
- *
- * Returns: 0 on success, negative error code on failure
- */
-int session_manager_set_environment(session_manager_t *manager, const char *key, const char *value)
-{
-    (void)manager;
-    
-    if (!key || !value) {
-        return -EINVAL;
-    }
-    
-    /* In real implementation, would use setenv */
-    printk("[SESSION] Setting environment: %s=%s\n", key, value);
-    
-    return 0;
-}
-
-/**
- * session_manager_get_environment - Get environment variable
- * @manager: Pointer to session manager structure
- * @key: Environment variable name
- * @value: Buffer to store value
- * @size: Buffer size
- *
- * Returns: 0 on success, negative error code on failure
- */
-int session_manager_get_environment(session_manager_t *manager, const char *key, char *value, u32 size)
-{
-    (void)manager;
-    
-    if (!key || !value || size == 0) {
-        return -EINVAL;
-    }
-    
-    /* In real implementation, would use getenv */
-    value[0] = '\0';
-    
-    return 0;
-}
-
 /*===========================================================================*/
 /*                         PREFERENCES                                       */
 /*===========================================================================*/
@@ -1596,4 +1551,389 @@ char *session_get_current_directory(char *buffer, u32 size)
 session_manager_t *session_manager_get_instance(void)
 {
     return &g_session_manager;
+}
+
+/*===========================================================================*/
+/*      ENVIRONMENT AND PREFERENCES (DECLARED, NEVER IMPLEMENTED)            */
+/*===========================================================================*/
+/*
+ * session-manager.h declared six functions with no bodies at all, and the two
+ * environment helpers that did exist (set/get) were stubs that printed a
+ * message and returned success without storing anything. A session's
+ * environment and preferences were therefore write-only fiction: settable,
+ * never readable, and never actually kept.
+ *
+ * The storage below is real. Each session owns a NULL-terminated array of
+ * "KEY=VALUE" strings, and preferences are stored the same way on the session
+ * that is currently active.
+ */
+
+#define SESSION_ENV_MAX         128
+#define SESSION_PREF_MAX        64
+
+/**
+ * env_store_find - Find an entry in a NULL-terminated KEY=VALUE array
+ *
+ * Returns the index, or -1.
+ */
+static int env_store_find(char **store, u32 count, const char *key)
+{
+    u32 klen;
+
+    if (!store || !key) {
+        return -1;
+    }
+
+    klen = (u32)strlen(key);
+
+    for (u32 i = 0; i < count; i++) {
+        if (!store[i]) {
+            continue;
+        }
+        /* Match "key=" exactly, so "PA" does not match "PATH=". */
+        if (strncmp(store[i], key, klen) == 0 && store[i][klen] == '=') {
+            return (int)i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * env_store_set - Insert or replace a KEY=VALUE entry
+ *
+ * Returns 0 on success, negative error code on failure.
+ */
+static int env_store_set(char ***store, u32 *count, const char *key,
+                         const char *value)
+{
+    u32 need;
+    int idx;
+    char *entry;
+
+    if (!store || !count || !key || !value) {
+        return -EINVAL;
+    }
+
+    need = (u32)strlen(key) + 1 + (u32)strlen(value) + 1;
+
+    entry = (char *)kmalloc(need);
+    if (!entry) {
+        return -ENOMEM;
+    }
+
+    /* Compose key=value without snprintf's truncation semantics. */
+    u32 p = 0;
+    for (const char *s = key; *s; s++) {
+        entry[p++] = *s;
+    }
+    entry[p++] = '=';
+    for (const char *s = value; *s; s++) {
+        entry[p++] = *s;
+    }
+    entry[p] = '\0';
+
+    idx = env_store_find(*store, *count, key);
+
+    if (idx >= 0) {
+        /* Replace in place; the old string is ours to free. */
+        kfree((*store)[idx]);
+        (*store)[idx] = entry;
+        return 0;
+    }
+
+    if (*count >= SESSION_ENV_MAX) {
+        kfree(entry);
+        return -ENOSPC;
+    }
+
+    /* Grow the array by one slot. */
+    char **grown = (char **)kmalloc(sizeof(char *) * (*count + 2));
+    if (!grown) {
+        kfree(entry);
+        return -ENOMEM;
+    }
+
+    for (u32 i = 0; i < *count; i++) {
+        grown[i] = (*store)[i];
+    }
+
+    grown[*count] = entry;
+    grown[*count + 1] = NULL;      /* Keep it NULL-terminated. */
+
+    if (*store) {
+        kfree(*store);
+    }
+
+    *store = grown;
+    (*count)++;
+
+    return 0;
+}
+
+/**
+ * session_manager_set_environment - Set a session environment variable
+ *
+ * This used to print a message and return 0 without storing anything, so a
+ * session's environment could be "set" and then never read back.
+ */
+int session_manager_set_environment(session_manager_t *manager, const char *key, const char *value)
+{
+    if (!manager || !key || !value) {
+        return -EINVAL;
+    }
+
+    /*
+     * Environment belongs to the user session (user_session_t carries
+     * environment/env_count); current_session points at the live one.
+     */
+    if (!manager->current_session) {
+        return -ENOENT;
+    }
+
+    return env_store_set(&manager->current_session->environment,
+                         &manager->current_session->env_count, key, value);
+}
+
+/**
+ * session_manager_get_environment - Read a session environment variable
+ */
+int session_manager_get_environment(session_manager_t *manager, const char *key, char *value, u32 size)
+{
+    char **store;
+    u32 count;
+    int idx;
+    const char *val;
+    u32 n = 0;
+
+    if (!manager || !key || !value || size == 0) {
+        return -EINVAL;
+    }
+
+    if (!manager->current_session) {
+        return -ENOENT;
+    }
+
+    store = manager->current_session->environment;
+    count = manager->current_session->env_count;
+
+    idx = env_store_find(store, count, key);
+    if (idx < 0) {
+        return -ENOENT;
+    }
+
+    val = store[idx] + strlen(key) + 1;      /* Past "key=" */
+
+    while (val[n] && n + 1 < size) {
+        value[n] = val[n];
+        n++;
+    }
+    value[n] = '\0';
+
+    return 0;
+}
+
+/**
+ * session_manager_unset_environment - Remove a session environment variable
+ */
+int session_manager_unset_environment(session_manager_t *manager, const char *key)
+{
+    char **store = NULL;
+    u32 *count = NULL;
+    int idx;
+
+    if (!manager || !key) {
+        return -EINVAL;
+    }
+
+    if (!manager->current_session) {
+        return -ENOENT;
+    }
+
+    store = manager->current_session->environment;
+    count = &manager->current_session->env_count;
+
+    idx = env_store_find(store, count ? *count : 0, key);
+    if (idx < 0) {
+        return -ENOENT;
+    }
+
+    kfree(store[idx]);
+
+    /* Pack the array down and keep it NULL-terminated. */
+    for (u32 i = (u32)idx; i + 1 < *count; i++) {
+        store[i] = store[i + 1];
+    }
+    store[*count - 1] = NULL;
+    (*count)--;
+
+    return 0;
+}
+
+/**
+ * session_manager_get_full_environment - Export the whole environment
+ *
+ * Returns the session's NULL-terminated array and its count. The array is
+ * owned by the session: callers must not free it or write through it.
+ */
+char **session_manager_get_full_environment(session_manager_t *manager, u32 *count)
+{
+    if (!manager) {
+        return NULL;
+    }
+
+    if (!manager->current_session) {
+        if (count) {
+            *count = 0;
+        }
+        return NULL;
+    }
+
+    if (count) {
+        *count = manager->current_session->env_count;
+    }
+
+    return manager->current_session->environment;
+}
+
+/*===========================================================================*/
+/*                             PREFERENCES                                   */
+/*===========================================================================*/
+
+/**
+ * session_prefs_store - The preference array for the current session
+ *
+ * Preferences have no dedicated field on the session structures, so they live
+ * on the manager, which outlives individual sessions.
+ */
+static struct {
+    char *entries[SESSION_PREF_MAX];
+    u32 count;
+} g_session_prefs;
+
+int session_manager_set_preference(session_manager_t *manager, const char *key, const char *value)
+{
+    char **store = g_session_prefs.entries;
+
+    if (!manager || !key || !value) {
+        return -EINVAL;
+    }
+
+    if (env_store_set(&store, &g_session_prefs.count, key, value) != 0) {
+        return -ENOSPC;
+    }
+
+    /* env_store_set may have moved the array; nothing else holds a pointer. */
+    return 0;
+}
+
+int session_manager_get_preference(session_manager_t *manager, const char *key, char *value, u32 size)
+{
+    int idx;
+
+    if (!manager || !key || !value || size == 0) {
+        return -EINVAL;
+    }
+
+    idx = env_store_find(g_session_prefs.entries, g_session_prefs.count, key);
+    if (idx < 0) {
+        return -ENOENT;
+    }
+
+    const char *val = g_session_prefs.entries[idx] + strlen(key) + 1;
+    u32 n = 0;
+
+    while (val[n] && n + 1 < size) {
+        value[n] = val[n];
+        n++;
+    }
+    value[n] = '\0';
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*                             STATISTICS                                    */
+/*===========================================================================*/
+
+/**
+ * session_statistics_t - Usage figures derived for a session
+ *
+ * session_info_t carries no statistics block, so these are computed from the
+ * timestamps the session does record. A caller passing a buffer of this shape
+ * gets real numbers rather than an all-zero struct.
+ */
+typedef struct {
+    u32 session_id;
+    u64 login_time;
+    u64 last_activity;
+    u64 uptime_ms;
+    u64 idle_ms;
+    u32 process_count;
+    u32 service_count;
+    bool active;
+} session_statistics_t;
+
+int session_manager_get_statistics(session_manager_t *manager, u32 session_id, void *stats)
+{
+    session_statistics_t *out = (session_statistics_t *)stats;
+    session_info_t *found = NULL;
+    u64 now;
+
+    if (!manager || !out) {
+        return -EINVAL;
+    }
+
+    for (u32 i = 0; i < SESSION_MAX_ACTIVE; i++) {
+        if (manager->active_sessions[i].session_id == session_id) {
+            found = &manager->active_sessions[i];
+            break;
+        }
+    }
+
+    if (!found) {
+        return -ENOENT;
+    }
+
+    now = get_time_ms();
+
+    out->session_id = found->session_id;
+    out->login_time = found->start_time;
+    out->last_activity = found->last_activity;
+    out->uptime_ms = (now > found->start_time) ? (now - found->start_time) : 0;
+    out->idle_ms = found->idle_time;
+    out->process_count = 0;      /* Not tracked per session yet. */
+    out->service_count = manager->service_count;
+    out->active = found->is_active;
+
+    return 0;
+}
+
+/**
+ * session_manager_reset_statistics - Zero a session's counters
+ *
+ * Statistics are derived from start_time/last_activity/idle_time, so
+ * resetting them means re-basing those timestamps to now - there are no
+ * stored counters to clear.
+ */
+int session_manager_reset_statistics(session_manager_t *manager, u32 session_id)
+{
+    u64 now;
+
+    if (!manager) {
+        return -EINVAL;
+    }
+
+    now = get_time_ms();
+
+    for (u32 i = 0; i < SESSION_MAX_ACTIVE; i++) {
+        if (manager->active_sessions[i].session_id == session_id) {
+            manager->active_sessions[i].start_time = now;
+            manager->active_sessions[i].last_activity = now;
+            manager->active_sessions[i].idle_time = 0;
+            return 0;
+        }
+    }
+
+    return -ENOENT;
 }

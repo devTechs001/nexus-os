@@ -57,6 +57,7 @@ extern void process_init(void);
 extern void ipc_init(void);
 extern void sync_init(void);
 extern void vfs_init(void);
+extern s32 nexfs_init(void);
 extern void storage_init(void);
 extern void network_init(void);
 extern int protocol_init(void);
@@ -327,6 +328,20 @@ void kernel_init_drivers(void)
     /* VFS */
     pr_info("  VFS...\n");
     vfs_init();
+
+    /*
+     * Register the native filesystem.
+     *
+     * NexFS is the only filesystem in the tree, and until now nothing ever
+     * registered it: vfs_init() sets up the VFS layer but leaves it with no
+     * filesystem types, so every path lookup failed. That is why there was
+     * no root filesystem to browse.
+     */
+    if (nexfs_init() == 0) {
+        pr_info("  NexFS registered\n");
+    } else {
+        pr_err("  NexFS registration failed\n");
+    }
     splash_update_progress(30, "Virtual File System initialized");
     
     /* Storage drivers */

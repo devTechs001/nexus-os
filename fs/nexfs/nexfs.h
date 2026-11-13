@@ -11,12 +11,51 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 #include "../vfs/vfs.h"
+#include "../../kernel/sync/sync.h"
+/*
+ * kmem_cache_create/alloc live in kernel/mm/mm.h. Without this, nexfs_inode.c
+ * and nexfs_journal.c called them undeclared, so the compiler assumed an int
+ * return and truncated the returned heap pointer to 32 bits before casting it
+ * back to a pointer - a guaranteed crash on 64-bit.
+ */
+#include "../../kernel/mm/mm.h"
+
+/*
+ * NexFS global state.
+ *
+ * This used to be a file-static in nexfs_core.c while nexfs_inode.c also
+ * referenced it, so that translation unit could not compile at all.
+ */
+typedef struct {
+    bool initialized;
+    u32 mount_count;
+    atomic_t total_inodes;
+    atomic_t total_blocks;
+    u64 total_reads;
+    u64 total_writes;
+} nexfs_global_t;
+
+extern nexfs_global_t nexfs_global;
 
 /*===========================================================================*/
 /*                         NEXFS CONFIGURATION                               */
 /*===========================================================================*/
 
-#define NEXFS_MAGIC             0x4E4558465300    /* "NEXFS\0" */
+/*
+ * Magic numbers.
+ *
+ * These were 48-bit literals (0x4E4558465300, 0x4A4F55524E414C) compared
+ * against, and stored into, u32 on-disk fields. The compiler truncated them
+ * silently ("changes value from 20916376148263244 to 1380860236"), so the
+ * value written to disk was not the value in the literal - the check could
+ * never match what the comment claimed.
+ *
+ * The fields are 32-bit, so the magic is defined as the 32-bit prefix of the
+ * ASCII tag: "NEXF" and "JOUR". Widening the on-disk field would change the
+ * format; that is a format decision, not a warning to silence.
+ */
+#define NEXFS_MAGIC             0x4E455846U     /* "NEXF" */
+#define NEXFS_JOURNAL_MAGIC     0x4A4F5552U     /* "JOUR" */
 #define NEXFS_VERSION           1
 #define NEXFS_REVISION          0
 
@@ -43,7 +82,6 @@
 /* Journal Configuration */
 #define NEXFS_JOURNAL_SIZE      (8 * 1024 * 1024)   /* 8 MB default */
 #define NEXFS_JOURNAL_BLOCKS    (NEXFS_JOURNAL_SIZE / NEXFS_BLOCK_SIZE)
-#define NEXFS_JOURNAL_MAGIC     0x4A4F55524E414C    /* "JOURNAL" */
 
 /* Superblock Configuration */
 #define NEXFS_SUPERBLOCK_OFFSET 1024
@@ -613,6 +651,9 @@ struct nexfs_transaction {
 
     /* Lock */
     spinlock_t t_lock;
+
+    /* Reference count (number of holders of this transaction) */
+    atomic_t t_refcount;
 };
 
 /* Transaction states */
@@ -659,6 +700,14 @@ struct nexfs_block_map {
 extern struct vfs_superblock_operations nexfs_superblock_ops;
 
 /* Inode operations */
+/*
+ * Block I/O. The journal reads and writes whole blocks through these; they
+ * were referenced by commented-out call sites and never existed.
+ */
+struct nexfs_inode;
+s32 nexfs_read_block(struct nexfs_inode *inode, u64 block, void *buf, u32 size);
+s32 nexfs_write_block(struct nexfs_inode *inode, u64 block, const void *buf, u32 size);
+
 extern struct vfs_inode_operations nexfs_inode_ops;
 extern struct vfs_inode_operations nexfs_dir_ops;
 extern struct vfs_inode_operations nexfs_symlink_ops;
@@ -702,6 +751,9 @@ s32 nexfs_delete_inode(struct nexfs_inode *inode);
 s32 nexfs_get_block(struct nexfs_inode *inode, u64 iblock,
                     struct nexfs_block_map *map, s32 create);
 s32 nexfs_alloc_blocks(struct nexfs_inode *inode, u64 start, u64 count);
+
+/* Single-block allocator (nexfs_core.c), also used by nexfs_inode.c */
+u64 nexfs_alloc_block(struct nexfs_superblock *sb, s32 group);
 s32 nexfs_free_blocks(struct nexfs_inode *inode, u64 start, u64 count);
 
 /* Directory functions */
@@ -732,6 +784,15 @@ u32 nexfs_crc32c(u32 crc, const void *buf, size_t len);
 u32 nexfs_inode_checksum(struct nexfs_inode_raw *inode);
 u32 nexfs_block_checksum(void *block, u32 blocknr);
 u32 nexfs_superblock_checksum(struct nexfs_superblock_raw *sb);
+
+/* Inode slab cache lifecycle */
+void nexfs_inode_cache_exit(void);
+
+/* Backing-device I/O - one block per call, size capped at NEXFS_BLOCK_SIZE */
+s32 nexfs_read_block_device(struct nexfs_superblock *sb, u64 block,
+                            void *buf, u32 size);
+s32 nexfs_write_block_device(struct nexfs_superblock *sb, u64 block,
+                             const void *buf, u32 size);
 
 /* Utility functions */
 u32 nexfs_group_index(struct nexfs_superblock *sb, u64 block);

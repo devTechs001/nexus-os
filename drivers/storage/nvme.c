@@ -38,7 +38,9 @@ static void nvme_free_contiguous(void *virt, phys_addr_t phys, u32 size);
 
 /* Helper Functions */
 static int nvme_wait_ready(nvme_device_t *dev, bool ready, u32 timeout_ms);
-static int nvme_wait_completion(nvme_completion_t *cpl, u16 expected_cid, u16 *phase);
+static int nvme_wait_completion(nvme_device_t *dev, nvme_queue_t *sq,
+                                 nvme_completion_t *cpl, u16 expected_cid,
+                                 u32 timeout_ms);
 static void nvme_update_stats(nvme_device_t *dev, bool is_write, u64 bytes);
 
 /*===========================================================================*/
@@ -237,6 +239,8 @@ static int nvme_wait_ready(nvme_device_t *dev, bool ready, u32 timeout_ms)
 static int nvme_submit_command(nvme_device_t *dev, nvme_queue_t *sq, 
                                nvme_command_t *cmd, nvme_completion_t *cpl)
 {
+    int ret;
+
     if (!dev || !sq || !cmd || !cpl) {
         return -EINVAL;
     }
@@ -262,44 +266,68 @@ static int nvme_submit_command(nvme_device_t *dev, nvme_queue_t *sq,
     sq->tail = next_tail;
     
     /* Wait for completion (polling) */
+    ret = nvme_wait_completion(dev, sq, cpl, cmd_id, 5000);
+
+    spin_unlock(&dev->lock);
+
+    return ret;
+}
+
+/**
+ * nvme_wait_completion - Poll a completion queue until a command completes
+ * @dev:         NVMe device owning the queue
+ * @sq:          Submission queue whose completion queue we watch
+ * @cpl:         Output completion entry
+ * @expected_cid: Command id we are waiting for
+ * @timeout_ms:  Give up after this many milliseconds
+ *
+ * The polling loop used to be inlined in nvme_submit_command(); the prototype
+ * existed but no body ever followed, so this logic was neither reusable nor
+ * testable. Returns 0 on success, -EIO on controller error, -ETIMEDOUT on
+ * expiry.
+ */
+static int nvme_wait_completion(nvme_device_t *dev, nvme_queue_t *sq,
+                                 nvme_completion_t *cpl, u16 expected_cid,
+                                 u32 timeout_ms)
+{
     u64 start = get_time_ms();
-    u32 timeout_ms = 5000;
-    
+
+    if (!dev || !sq || !cpl || !sq->cq || sq->size == 0) {
+        return -EINVAL;
+    }
+
     while (1) {
         /* Update head pointer from controller */
         u32 db = nvme_get_doorbell(dev, sq->id, true);
-        sq->head = db;
-        
+        sq->head = (u16)(db % sq->size);
+
         /* Check completion queue */
         nvme_completion_t *cq_entry = &((nvme_completion_t *)sq->cq)[sq->head];
-        
+
         /* Check phase tag */
         u16 status = cq_entry->status;
         u16 phase = (status >> 1) & 1;
-        
-        if (cq_entry->command_id == cmd_id && phase == sq->phase) {
+
+        if (cq_entry->command_id == expected_cid && phase == sq->phase) {
             /* Command completed */
             memcpy(cpl, cq_entry, sizeof(nvme_completion_t));
-            
-            /* Update head pointer */
-            u16 new_head = (sq->head + 1) % sq->size;
-            nvme_ring_doorbell(dev, sq->id, new_head);
-            
-            spin_unlock(&dev->lock);
-            
+
+            /* Advance the completion-queue head we own. */
+            sq->head = (u16)((sq->head + 1) % sq->size);
+            nvme_ring_doorbell(dev, sq->id, sq->head);
+
             /* Check status */
             u16 sc = (status >> NVME_STATUS_SHIFT) & NVME_STATUS_MASK;
             if (sc != NVME_SC_SUCCESS) {
                 return -EIO;
             }
-            
+
             return 0;
         }
-        
+
         /* Check timeout */
         if (get_time_ms() - start >= timeout_ms) {
-            spin_unlock(&dev->lock);
-            printk("[NVME] Command timeout (cid=%d)\n", cmd_id);
+            printk("[NVME] Command timeout (cid=%d)\n", expected_cid);
             return -ETIMEDOUT;
         }
     }
@@ -948,6 +976,8 @@ int nvme_create_admin_queues(nvme_device_t *dev)
 
 /**
  * nvme_delete_admin_queues - Delete admin queues
+ */
+
 /*===========================================================================*/
 /*                         NAMESPACE OPERATIONS                              */
 /*===========================================================================*/

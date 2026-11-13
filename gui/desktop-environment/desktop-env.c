@@ -27,7 +27,7 @@ static desktop_environment_t g_desktop_env;
 static int render_solid_background(desktop_environment_t *env);
 static int render_gradient_background(desktop_environment_t *env);
 static int render_image_background(desktop_environment_t *env);
-static color_t gradient_sample(gradient_t *gradient, float t);
+color_t gradient_sample(gradient_t *gradient, float t);
 
 /* Icon management */
 static int arrange_icons_grid(desktop_environment_t *env);
@@ -445,7 +445,7 @@ int desktop_render_background(desktop_environment_t *env)
  *
  * Returns: Interpolated color
  */
-static color_t gradient_sample(gradient_t *gradient, float t)
+color_t gradient_sample(gradient_t *gradient, float t)
 {
     color_t result = {0, 0, 0, 255};
     
@@ -1711,7 +1711,7 @@ int desktop_render_icons(desktop_environment_t *env)
     for (u32 i = 0; i < env->icon_count; i++) {
         desktop_icon_t *icon = &env->icons[i];
         
-        if (icon->visible) {
+        if (!icon->hidden) {
             /* Render icon image */
             /* Render icon label */
             /* Render selection highlight if selected */

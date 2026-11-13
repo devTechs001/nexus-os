@@ -17,7 +17,19 @@
 
 #define VFS_MAGIC               0x56465300      /* "VFS\0" */
 #define VFS_NAME_MAX            255
+#define VFS_BLOCK_SIZE          4096
 #define VFS_PATH_MAX            4096
+#define VFS_MAX_PATH_DEPTH      64          /* Max dir components in a path */
+
+/* Directory entry types returned via filldir_t */
+#define VFS_DT_UNKNOWN          0
+#define VFS_DT_FIFO             1
+#define VFS_DT_CHR              2
+#define VFS_DT_DIR              4
+#define VFS_DT_BLK              6
+#define VFS_DT_REG              8
+#define VFS_DT_LNK              10
+#define VFS_DT_SOCK             12
 #define VFS_MAX_MOUNT_POINTS    64
 #define VFS_MAX_FILESYSTEMS     16
 #define VFS_MAX_OPEN_FILES      65536
@@ -68,6 +80,22 @@ static inline u32 vfs_dentry_hash(void *parent, const char *name)
 
 /* File Mode Flags */
 #define VFS_MODE_MASK           0x00000FFF
+
+/*
+ * File-type bits within mode.
+ *
+ * The VFS has a separate VFS_TYPE_* encoding, but mode_t-style callers (and
+ * NexFS, which stores mode and type in one field) need type bits that can be
+ * tested directly with a mask - which is what path resolution does.
+ */
+#define VFS_MODE_IFMT           0x0000F000      /* Type mask */
+#define VFS_MODE_IFREG          0x00001000      /* Regular file */
+#define VFS_MODE_IFDIR          0x00002000      /* Directory */
+#define VFS_MODE_IFCHR          0x00003000      /* Character device */
+#define VFS_MODE_IFBLK          0x00004000      /* Block device */
+#define VFS_MODE_IFIFO          0x00005000      /* FIFO */
+#define VFS_MODE_IFSOCK         0x00006000      /* Socket */
+#define VFS_MODE_IFLNK          0x00007000      /* Symbolic link */
 #define VFS_MODE_IRUSR          0x00000100      /* Owner read */
 #define VFS_MODE_IWUSR          0x00000200      /* Owner write */
 #define VFS_MODE_IXUSR          0x00000400      /* Owner execute */
@@ -152,6 +180,7 @@ typedef s32 (*filldir_t)(void *dirent, const char *name, int namelen, u64 offset
 #define VFS_ENAMETOOLONG        (-26)
 #define VFS_EOVERFLOW           (-27)
 #define VFS_EBADF               (-28)
+#define VFS_ERANGE              (-29)
 #define VFS_ENFILE              (-29)
 
 /*===========================================================================*/
@@ -460,11 +489,18 @@ struct vfs_dentry {
 
 /**
  * struct iovec - I/O vector for scatter/gather
+ *
+ * syscall.h defines the same struct for the syscall ABI. Both headers are
+ * legitimately needed together (a shell that calls the VFS and the syscall
+ * layer), so guard against the duplicate definition.
  */
+#ifndef _NEXUS_IOVEC_DEFINED
+#define _NEXUS_IOVEC_DEFINED
 struct iovec {
     void *iov_base;                   /* Pointer to data */
     u64 iov_len;                      /* Length of data */
 };
+#endif
 
 /**
  * struct vfs_file_operations - File operations
@@ -908,6 +944,7 @@ s32 vfs_truncate(const char *pathname, u64 length);
 /* Directory Operations */
 s32 vfs_readdir(const char *pathname, void *dirent, filldir_t filldir);
 s32 vfs_getcwd(char *buf, u64 size);
+s32 vfs_chdir(const char *pathname);
 
 /* Superblock Functions */
 s32 vfs_sync_fs(struct vfs_superblock *sb, s32 wait);
