@@ -11,6 +11,24 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 #include "../vfs/vfs.h"
+#include "../../kernel/sync/sync.h"
+
+/*
+ * NexFS global state.
+ *
+ * This used to be a file-static in nexfs_core.c while nexfs_inode.c also
+ * referenced it, so that translation unit could not compile at all.
+ */
+typedef struct {
+    bool initialized;
+    u32 mount_count;
+    atomic_t total_inodes;
+    atomic_t total_blocks;
+    u64 total_reads;
+    u64 total_writes;
+} nexfs_global_t;
+
+extern nexfs_global_t nexfs_global;
 
 /*===========================================================================*/
 /*                         NEXFS CONFIGURATION                               */
@@ -613,6 +631,9 @@ struct nexfs_transaction {
 
     /* Lock */
     spinlock_t t_lock;
+
+    /* Reference count (number of holders of this transaction) */
+    atomic_t t_refcount;
 };
 
 /* Transaction states */
@@ -702,6 +723,9 @@ s32 nexfs_delete_inode(struct nexfs_inode *inode);
 s32 nexfs_get_block(struct nexfs_inode *inode, u64 iblock,
                     struct nexfs_block_map *map, s32 create);
 s32 nexfs_alloc_blocks(struct nexfs_inode *inode, u64 start, u64 count);
+
+/* Single-block allocator (nexfs_core.c), also used by nexfs_inode.c */
+u64 nexfs_alloc_block(struct nexfs_superblock *sb, s32 group);
 s32 nexfs_free_blocks(struct nexfs_inode *inode, u64 start, u64 count);
 
 /* Directory functions */

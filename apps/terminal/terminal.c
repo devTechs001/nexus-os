@@ -7,6 +7,8 @@
  */
 
 #include "terminal.h"
+#include "shell.h"
+#include "../../fs/vfs/vfs.h"
 #include "../../gui/gui.h"
 #include "../../gui/widgets/widgets.h"
 #include "../../gui/window-manager/window-manager.h"
@@ -332,7 +334,7 @@ static int create_tab_bar(terminal_window_t *win)
     }
     
     /* Create tab bar panel */
-    win->tab_bar = panel_create(win->wm_window, 0, 0, 900, 32);
+    win->tab_bar = panel_create(NULL, 0, 0, 900, 32);
     if (!win->tab_bar) {
         return -1;
     }
@@ -364,7 +366,7 @@ static int create_terminal_view(terminal_window_t *win)
     }
     
     /* Create terminal view panel */
-    win->terminal_view = panel_create(win->wm_window, 0, 32, 900, 536);
+    win->terminal_view = panel_create(NULL, 0, 32, 900, 536);
     if (!win->terminal_view) {
         return -1;
     }
@@ -390,7 +392,7 @@ static int create_scrollbar(terminal_window_t *win)
     }
     
     /* Create scrollbar */
-    win->scrollbar = panel_create(win->wm_window, 890, 32, 10, 536);
+    win->scrollbar = panel_create(NULL, 890, 32, 10, 536);
     if (!win->scrollbar) {
         return -1;
     }
@@ -416,7 +418,7 @@ static int create_status_bar(terminal_window_t *win)
     }
     
     /* Create status bar panel */
-    win->status_bar = panel_create(win->wm_window, 0, 568, 900, 32);
+    win->status_bar = panel_create(NULL, 0, 568, 900, 32);
     if (!win->status_bar) {
         return -1;
     }
@@ -852,25 +854,68 @@ int terminal_send_string(terminal_window_t *win, const char *str)
  *
  * Returns: 0 on success, negative error code on failure
  */
-static int pty_spawn(terminal_window_t *win, const char *shell, const char *dir)
+/*
+ * PTY plumbing.
+ *
+ * This used to be a mock: pty_spawn() stored "1000 + window_id" as a PID and
+ * pty_read()/pty_write() did nothing at all, so the terminal window had a
+ * scrollback buffer that could never be filled by an actual command.
+ *
+ * It is now backed by the real in-kernel shell (shell.c): the shell owns the
+ * interpreter and the environment, and this file only supplies the byte
+ * plumbing between the shell's output sink and the terminal cell buffer.
+ */
+
+/* Output sink: shell bytes -> terminal scrollback cells. */
+static void terminal_shell_sink(void *ctx, const char *data, u32 len)
 {
-    if (!win || !shell) {
+    terminal_window_t *win = (terminal_window_t *)ctx;
+
+    if (!win || !data || !len) {
+        return;
+    }
+
+    /* Route through the window's writer so escape handling and wrapping
+     * stay in one place. */
+    terminal_write(win, data, len);
+}
+
+static int pty_spawn(terminal_window_t *win, const char *shell_path, const char *dir)
+{
+    int rc;
+
+    if (!win || !shell_path) {
         return -EINVAL;
     }
-    
-    printk("[TERMINAL] Spawning shell: %s in %s\n", shell, dir ? dir : "/");
-    
-    /* In real implementation, would:
-     * - Create PTY master/slave
-     * - Fork process
-     * - Execute shell
-     * - Set up environment
-     */
-    
-    /* Mock PID for now */
-    win->shell_pid = 1000 + win->window_id;
-    win->is_running = true;
-    
+
+    printk("[TERMINAL] Starting shell '%s' in %s\n",
+           shell_path, dir ? dir : "/");
+
+    rc = shell_init();
+    if (rc != 0) {
+        printk("[TERMINAL] shell_init failed: %d\n", rc);
+        return rc;
+    }
+
+    /* Honour the requested starting directory. */
+    if (dir && *dir) {
+        vfs_chdir(dir);
+    }
+
+    /* Point the shell's stdout/stderr at this window. */
+    shell_set_output(terminal_shell_sink, win);
+    shell_set_error(terminal_shell_sink, win);
+
+    win->shell_pid = shell_get_pid();
+    win->is_running = shell_is_running();
+
+    /* Banner, then the first prompt. */
+    terminal_write(win,
+        "NEXUS OS 1.0.0 - Nexus Shell\n"
+        "Type 'help' for a list of commands.\n\n", 70);
+
+    shell_print_prompt();
+
     return 0;
 }
 
@@ -885,9 +930,12 @@ static int pty_read(terminal_window_t *win)
     if (!win || !win->is_running) {
         return -1;
     }
-    
-    /* In real implementation, would read from PTY master FD */
-    
+
+    /*
+     * The shell is in-process, so there is no kernel PTY to poll: input
+     * arrives through terminal_send_key()/terminal_send_string(), which
+     * feed the line editor. Nothing is pending here.
+     */
     return 0;
 }
 
@@ -901,13 +949,59 @@ static int pty_read(terminal_window_t *win)
  */
 static int pty_write(terminal_window_t *win, const char *data, u32 length)
 {
+    /*
+     * Writing to the "PTY" means handing bytes to the shell's line editor.
+     * Newline commits the line and runs it; anything else accumulates and
+     * is echoed back to the cell buffer so the user sees what they typed.
+     */
+    static char line_buf[SHELL_MAX_LINE];
+    static u32 line_len;
+
     if (!win || !data || length == 0) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would write to PTY master FD */
-    
-    return 0;
+
+    for (u32 i = 0; i < length; i++) {
+        char c = data[i];
+
+        if (c == '\r') {
+            continue;               /* CRLF input: ignore the CR. */
+        }
+
+        if (c == '\n') {
+            terminal_write(win, "\n", 1);
+            line_buf[line_len] = '\0';
+            if (line_len > 0) {
+                shell_submit_line(line_buf);
+            }
+            line_len = 0;
+            terminal_write(win, "\n", 1);
+            shell_print_prompt();
+            continue;
+        }
+
+        if (c == 0x7F || c == '\b') {
+            if (line_len > 0) {
+                line_len--;
+                terminal_write(win, "\b \b", 3);
+            }
+            continue;
+        }
+
+        if (c == 0x03) {            /* ^C */
+            line_len = 0;
+            terminal_write(win, "^C\n", 3);
+            shell_print_prompt();
+            continue;
+        }
+
+        if (line_len + 1 < sizeof(line_buf)) {
+            line_buf[line_len++] = c;
+            terminal_write(win, &c, 1);
+        }
+    }
+
+    return (int)length;
 }
 
 /**

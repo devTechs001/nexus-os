@@ -18,6 +18,10 @@ extern void arch_set_return_value(struct task_struct *task, int value);
 extern int arch_load_binary(struct task_struct *task, const char *path,
                             char **argv, char **envp);
 
+/* ELF64 loader (kernel/core/elf_loader.c) */
+extern int elf_exec(const char *path, u64 *entry, u64 *image_size, u32 *segments);
+extern u64 elf_alloc_user_stack(void);
+
 /*===========================================================================*/
 /*                         PROCESS MANAGEMENT DATA                           */
 /*===========================================================================*/
@@ -1153,12 +1157,53 @@ int arch_copy_files(struct task_struct *parent, struct task_struct *child)
     return 0;
 }
 
+/*
+ * arch_load_binary - Load an executable image for a task.
+ *
+ * This used to return -ENOSYS unconditionally, which meant no program of any
+ * kind could be started: exec_process() always failed, so the shell's external
+ * command path was dead and nothing written in C, C++, Rust or an interpreted
+ * language could run.
+ *
+ * It now delegates to the ELF64 loader, which validates the image and places
+ * its segments in memory. What it cannot yet do is switch the task onto the
+ * new instruction pointer: that needs per-process page tables and a
+ * non-trivial context_switch(), and arch_switch_to() is still a no-op. So the
+ * image is loaded and the entry point recorded, and the caller is told
+ * explicitly that the hand-off is not available yet - rather than being told
+ * the binary itself was bad.
+ */
 int arch_load_binary(struct task_struct *task, const char *path,
                      char **argv, char **envp)
 {
-    (void)task;
-    (void)path;
+    u64 entry = 0;
+    u64 size = 0;
+    u32 segments = 0;
+    int rc;
+
     (void)argv;
     (void)envp;
+
+    if (!task || !path) {
+        return -EINVAL;
+    }
+
+    rc = elf_exec(path, &entry, &size, &segments);
+    if (rc != 0) {
+        return rc;
+    }
+
+    /* Record what was loaded on the task for introspection. */
+    task->start_time = get_time_ms();
+
+    pr_info("[EXEC] '%s' loaded: %llu bytes, %u segments, entry 0x%llX\n",
+            path, (unsigned long long)size, segments,
+            (unsigned long long)entry);
+
+    /*
+     * The image is resident but cannot be entered yet. Report ENOSYS so the
+     * distinction between "bad binary" and "no userspace hand-off" stays
+     * visible to whoever is debugging.
+     */
     return -ENOSYS;
 }

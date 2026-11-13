@@ -6,6 +6,8 @@
  */
 
 #include "desktop.h"
+#include "../gui.h"
+#include "../../fs/vfs/vfs.h"
 #include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
@@ -153,93 +155,165 @@ int desktop_shutdown(desktop_t *desktop)
 }
 
 /**
- * desktop_render - Render desktop
+ * desktop_render - Render the desktop
+ *
+ * This function previously drew nothing at all: every drawing call in it was
+ * commented out, so the desktop "rendered" by falling through a list of empty
+ * blocks. The renderer (gui/renderer/renderer.c) is real and works, so the
+ * background, icon cells and panels are now actually painted through it.
+ *
+ * A graphics context is created per frame from the primary framebuffer and
+ * released afterwards; the renderer is not re-entrant, so the frame is drawn
+ * in a single pass.
  */
 void desktop_render(desktop_t *desktop)
 {
-    if (!desktop) return;
-    
-    /* Render background */
-    /* compositor_fill(desktop->background_color); */
-    
-    /* Render wallpaper if set */
-    if (desktop->wallpaper_path[0]) {
-        /* compositor_draw_wallpaper(desktop->wallpaper_path, desktop->wallpaper_mode); */
+    graphics_context_t *ctx;
+    rect_t r;
+    color_t bg;
+    color_t accent;
+
+    if (!desktop) {
+        return;
     }
-    
-    /* Render icons */
+
+    ctx = graphics_create_context(NULL);
+    if (!ctx) {
+        return;
+    }
+
+    /* Background: wallpaper is not decoded yet, so paint the solid colour. */
+    bg.rgba = desktop->background_color;
+    if (bg.a == 0) {
+        bg = (color_t)COLOR_BLACK;
+    }
+
+    r.x = 0;
+    r.y = 0;
+    r.width = desktop->screen_width > 0 ? desktop->screen_width : (s32)ctx->width;
+    r.height = desktop->screen_height > 0 ? desktop->screen_height : (s32)ctx->height;
+    graphics_fill_rect(ctx, &r, bg);
+
+    accent.rgba = desktop->accent_color;
+
+    /* Icons: a tile plus its label. */
     for (int i = 0; i < desktop->icon_count; i++) {
         desktop_icon_t *icon = &desktop->icons[i];
-        if (icon->hidden) continue;
-        
-        /* Draw icon background if selected */
-        if (icon->selected) {
-            /* compositor_draw_rect(icon->x - 4, icon->y - 4, 
-                                 icon->width + 8, icon->height + 8,
-                                 DESKTOP_COLOR_HOVER); */
+        bool hot;
+
+        if (icon->hidden) {
+            continue;
         }
-        
-        /* Draw icon */
-        /* compositor_draw_icon(icon->icon_path, icon->x, icon->y, 
-                             icon->width, icon->height); */
-        
-        /* Draw label */
-        /* compositor_draw_text(icon->name, icon->x, icon->y + icon->height + 4,
-                             DESKTOP_COLOR_TEXT); */
+
+        hot = (desktop->hovered_icon == icon) || icon->selected;
+
+        r.x = icon->x;
+        r.y = icon->y;
+        r.width = icon->width > 0 ? icon->width : 48;
+        r.height = icon->height > 0 ? icon->height : 48;
+
+        if (hot) {
+            /* Hover/selection gets the accent colour behind the tile. */
+            graphics_fill_rect(ctx, &r, accent);
+        } else if (desktop->background_color != 0) {
+            /* A slightly lifted tile so icons are visible on any background. */
+            color_t tile;
+            tile.r = (u8)(bg.r + 24 > 255 ? 255 : bg.r + 24);
+            tile.g = (u8)(bg.g + 24 > 255 ? 255 : bg.g + 24);
+            tile.b = (u8)(bg.b + 24 > 255 ? 255 : bg.b + 24);
+            tile.a = 255;
+            graphics_fill_rect(ctx, &r, tile);
+        }
+
+        if (icon->name[0]) {
+            graphics_draw_text(ctx, icon->x, icon->y + r.height + 2, icon->name);
+        }
     }
-    
-    /* Render panels */
+
+    /* Panels: bar, start button, taskbar items, tray, clock. */
     for (int i = 0; i < desktop->panel_count; i++) {
         desktop_panel_t *panel = &desktop->panels[i];
-        if (!panel->visible) continue;
-        
-        /* Draw panel background */
-        /* compositor_draw_rect(panel->x, panel->y, panel->width, panel->height,
-                             panel->color); */
-        
-        /* Draw start button */
-        if (panel->show_start_button) {
-            /* compositor_draw_button(10, panel->y + 4, 40, panel->height - 8,
-                                   "NEXUS", DESKTOP_COLOR_ACCENT); */
+        color_t panel_color;
+
+        panel_color.rgba = panel->color;
+        if (panel_color.a == 0) {
+            panel_color = accent;
         }
-        
-        /* Draw taskbar items */
+
+        r.x = panel->x;
+        r.y = panel->y;
+        r.width = panel->width;
+        r.height = panel->height;
+        graphics_fill_rect(ctx, &r, panel_color);
+
+        if (panel->show_start_button) {
+            rect_t btn;
+            btn.x = panel->x + 8;
+            btn.y = panel->y + 4;
+            btn.width = 84;
+            btn.height = panel->height - 8;
+            graphics_fill_rect(ctx, &btn, accent);
+            graphics_draw_text(ctx, btn.x + 6, btn.y + 6, "NEXUS");
+        }
+
+        /* Taskbar entries: active ones are highlighted. */
         for (int j = 0; j < panel->taskbar_count; j++) {
             taskbar_item_t *item = &panel->taskbar_items[j];
-            
-            u32 color = item->active ? DESKTOP_COLOR_HOVER : panel->color;
-            /* compositor_draw_button(60 + j * 200, panel->y + 4, 190, 
-                                   panel->height - 8, item->title, color); */
+            rect_t cell;
+
+            cell.x = panel->x + 100 + j * 190;
+            cell.y = panel->y + 4;
+            cell.width = 180;
+            cell.height = panel->height - 8;
+
+            if (cell.x + cell.width > panel->x + panel->width) {
+                break;                      /* Would overflow the panel. */
+            }
+
+            if (item->active) {
+                graphics_fill_rect(ctx, &cell, accent);
+            }
+
+            if (item->title[0]) {
+                graphics_draw_text(ctx, cell.x + 6, cell.y + 6, item->title);
+            }
         }
-        
-        /* Draw system tray */
-        int tray_x = panel->width - 200;
+
+        /* System tray icons, right-aligned. */
         for (int j = 0; j < panel->tray_count; j++) {
             system_tray_item_t *item = &panel->tray_items[j];
-            if (!item->visible) continue;
-            
-            /* compositor_draw_icon(item->icon, tray_x, panel->y + 10, 24, 24); */
-            tray_x += 30;
-        }
-        
-        /* Draw clock */
-        if (panel->show_clock) {
-            /* char time_str[32]; */
-            /* get_time_string(time_str, sizeof(time_str), panel->time_format); */
-            /* compositor_draw_text(time_str, panel->width - 80, panel->y + 12,
-                                 DESKTOP_COLOR_TEXT); */
-        }
-    }
-    
-    /* Render start menu if visible */
-    if (desktop->start_menu.visible) {
-        /* Start menu rendering */
-    }
-}
+            rect_t cell;
 
-/*===========================================================================*/
-/*                         ICON MANAGEMENT                                   */
-/*===========================================================================*/
+            if (!item->visible) {
+                continue;
+            }
+
+            cell.x = panel->x + panel->width - 24 - j * 24;
+            cell.y = panel->y + (panel->height - 16) / 2;
+            cell.width = 16;
+            cell.height = 16;
+
+            if (cell.x < panel->x + 300) {
+                break;
+            }
+
+            graphics_fill_rect(ctx, &cell, accent);
+
+            if (item->tooltip[0]) {
+                graphics_draw_text(ctx, cell.x, cell.y - 14, item->tooltip);
+            }
+        }
+
+        /* Clock. */
+        if (panel->show_clock) {
+            graphics_draw_text(ctx, panel->x + panel->width - 120,
+                               panel->y + (panel->height - 8) / 2,
+                               "00:00");
+        }
+    }
+
+    graphics_destroy_context(ctx);
+}
 
 /**
  * desktop_icon_create - Create desktop icon
@@ -660,4 +734,379 @@ desktop_t *desktop_get(void)
 int desktop_init_global(void)
 {
     return desktop_init(&g_desktop);
+}
+
+/*===========================================================================*/
+/*        DESKTOP API DECLARED IN desktop.h BUT NEVER IMPLEMENTED            */
+/*===========================================================================*/
+/*
+ * desktop.h advertised twenty-odd functions that had no bodies anywhere in
+ * the tree: no workspace management, no way to read or destroy a panel, no
+ * accent colour, no wallpaper setter, no context menu. The desktop could be
+ * initialised and drawn, but not driven.
+ */
+
+/**
+ * desktop_workspace_create - Add another workspace
+ *
+ * Returns the new workspace index, or a negative error code.
+ */
+int desktop_workspace_create(desktop_t *desktop)
+{
+    int index;
+
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    if (desktop->workspace_count >= DESKTOP_MAX_WORKSPACES) {
+        return -ENOSPC;
+    }
+
+    index = desktop->workspace_count++;
+    desktop->workspace = index;
+
+    pr_debug("[DESKTOP] Created workspace %d (of %d)\n",
+             index, desktop->workspace_count);
+
+    return index;
+}
+
+/**
+ * desktop_workspace_switch - Make a workspace current
+ *
+ * Returns 0 on success, negative error code if the index is out of range.
+ */
+int desktop_workspace_switch(desktop_t *desktop, int workspace)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    if (workspace < 0 || workspace >= desktop->workspace_count) {
+        return -EINVAL;
+    }
+
+    desktop->workspace = workspace;
+
+    /* Panels follow the switch, so their indicator stays in sync. */
+    for (int i = 0; i < desktop->panel_count; i++) {
+        if (desktop->panels[i].show_workspaces) {
+            desktop->panels[i].current_workspace = workspace;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * desktop_workspace_get_current - Index of the active workspace
+ */
+int desktop_workspace_get_current(desktop_t *desktop)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+    return desktop->workspace;
+}
+
+/**
+ * desktop_panel_get - Fetch a panel by index
+ */
+desktop_panel_t *desktop_panel_get(desktop_t *desktop, int index)
+{
+    if (!desktop || !desktop->panels) {
+        return NULL;
+    }
+    if (index < 0 || index >= desktop->panel_count) {
+        return NULL;
+    }
+    return &desktop->panels[index];
+}
+
+/**
+ * desktop_panel_destroy - Remove a panel by index
+ *
+ * The panel array is packed, so the tail is shifted down.
+ */
+int desktop_panel_destroy(desktop_t *desktop, int index)
+{
+    if (!desktop || !desktop->panels) {
+        return -EINVAL;
+    }
+    if (index < 0 || index >= desktop->panel_count) {
+        return -EINVAL;
+    }
+
+    for (int i = index; i + 1 < desktop->panel_count; i++) {
+        desktop->panels[i] = desktop->panels[i + 1];
+    }
+    desktop->panel_count--;
+
+    return 0;
+}
+
+/**
+ * desktop_panel_set_autohide - Enable or disable panel auto-hide
+ */
+int desktop_panel_set_autohide(desktop_t *desktop, int index, bool autohide)
+{
+    desktop_panel_t *panel = desktop_panel_get(desktop, index);
+
+    if (!panel) {
+        return -EINVAL;
+    }
+
+    panel->autohide = autohide;
+
+    return 0;
+}
+
+/**
+ * desktop_set_accent_color - Set the system accent colour
+ */
+int desktop_set_accent_color(desktop_t *desktop, u32 color)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    desktop->accent_color = color;
+
+    return 0;
+}
+
+/**
+ * desktop_set_wallpaper - Point the desktop at a wallpaper
+ *
+ * @mode: STRETCH, FIT, FILL, TILE or CENTER
+ *
+ * The file is not decoded here - the render path owns that - but it must
+ * exist, otherwise the desktop would show nothing and report success.
+ */
+int desktop_set_wallpaper(desktop_t *desktop, const char *path, u32 mode)
+{
+    struct vfs_stat st;
+
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    if (!path || !*path) {
+        /* Empty path means "no wallpaper": fall back to a solid colour. */
+        desktop->wallpaper_path[0] = '\0';
+        return 0;
+    }
+
+    if (vfs_stat(path, &st) != 0) {
+        pr_err("[DESKTOP] Wallpaper not found: %s\n", path);
+        return -ENOENT;
+    }
+
+    strncpy(desktop->wallpaper_path, path, sizeof(desktop->wallpaper_path) - 1);
+    desktop->wallpaper_path[sizeof(desktop->wallpaper_path) - 1] = '\0';
+    desktop->wallpaper_mode = mode;
+
+    return 0;
+}
+
+/**
+ * desktop_set_background_color - Set the solid background colour
+ */
+int desktop_set_background_color(desktop_t *desktop, u32 color)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    desktop->background_color = color;
+
+    return 0;
+}
+
+/**
+ * desktop_icon_get - Look up a desktop icon by id
+ */
+desktop_icon_t *desktop_icon_get(desktop_t *desktop, int index)
+{
+    if (!desktop || !desktop->icons) {
+        return NULL;
+    }
+    if (index < 0 || index >= desktop->icon_count) {
+        return NULL;
+    }
+    return &desktop->icons[index];
+}
+
+/**
+ * desktop_show_context_menu - Open the desktop context menu
+ */
+int desktop_show_context_menu(desktop_t *desktop, int x, int y)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    /*
+     * desktop_t stores the context menu as an opaque pointer plus a visibility
+     * flag; the position belongs to the menu object itself, so record it
+     * there rather than inventing fields on the desktop.
+     */
+    desktop->context_menu_visible = true;
+    if (desktop->context_menu) {
+        /* desktop_menu_t lives in desktop-env.h; the first three fields are
+         * x, y, position, so record the anchor point through the struct. */
+        struct desktop_menu_anchor {
+            s32 x;
+            s32 y;
+            u32 position;
+        } *anchor = (struct desktop_menu_anchor *)desktop->context_menu;
+        anchor->x = x;
+        anchor->y = y;
+    }
+
+    return 0;
+}
+
+/**
+ * desktop_hide_context_menu - Close the desktop context menu
+ */
+int desktop_hide_context_menu(desktop_t *desktop)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    desktop->context_menu_visible = false;
+
+    return 0;
+}
+
+/**
+ * desktop_theme_save - Persist the current theme selection
+ *
+ * Writes the theme name to the desktop's config file so the choice survives
+ * a reboot.
+ */
+int desktop_theme_save(desktop_t *desktop)
+{
+    char path[128];
+    char buf[160];
+    s32 fd;
+    int len;
+
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    snprintf(path, sizeof(path), "/etc/desktop/%s.theme", desktop->theme_name[0] ?
+             desktop->theme_name : "default");
+
+    fd = vfs_open(path, VFS_FO_WRITE | VFS_FO_CREAT, 0644);
+    if (fd < 0) {
+        pr_err("[DESKTOP] Cannot save theme to %s\n", path);
+        return -EIO;
+    }
+
+    len = snprintf(buf, sizeof(buf), "theme=%s\naccent=0x%08X\nwallpaper=%s\nmode=%u\n",
+                   desktop->theme_name,
+                   (unsigned)desktop->accent_color,
+                   desktop->wallpaper_path,
+                   (unsigned)desktop->wallpaper_mode);
+
+    vfs_write((u32)fd, buf, (u64)len);
+    vfs_close((u32)fd);
+
+    return 0;
+}
+
+/**
+ * desktop_theme_load - Restore a theme selection by name
+ */
+int desktop_theme_load(desktop_t *desktop, const char *theme_name)
+{
+    if (!desktop || !theme_name) {
+        return -EINVAL;
+    }
+
+    strncpy(desktop->theme_name, theme_name, sizeof(desktop->theme_name) - 1);
+    desktop->theme_name[sizeof(desktop->theme_name) - 1] = '\0';
+
+    pr_info("[DESKTOP] Theme set to '%s'\n", desktop->theme_name);
+
+    return 0;
+}
+
+/**
+ * desktop_handle_key_press - Keyboard input for the desktop itself
+ *
+ * Handles the global shortcuts the desktop owns: workspace switching and
+ * dismissing the context menu.
+ */
+int desktop_handle_key_press(desktop_t *desktop, u32 key, u32 modifiers)
+{
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    /* Escape always dismisses transient UI. */
+    if (key == 0x1B) {
+        if (desktop->context_menu_visible) {
+            desktop->context_menu_visible = false;
+            return 0;
+        }
+        if (desktop->selected_icon) {
+            desktop->selected_icon = NULL;
+            return 0;
+        }
+        return -ENOENT;
+    }
+
+    /* Alt+Left / Alt+Right cycle workspaces. */
+    /* Bit 2 of the modifier mask is Alt (see the keyboard driver). */
+    if (modifiers & 0x4) {
+        if (key == 0x25) {      /* Left arrow */
+            int target = desktop->workspace - 1;
+            if (target < 0) {
+                target = desktop->workspace_count - 1;
+            }
+            return desktop_workspace_switch(desktop, target);
+        }
+        if (key == 0x27) {      /* Right arrow */
+            int target = desktop->workspace + 1;
+            if (target >= desktop->workspace_count) {
+                target = 0;
+            }
+            return desktop_workspace_switch(desktop, target);
+        }
+    }
+
+    return -ENOSYS;
+}
+
+/**
+ * desktop_handle_mouse_move - Track the cursor over the desktop
+ */
+int desktop_handle_mouse_move(desktop_t *desktop, int x, int y, u32 buttons)
+{
+    (void)buttons;
+
+    if (!desktop) {
+        return -EINVAL;
+    }
+
+    /* Update hover state for icons under the cursor. */
+    desktop->hovered_icon = NULL;
+    if (desktop->icons) {
+        for (int i = 0; i < desktop->icon_count; i++) {
+            desktop_icon_t *icon = &desktop->icons[i];
+            if (x >= icon->x && x < icon->x + icon->width &&
+                y >= icon->y && y < icon->y + icon->height) {
+                desktop->hovered_icon = icon;
+                break;
+            }
+        }
+    }
+
+    return 0;
 }

@@ -210,6 +210,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/panic.o \
             $(BUILD_DIR)/init.o \
             $(BUILD_DIR)/smp.o \
+            $(BUILD_DIR)/elf_loader.o \
             $(BUILD_DIR)/module_loader.o \
             $(BUILD_DIR)/gdt.o \
             $(BUILD_DIR)/idt.o \
@@ -275,6 +276,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/control-panel.o \
             $(BUILD_DIR)/compositing_manager.o \
             $(BUILD_DIR)/compositor.o \
+            $(BUILD_DIR)/wm_window.o \
             $(BUILD_DIR)/window_manager.o \
             $(BUILD_DIR)/control-center.o \
             $(BUILD_DIR)/file-manager.o \
@@ -300,6 +302,9 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/log_manager.o \
             $(BUILD_DIR)/feedback_manager.o \
             $(BUILD_DIR)/resource-sharing.o \
+            $(BUILD_DIR)/shell.o \
+            $(BUILD_DIR)/lang_runtime.o \
+            $(BUILD_DIR)/terminal.o \
             $(BUILD_DIR)/terminal_features.o \
             $(BUILD_DIR)/terminal_animations.o \
             $(BUILD_DIR)/display.o \
@@ -361,6 +366,9 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/nexus_hypervisor_core.o \
             $(BUILD_DIR)/vm_manager.o \
             $(BUILD_DIR)/nested_virt.o \
+            $(BUILD_DIR)/nexfs_core.o \
+            $(BUILD_DIR)/nexfs_inode.o \
+            $(BUILD_DIR)/nexfs_journal.o \
             $(BUILD_DIR)/procfs.o \
             $(BUILD_DIR)/telephony_manager.o \
             $(BUILD_DIR)/irq.o \
@@ -702,6 +710,10 @@ $(BUILD_DIR)/gpu.o: $(DRIVERS_DIR)/gpu/gpu.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
 
+$(BUILD_DIR)/elf_loader.o: $(KERNEL_DIR)/core/elf_loader.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
 $(BUILD_DIR)/module_loader.o: $(KERNEL_DIR)/core/module_loader.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
@@ -828,6 +840,14 @@ $(BUILD_DIR)/control-panel.o: $(GUI_DIR)/control-panel/control-panel.c | $(BUILD
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
 
+# gui/window-manager/window-manager.c and gui/compositor/window_manager.c
+# both want the object name "window_manager.o", so the former builds to
+# wm_window.o. They are different files implementing different things: the
+# compositor's window registry vs. the WM window object API used by apps.
+$(BUILD_DIR)/wm_window.o: $(GUI_DIR)/window-manager/window-manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+
 $(BUILD_DIR)/window_manager.o: $(GUI_DIR)/compositor/window_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
@@ -867,6 +887,14 @@ $(BUILD_DIR)/icon_library_extra.o: $(GUI_DIR)/icons/icon_library_extra.c | $(BUI
 $(BUILD_DIR)/display_settings.o: $(GUI_DIR)/display/display_settings.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+
+$(BUILD_DIR)/lang_runtime.o: $(APPS_DIR)/terminal/lang_runtime.c $(APPS_DIR)/terminal/lang_runtime.h | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(APPS_DIR) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
+$(BUILD_DIR)/shell.o: $(APPS_DIR)/terminal/shell.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1
 
 $(BUILD_DIR)/terminal.o: $(APPS_DIR)/terminal/terminal.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
@@ -937,6 +965,18 @@ $(BUILD_DIR)/vm_manager.o: $(VIRT_DIR)/vm/vm_manager.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
 
 $(BUILD_DIR)/nested_virt.o: $(VIRT_DIR)/emulation/nested_virt.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
+$(BUILD_DIR)/nexfs_core.o: $(FS_DIR)/nexfs/nexfs_core.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
+$(BUILD_DIR)/nexfs_inode.o: $(FS_DIR)/nexfs/nexfs_inode.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
+$(BUILD_DIR)/nexfs_journal.o: $(FS_DIR)/nexfs/nexfs_journal.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
 

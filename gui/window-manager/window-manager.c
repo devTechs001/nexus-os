@@ -1103,7 +1103,30 @@ static int apply_snap_geometry(window_manager_t *wm, wm_window_t *win)
         return -EINVAL;
     }
     
-    win->geometry = win->snap_rect;
+    /*
+     * window_geometry_t carries min/max constraints that rect_t does not, so
+     * this is a field-wise copy rather than a struct assignment. Clamp the
+     * snapped rectangle to the window's own limits while we are here, so a
+     * snap can never produce an unusable geometry.
+     */
+    win->geometry.x      = win->snap_rect.x;
+    win->geometry.y      = win->snap_rect.y;
+    win->geometry.width  = win->snap_rect.width;
+    win->geometry.height = win->snap_rect.height;
+
+    if (win->geometry.min_width && win->geometry.width < win->geometry.min_width) {
+        win->geometry.width = win->geometry.min_width;
+    }
+    if (win->geometry.min_height && win->geometry.height < win->geometry.min_height) {
+        win->geometry.height = win->geometry.min_height;
+    }
+    if (win->geometry.max_width && win->geometry.width > win->geometry.max_width) {
+        win->geometry.width = win->geometry.max_width;
+    }
+    if (win->geometry.max_height && win->geometry.height > win->geometry.max_height) {
+        win->geometry.height = win->geometry.max_height;
+    }
+
     update_window_geometry(wm, win);
     
     return 0;

@@ -28,6 +28,18 @@
 #define TERMINAL_MAX_SHORTCUTS      64
 #define TERMINAL_MAX_BOOKMARKS      64
 
+/*
+ * Forward declarations for GUI types this header refers to.
+ *
+ * terminal.h used wm_window_t and desktop_menu_t without declaring them, so
+ * the header could not be compiled on its own - which is why terminal.c had
+ * been dropped from the build.
+ */
+struct wm_window;
+typedef struct wm_window wm_window_t;
+struct desktop_menu;
+typedef struct desktop_menu desktop_menu_t;
+
 /*===========================================================================*/
 /*                         TERMINAL MODES                                    */
 /*===========================================================================*/
@@ -204,6 +216,13 @@ typedef struct terminal_window {
     bool find_regex;                  /* Use Regex */
     u32 find_matches;                 /* Find Matches */
     
+    /* Cursor / scrollback (per window, not per tab) */
+    bool cursor_blink;                /* Blink the cursor */
+    u32 scrollback_lines;             /* Scrollback size for new tabs */
+
+    /* Window list linkage */
+    struct terminal_window *next;     /* Next window in the app's list */
+
     /* Settings */
     terminal_theme_t current_theme;   /* Current Theme */
     terminal_profile_t current_profile; /* Current Profile */
@@ -271,6 +290,10 @@ typedef struct {
     /* Fonts */
     char fonts[TERMINAL_MAX_FONTS][64];
     u32 font_count;                   /* Font Count */
+
+    /* Keyboard shortcuts (application-wide defaults) */
+    terminal_shortcut_t shortcuts[TERMINAL_MAX_SHORTCUTS];
+    u32 shortcut_count;               /* Shortcut Count */
     
     /* Global Settings */
     terminal_profile_t default_profile; /* Default Profile */

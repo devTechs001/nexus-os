@@ -10,14 +10,8 @@
 /*                         NEXFS GLOBAL STATE                                */
 /*===========================================================================*/
 
-static struct {
-    bool initialized;
-    u32 mount_count;
-    atomic_t total_inodes;
-    atomic_t total_blocks;
-    u64 total_reads;
-    u64 total_writes;
-} nexfs_global = {
+/* Defined here, declared in nexfs.h so nexfs_inode.c can share it. */
+nexfs_global_t nexfs_global = {
     .initialized = false,
     .mount_count = 0,
 };
@@ -396,7 +390,7 @@ static s32 nexfs_write_group_descriptors(struct nexfs_superblock *sb)
  *
  * Returns: Block number or 0 on failure
  */
-static u64 nexfs_alloc_block(struct nexfs_superblock *sb, s32 group)
+u64 nexfs_alloc_block(struct nexfs_superblock *sb, s32 group)
 {
     u32 g;
     u32 bit;
@@ -812,7 +806,7 @@ s32 nexfs_mount(struct vfs_filesystem *fs, u32 flags, const char *dev_name,
     vfs_sb->s_blocks = sb->raw.s_blocks_count;
     vfs_sb->s_free_blocks = sb->raw.s_free_blocks;
     vfs_sb->s_bsize = NEXFS_BLOCK_SIZE;
-    vfs_sb->s_inodes = sb->raw.s_inodes_count;
+    vfs_sb->s_inodes_total = sb->raw.s_inodes_count;
     vfs_sb->s_free_inodes = sb->raw.s_free_inodes;
     vfs_sb->s_root = &root_inode->vfs_inode;
     vfs_sb->s_flags = flags;

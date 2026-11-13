@@ -1963,3 +1963,566 @@ login_screen_t *login_screen_get_instance(void)
 {
     return &g_login_screen;
 }
+
+/*===========================================================================*/
+/*        LOGIN SCREEN API THAT WAS DECLARED BUT NEVER IMPLEMENTED           */
+/*===========================================================================*/
+/*
+ * login-screen.h advertised all of the functions below, and login-screen.c
+ * used some of them internally, but none had a body anywhere in the tree.
+ * That left the screen only half-wired: there was no way to lock it, show an
+ * error, switch users, or inspect the session list from outside.
+ */
+
+/**
+ * login_screen_update_clock - Refresh the on-screen time from the RTC
+ * @screen: Pointer to login screen structure
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int login_screen_update_clock(login_screen_t *screen)
+{
+    u64 now;
+    u32 secs;
+    u32 days;
+
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    now = login_get_current_time();
+    secs = (u32)(now / 1000);
+
+    screen->hour   = (secs / 3600) % 24;
+    screen->minute = (secs / 60) % 60;
+    screen->second = secs % 60;
+
+    /*
+     * Civil date from days since epoch (a compact version of Howard Hinnant's
+     * civil_from_days, which is exact for the whole range we care about).
+     */
+    days = secs / 86400;
+    days += 719468;
+    u32 era = days / 146097;
+    u32 doe = days - era * 146097;
+    u32 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    u32 y   = yoe + era * 400;
+    u32 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    u32 mp  = (5 * doy + 2) / 153;
+    u32 d   = doy - (153 * mp + 2) / 5 + 1;
+    u32 m   = (mp < 10) ? mp + 3 : mp - 9;
+
+    if (m <= 2) {
+        y++;
+    }
+
+    screen->day   = d;
+    screen->month = m;
+    screen->year  = y;
+    screen->weekday = (u32)((days + 4) % 7);    /* 0 = Sunday */
+
+    return 0;
+}
+
+/**
+ * login_screen_update_status - Set the status line
+ */
+int login_screen_update_status(login_screen_t *screen, const char *status)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    update_status(screen, status ? status : "");
+    return 0;
+}
+
+/**
+ * login_screen_update_message - Set the welcome message
+ */
+int login_screen_update_message(login_screen_t *screen, const char *message)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    if (message) {
+        strncpy(screen->welcome_message, message, sizeof(screen->welcome_message) - 1);
+        screen->welcome_message[sizeof(screen->welcome_message) - 1] = '\0';
+    } else {
+        screen->welcome_message[0] = '\0';
+    }
+
+    return 0;
+}
+
+/**
+ * login_screen_show_error - Display an error, clearing any status line
+ */
+int login_screen_show_error(login_screen_t *screen, const char *error)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    if (error) {
+        strncpy(screen->error_message, error, sizeof(screen->error_message) - 1);
+        screen->error_message[sizeof(screen->error_message) - 1] = '\0';
+    } else {
+        screen->error_message[0] = '\0';
+    }
+
+    /* An error replaces the status line: showing both is contradictory. */
+    update_status(screen, screen->error_message);
+
+    return 0;
+}
+
+/**
+ * login_screen_clear_error - Clear the error and restore a neutral status
+ */
+int login_screen_clear_error(login_screen_t *screen)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    memset(screen->error_message, 0, sizeof(screen->error_message));
+    update_status(screen, "");
+
+    return 0;
+}
+
+/**
+ * login_screen_set_theme - Select a theme preset by name
+ */
+int login_screen_set_theme(login_screen_t *screen, const char *theme_name)
+{
+    int rc;
+
+    if (!screen || !theme_name) {
+        return -EINVAL;
+    }
+
+    if (strcmp(theme_name, "dark") == 0) {
+        rc = login_theme_dark(&screen->theme);
+    } else if (strcmp(theme_name, "light") == 0) {
+        rc = login_theme_light(&screen->theme);
+    } else if (strcmp(theme_name, "minimal") == 0) {
+        rc = login_theme_minimal(&screen->theme);
+    } else if (strcmp(theme_name, "elegant") == 0) {
+        rc = login_theme_elegant(&screen->theme);
+    } else {
+        rc = login_theme_default(&screen->theme);
+    }
+
+    if (rc != 0) {
+        return rc;
+    }
+
+    strncpy(screen->current_theme_name, theme_name, sizeof(screen->current_theme_name) - 1);
+    screen->current_theme_name[sizeof(screen->current_theme_name) - 1] = '\0';
+
+    return 0;
+}
+
+/**
+ * login_screen_apply_theme - Apply a caller-supplied theme structure
+ */
+int login_screen_apply_theme(login_screen_t *screen, login_theme_t *theme)
+{
+    if (!screen || !theme) {
+        return -EINVAL;
+    }
+
+    memcpy(&screen->theme, theme, sizeof(login_theme_t));
+
+    return 0;
+}
+
+/**
+ * login_screen_set_accessibility - Update accessibility options
+ */
+int login_screen_set_accessibility(login_screen_t *screen,
+                                   accessibility_options_t *options)
+{
+    if (!screen || !options) {
+        return -EINVAL;
+    }
+
+    memcpy(&screen->accessibility, options, sizeof(accessibility_options_t));
+
+    return 0;
+}
+
+/**
+ * login_screen_list_users - Enumerate users shown on the login screen
+ * @screen: Pointer to login screen structure
+ * @users: Output array
+ * @count: In: capacity of @users. Out: number written.
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int login_screen_list_users(login_screen_t *screen, user_info_t *users, u32 *count)
+{
+    u32 n;
+
+    if (!screen || !users || !count) {
+        return -EINVAL;
+    }
+
+    n = screen->user_count;
+    if (n > *count) {
+        n = *count;
+    }
+
+    for (u32 i = 0; i < n; i++) {
+        memcpy(&users[i], &screen->users[i], sizeof(user_info_t));
+    }
+
+    *count = n;
+
+    return 0;
+}
+
+/**
+ * login_screen_list_sessions - Enumerate open sessions
+ */
+int login_screen_list_sessions(login_screen_t *screen, session_info_t *sessions,
+                               u32 *count)
+{
+    u32 n;
+
+    if (!screen || !sessions || !count) {
+        return -EINVAL;
+    }
+
+    n = screen->session_count;
+    if (n > *count) {
+        n = *count;
+    }
+
+    for (u32 i = 0; i < n; i++) {
+        memcpy(&sessions[i], &screen->sessions[i], sizeof(session_info_t));
+    }
+
+    *count = n;
+
+    return 0;
+}
+
+/**
+ * login_screen_get_current_session - Return the active session, if any
+ */
+int login_screen_get_current_session(login_screen_t *screen, session_info_t *session)
+{
+    if (!screen || !session) {
+        return -EINVAL;
+    }
+
+    for (u32 i = 0; i < screen->session_count; i++) {
+        if (screen->sessions[i].is_active) {
+            memcpy(session, &screen->sessions[i], sizeof(session_info_t));
+            return 0;
+        }
+    }
+
+    return -ENOENT;
+}
+
+/**
+ * login_screen_add_session - Register a new session for the current user
+ */
+int login_screen_add_session(login_screen_t *screen, session_info_t *session)
+{
+    session_info_t *s;
+
+    if (!screen || !session) {
+        return -EINVAL;
+    }
+
+    if (screen->session_count >= LOGIN_MAX_SESSIONS) {
+        return -ENOMEM;
+    }
+
+    s = &screen->sessions[screen->session_count++];
+    memcpy(s, session, sizeof(session_info_t));
+
+    /* Fill in whatever the caller left blank. */
+    if (s->session_id == 0) {
+        s->session_id = 1000 + screen->session_count;
+    }
+    if (s->user_id == 0 && screen->current_user) {
+        s->user_id = screen->current_user->user_id;
+    }
+    if (s->session_name[0] == '\0') {
+        snprintf(s->session_name, sizeof(s->session_name),
+                 "session%u", s->session_id);
+    }
+    if (s->display[0] == '\0') {
+        snprintf(s->display, sizeof(s->display), ":0");
+    }
+    if (s->start_time == 0) {
+        s->start_time = login_get_current_time();
+    }
+    s->last_activity = s->start_time;
+    s->is_active = true;
+    s->is_default = (screen->session_count == 1);
+
+    /* Only one session may be active at a time. */
+    for (u32 i = 0; i + 1 < screen->session_count; i++) {
+        screen->sessions[i].is_active = false;
+    }
+
+    return 0;
+}
+
+/**
+ * login_screen_switch_user - Move focus to a different user account
+ */
+int login_screen_switch_user(login_screen_t *screen, u32 user_id)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    for (u32 i = 0; i < screen->user_count; i++) {
+        if (screen->users[i].user_id == user_id) {
+            screen->current_user = &screen->users[i];
+            screen->is_authenticated = false;
+            screen->password_length = 0;
+            memset(screen->password_buffer, 0, LOGIN_PASSWORD_MAX);
+
+            if (screen->password_entry) {
+                widget_set_text(screen->password_entry, "");
+                widget_focus(screen->password_entry);
+            }
+
+            update_status(screen, "Enter password");
+            return 0;
+        }
+    }
+
+    return -ENOENT;
+}
+
+/**
+ * login_screen_remove_user - Delete a user account from the login screen
+ *
+ * The account list is packed, so the tail has to be shifted down. Any
+ * session belonging to the removed user is dropped as well.
+ */
+int login_screen_remove_user(login_screen_t *screen, u32 user_id)
+{
+    u32 i;
+
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    for (i = 0; i < screen->user_count; i++) {
+        if (screen->users[i].user_id == user_id) {
+            /* Refuse to remove the account currently selected. */
+            if (screen->current_user == &screen->users[i]) {
+                return -EBUSY;
+            }
+
+            for (u32 j = i; j + 1 < screen->user_count; j++) {
+                screen->users[j] = screen->users[j + 1];
+            }
+            screen->user_count--;
+
+            /* Pack sessions too. */
+            for (u32 j = 0; j < screen->session_count; ) {
+                if (screen->sessions[j].user_id == user_id) {
+                    for (u32 k = j; k + 1 < screen->session_count; k++) {
+                        screen->sessions[k] = screen->sessions[k + 1];
+                    }
+                    screen->session_count--;
+                } else {
+                    j++;
+                }
+            }
+
+            return 0;
+        }
+    }
+
+    return -ENOENT;
+}
+
+/*===========================================================================*/
+/*                       ALTERNATE AUTHENTICATION                            */
+/*===========================================================================*/
+
+/**
+ * login_screen_authenticate_pin - Authenticate with a numeric PIN
+ *
+ * A PIN is a credential like any other, so it goes through the exact same
+ * auth path as a password - including the attempt counter and lockout. It is
+ * compared against the account's password field rather than a separate store,
+ * because NEXUS has no dedicated PIN backend.
+ */
+int login_screen_authenticate_pin(login_screen_t *screen, const char *pin)
+{
+    if (!screen || !pin) {
+        return -EINVAL;
+    }
+
+    if (!*pin) {
+        login_screen_show_error(screen, "PIN required");
+        return -EINVAL;
+    }
+
+    return login_screen_authenticate(screen, pin);
+}
+
+/**
+ * login_screen_authenticate_face - Face unlock
+ *
+ * Returns -ENOSYS deliberately: there is no camera pipeline feeding a face
+ * matcher in this tree, and pretending otherwise would let anyone in.
+ */
+int login_screen_authenticate_face(login_screen_t *screen)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    login_screen_show_error(screen,
+        "Face unlock is not available (no biometric pipeline)");
+    return -ENOSYS;
+}
+
+/**
+ * login_screen_authenticate_fingerprint - Fingerprint unlock
+ *
+ * Same reasoning as face unlock: honestly unavailable rather than fake.
+ */
+int login_screen_authenticate_fingerprint(login_screen_t *screen)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    login_screen_show_error(screen,
+        "Fingerprint unlock is not available (no sensor pipeline)");
+    return -ENOSYS;
+}
+
+/*===========================================================================*/
+/*                          POWER MANAGEMENT                                 */
+/*===========================================================================*/
+
+/**
+ * login_screen_hibernate_system - Hibernate the machine
+ *
+ * Hibernation needs swap-space writeout and a resume image; neither exists
+ * yet. Report that instead of silently doing nothing after the UI says it
+ * worked.
+ */
+int login_screen_hibernate_system(login_screen_t *screen)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    login_screen_show_error(screen,
+        "Hibernation is not supported (no resume image support)");
+    return -ENOSYS;
+}
+
+/**
+ * login_screen_lock_system - Lock the session from the login screen
+ *
+ * Distinct from login_screen_lock(): that locks the *screen object*, while
+ * this is the power-menu "Lock" action, which also tears the session down to
+ * the lock state so the desktop has to be re-authenticated.
+ */
+int login_screen_lock_system(login_screen_t *screen)
+{
+    int rc;
+
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    rc = login_screen_lock(screen);
+    if (rc != 0) {
+        return rc;
+    }
+
+    /* Suspending the session means dropping the authentication context. */
+    screen->state = LOGIN_STATE_LOCKED;
+    screen->is_authenticated = false;
+    screen->failed_attempts = 0;
+
+    update_status(screen, "Session locked");
+    pr_info("[LOGIN] Session locked by user\n");
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*                          UTILITIES                                        */
+/*===========================================================================*/
+
+/**
+ * login_format_time - Format a millisecond timestamp as HH:MM[:SS]
+ *
+ * @time: Timestamp in milliseconds since boot/epoch
+ * @buffer: Destination
+ * @size: Size of @buffer
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int login_format_time(u64 time, char *buffer, u32 size)
+{
+    u32 secs;
+    u32 h, m, s;
+
+    if (!buffer || size < 6) {
+        return -EINVAL;
+    }
+
+    secs = (u32)(time / 1000);
+    h = (secs / 3600) % 24;
+    m = (secs / 60) % 60;
+    s = secs % 60;
+
+    snprintf(buffer, size, "%02u:%02u:%02u", h, m, s);
+
+    return 0;
+}
+
+/**
+ * login_format_date - Format a millisecond timestamp as YYYY-MM-DD
+ */
+int login_format_date(u64 time, char *buffer, u32 size)
+{
+    u32 secs;
+    u32 days, era, doe, yoe, y, doy, mp, d, m;
+
+    if (!buffer || size < 11) {
+        return -EINVAL;
+    }
+
+    secs = (u32)(time / 1000);
+    days = secs / 86400;
+    days += 719468;
+    era = days / 146097;
+    doe = days - era * 146097;
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y   = yoe + era * 400;
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp  = (5 * doy + 2) / 153;
+    d   = doy - (153 * mp + 2) / 5 + 1;
+    m   = (mp < 10) ? mp + 3 : mp - 9;
+    if (m <= 2) {
+        y++;
+    }
+
+    snprintf(buffer, size, "%04u-%02u-%02u", y, m, d);
+
+    return 0;
+}

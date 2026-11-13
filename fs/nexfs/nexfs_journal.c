@@ -155,6 +155,7 @@ static struct nexfs_transaction *nexfs_transaction_alloc(struct nexfs_journal *j
     INIT_LIST_HEAD(&trans->t_list);
 
     spin_lock_init(&trans->t_lock);
+    atomic_set(&trans->t_refcount, 0);
 
     return trans;
 }
@@ -441,7 +442,7 @@ s32 nexfs_journal_start(struct nexfs_superblock *sb, u32 blocks)
         journal->j_current_transaction = trans;
     }
 
-    atomic_inc(&trans->t_lock.counter);  /* Use as refcount */
+    atomic_inc(&trans->t_refcount);
 
     spin_unlock(&journal->j_lock);
 
@@ -474,9 +475,9 @@ s32 nexfs_journal_stop(struct nexfs_superblock *sb)
     trans = journal->j_current_transaction;
 
     if (trans) {
-        atomic_dec(&trans->t_lock.counter);
+        atomic_dec(&trans->t_refcount);
 
-        if (atomic_read(&trans->t_lock.counter) <= 0) {
+        if (atomic_read(&trans->t_refcount) <= 0) {
             /* Transaction complete */
             trans->t_state = NEXUS_TRANS_LOCKED;
         }
