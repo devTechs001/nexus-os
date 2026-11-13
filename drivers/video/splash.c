@@ -517,6 +517,17 @@ void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp)
         return;
     }
 
+    /*
+     * The renderer writes 32-bit XRGB pixels. Rendering into a 16- or 24-bpp
+     * surface would produce colour garbage rather than a splash, so refuse
+     * the framebuffer instead of pretending to draw on it.
+     */
+    if (bpp && bpp != 32) {
+        printk("[SPLASH] Framebuffer is %ubpp; the splash renderer needs 32bpp "
+               "- graphical splash skipped (console output continues)\n", bpp);
+        return;
+    }
+
     g_splash.framebuffer = fb;
     g_splash.width = width;
     g_splash.height = height;

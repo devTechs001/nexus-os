@@ -9,6 +9,10 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declarations: defined further down this file. */
+int alias_add(const char *name, const char *value, const char *description);
+int help_add(const char *command, const char *short_desc, const char *full_desc, const char *see_also);
+
 /*===========================================================================*/
 /*                         CONFIGURATION                                     */
 /*===========================================================================*/

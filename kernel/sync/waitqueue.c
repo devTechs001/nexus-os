@@ -4,6 +4,7 @@
  */
 
 #include "sync.h"
+#include "../sched/sched.h"
 
 /*===========================================================================*/
 /*                         WAIT QUEUE CONFIGURATION                          */

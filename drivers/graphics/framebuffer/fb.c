@@ -110,6 +110,13 @@ typedef struct {
     void *par;
 } fb_info_t;
 
+/* Registration entry points (defined further down this file). */
+fb_info_t *fb_register_device(const char *name, void *base, phys_addr_t phys,
+                              u32 size, u32 xres, u32 yres, u32 bpp);
+fb_info_t *fb_register_device_ex(const char *name, void *base, phys_addr_t phys,
+                                 u32 size, u32 xres, u32 yres, u32 bpp,
+                                 u32 pitch);
+
 typedef struct {
     bool initialized;
     fb_info_t devices[FB_MAX_DEVICES];
@@ -381,8 +388,9 @@ int fb_get_mode(u32 *xres, u32 *yres, u32 *bpp)
 /*                         DEVICE MANAGEMENT                                 */
 /*===========================================================================*/
 
-fb_info_t *fb_register_device(const char *name, void *base, phys_addr_t phys, 
-                               u32 size, u32 xres, u32 yres, u32 bpp)
+fb_info_t *fb_register_device_ex(const char *name, void *base, phys_addr_t phys,
+                                  u32 size, u32 xres, u32 yres, u32 bpp,
+                                  u32 pitch)
 {
     spinlock_lock(&g_fb.lock);
     
@@ -409,7 +417,13 @@ fb_info_t *fb_register_device(const char *name, void *base, phys_addr_t phys,
     
     fb->fix.smem_start = base;
     fb->fix.smem_len = size;
-    fb->fix.line_length = xres * (bpp / 8);
+    /*
+     * Honour the pitch the bootloader actually gave us. GRUB commonly pads
+     * each scanline to a larger alignment than xres * bytes_per_pixel, and
+     * assuming the tight stride shears the image diagonally: every row
+     * starts a few pixels further right than the one above it.
+     */
+    fb->fix.line_length = pitch ? pitch : (xres * (bpp / 8));
     fb->fix.accel = FB_HAS_ACCEL;
     
     /* Set default color map */
@@ -500,20 +514,36 @@ int framebuffer_init(void)
     boot_params_t *params = get_boot_params();
     if (params && params->gfx_addr) {
         u32 fb_size = params->gfx_pitch * params->gfx_height;
-        fb_register_device("GRUB FB",
-                           (void *)(uintptr_t)params->gfx_addr,
-                           params->gfx_addr,
-                           fb_size,
-                           params->gfx_width,
-                           params->gfx_height,
-                           params->gfx_depth);
-        printk("[FRAMEBUFFER] Registered GRUB framebuffer: %dx%dx%d at 0x%llX\n",
-               params->gfx_width, params->gfx_height, params->gfx_depth, params->gfx_addr);
+        fb_register_device_ex("GRUB FB",
+                              (void *)(uintptr_t)params->gfx_addr,
+                              params->gfx_addr,
+                              fb_size,
+                              params->gfx_width,
+                              params->gfx_height,
+                              params->gfx_depth,
+                              params->gfx_pitch);
+        printk("[FRAMEBUFFER] Registered GRUB framebuffer: %dx%dx%d, pitch %u at 0x%llX\n",
+               params->gfx_width, params->gfx_height, params->gfx_depth,
+               params->gfx_pitch, params->gfx_addr);
     } else {
-        /* Fallback: register standard VGA framebuffer */
-        void *vga_base = (void *)0x000A0000;
-        fb_register_device("VGA", vga_base, 0x000A0000, 65536, 320, 200, 8);
-        printk("[FRAMEBUFFER] No GRUB framebuffer, using legacy VGA\n");
+        /*
+         * Fallback: VGA *text* memory, not the 0xA0000 graphics window.
+         *
+         * Registering 0xA0000 at 320x200x8 painted nothing: the display was
+         * in text mode (console_init() had set it up that way), so writes to
+         * the graphics aperture were never scanned out - which is exactly
+         * why the VGA window stayed black while the serial log ran.
+         *
+         * The text buffer at 0xB8000 *is* what the card displays in text
+         * mode, so registering it as a 720x400x4 surface means the graphical
+         * renderer's output actually lands on screen.
+         */
+        void *vga_text = (void *)0xB8000;
+        fb_register_device_ex("VGA text", vga_text, 0xB8000, 32768,
+                              720, 400, 4, 80 * 2);
+        printk("[FRAMEBUFFER] No GRUB framebuffer: registered VGA text memory "
+               "(80x25 characters at 0xB8000) instead of an unusable "
+               "320x200 graphics fallback\n");
     }
     
     printk("[FRAMEBUFFER] Framebuffer driver initialized\n");
@@ -531,6 +561,19 @@ int framebuffer_shutdown(void)
     
     g_fb.initialized = false;
     return 0;
+}
+
+/*
+ * fb_register_device - Backwards-compatible registration with a tight pitch
+ *
+ * Callers that know their scanline stride should use fb_register_device_ex()
+ * so a padded framebuffer is described correctly.
+ */
+fb_info_t *fb_register_device(const char *name, void *base, phys_addr_t phys,
+                              u32 size, u32 xres, u32 yres, u32 bpp)
+{
+    return fb_register_device_ex(name, base, phys, size, xres, yres, bpp,
+                                 xres * (bpp / 8));
 }
 
 /*===========================================================================*/

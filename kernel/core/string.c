@@ -686,3 +686,78 @@ char *kstrdup(const char *s)
     }
     return new;
 }
+
+/**
+ * atoi - Convert a decimal string to an int
+ *
+ * Callers (boot menu, config parsers) relied on an implicit declaration;
+ * the only implementation lived in userspace/libc, which is not linked
+ * into the kernel.
+ */
+int atoi(const char *nptr)
+{
+    int result = 0;
+    int sign = 1;
+
+    if (!nptr) {
+        return 0;
+    }
+
+    while (*nptr == ' ' || *nptr == '\t' || *nptr == '\n') {
+        nptr++;
+    }
+
+    if (*nptr == '-') {
+        sign = -1;
+        nptr++;
+    } else if (*nptr == '+') {
+        nptr++;
+    }
+
+    while (*nptr >= '0' && *nptr <= '9') {
+        result = result * 10 + (*nptr - '0');
+        nptr++;
+    }
+
+    return sign * result;
+}
+
+/**
+ * strcasestr - Case-insensitive substring search
+ */
+char *strcasestr(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle) {
+        return NULL;
+    }
+
+    if (!*needle) {
+        return (char *)haystack;
+    }
+
+    for (; *haystack; haystack++) {
+        const char *h = haystack;
+        const char *n = needle;
+
+        while (*h && *n) {
+            char hc = *h;
+            char nc = *n;
+
+            if (hc >= 'A' && hc <= 'Z') hc = (char)(hc - 'A' + 'a');
+            if (nc >= 'A' && nc <= 'Z') nc = (char)(nc - 'A' + 'a');
+
+            if (hc != nc) {
+                break;
+            }
+
+            h++;
+            n++;
+        }
+
+        if (!*n) {
+            return (char *)haystack;
+        }
+    }
+
+    return NULL;
+}

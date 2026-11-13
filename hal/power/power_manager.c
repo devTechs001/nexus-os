@@ -9,6 +9,10 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declarations: defined elsewhere in the HAL, no shared header
+ * without pulling in a conflicting cpu_info_t definition. */
+int cpu_set_frequency(u32 cpu_id, u32 freq);
+
 /*===========================================================================*/
 /*                         POWER MANAGEMENT CONFIGURATION                    */
 /*===========================================================================*/

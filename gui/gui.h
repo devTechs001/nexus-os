@@ -13,7 +13,7 @@
 #define _NEXUS_GUI_H
 
 #include "../kernel/include/types.h"
-#include "../kernel/include/kernel.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         GUI FRAMEWORK VERSION                             */

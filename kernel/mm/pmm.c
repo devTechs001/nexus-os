@@ -350,6 +350,45 @@ size_t pmm_get_used_pages(void)
     return count;
 }
 
+/*
+ * System information probes.
+ *
+ * procfs.c (/proc/meminfo) and log_manager.c call these, but they were
+ * never defined: both files fell back to an implicit int declaration and
+ * the kernel could not link. Back them with the real page counters.
+ */
+u64 get_total_memory(void)
+{
+    return (u64)pmm_get_total_pages() * PAGE_SIZE;
+}
+
+u64 get_free_memory(void)
+{
+    return (u64)pmm_get_free_pages() * PAGE_SIZE;
+}
+
+/*
+ * Page and buffer cache accounting is not tracked separately yet - there
+ * is no page cache in the VFS - so report zero rather than a made-up
+ * number. The callers add these to the free figure, so zero is correct.
+ */
+u64 get_page_cache_size(void)
+{
+    return 0;
+}
+
+u64 get_buffer_cache_size(void)
+{
+    return 0;
+}
+
+/* Slab usage is genuinely tracked, in the slab allocator. */
+u64 get_slab_memory(void)
+{
+    extern size_t slab_get_active_bytes(void);
+    return (u64)slab_get_active_bytes();
+}
+
 /*===========================================================================*/
 /*                         PMM INITIALIZATION                                */
 /*===========================================================================*/

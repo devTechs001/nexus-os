@@ -519,4 +519,25 @@ void hal_early_init(void);
 void hal_late_init(void);
 void hal_shutdown(void);
 
+
+/*===========================================================================*/
+/*                    x86_64 CPU DRIVER ENTRY POINTS                         */
+/*===========================================================================*/
+/*
+ * Implemented in kernel/arch/x86_64/cpu/cpu.c and called from hal/cpu/.
+ * They had no declaration in any header, so every caller fell back to an
+ * implicit int-returning prototype.
+ */
+int x86_cpu_detect(u32 cpu_id);
+int x86_cpu_enable(u32 cpu_id);
+int x86_cpu_disable(u32 cpu_id);
+int x86_cpu_set_frequency(u32 cpu_id, u32 freq);
+int x86_cpu_set_pstate(u32 cpu_id, u32 pstate);
+s32 x86_cpu_get_temperature(u32 cpu_id);
+s32 x86_cpu_get_tjmax(u32 cpu_id);
+
+/* Power management helpers (hal/power/) */
+int cpu_set_frequency(u32 cpu_id, u32 freq);
+int acpi_enter_sleep_state(u32 state);
+
 #endif /* _NEXUS_HAL_H */

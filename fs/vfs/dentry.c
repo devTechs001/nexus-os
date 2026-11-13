@@ -25,8 +25,8 @@ static struct {
     atomic_t negative;
     atomic_t referenced;
     u64 total_lookups;
-    u64 total_creates;
-    u64 total_deletes;
+    atomic_t total_creates;   /* bumped with atomic_inc() below */
+    atomic_t total_deletes;   /* likewise */
 } dentry_stats;
 
 /*===========================================================================*/
@@ -63,8 +63,8 @@ s32 vfs_dentry_cache_init(void)
     atomic_set(&dentry_stats.negative, 0);
     atomic_set(&dentry_stats.referenced, 0);
     dentry_stats.total_lookups = 0;
-    dentry_stats.total_creates = 0;
-    dentry_stats.total_deletes = 0;
+    atomic_set(&dentry_stats.total_creates, 0);
+    atomic_set(&dentry_stats.total_deletes, 0);
 
     pr_debug("VFS: Dentry cache created (size=%lu)\n", sizeof(struct vfs_dentry));
 
@@ -823,8 +823,8 @@ void vfs_dentry_stats_print(void)
     printk("Negative:        %d\n", atomic_read(&dentry_stats.negative));
     printk("Referenced:      %d\n", atomic_read(&dentry_stats.referenced));
     printk("Total Lookups:   %llu\n", (unsigned long long)dentry_stats.total_lookups);
-    printk("Total Creates:   %llu\n", (unsigned long long)dentry_stats.total_creates);
-    printk("Total Deletes:   %llu\n", (unsigned long long)dentry_stats.total_deletes);
+    printk("Total Creates:   %d\n", atomic_read(&dentry_stats.total_creates));
+    printk("Total Deletes:   %d\n", atomic_read(&dentry_stats.total_deletes));
 }
 
 /**

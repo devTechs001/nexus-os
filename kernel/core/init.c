@@ -231,8 +231,16 @@ void kernel_init_cpus(void)
     /* 3. Initialize interrupt controllers */
     interrupt_init();
     
-    /* 4. Initialize system timer (1 GHz default) */
-    arch_init_timer(1000000000);
+    /*
+     * 4. Initialize system timer at 1000 Hz (1 ms tick).
+     *
+     * This used to pass 1000000000. The PIT divisor is
+     * 1193182 / freq, which truncates to 0 at 1 GHz, and a divisor of 0
+     * means 65536 to the hardware - so the PIT actually ticked at ~18 Hz
+     * while the kernel believed it was 1 tick/ms. Every tick-based timeout
+     * and the boot splash animation were therefore wrong by ~55x.
+     */
+    arch_init_timer(1000);
 
     /* 5. Initialize ACPI */
     acpi_init();

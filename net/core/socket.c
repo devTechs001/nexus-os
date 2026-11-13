@@ -305,7 +305,6 @@ int sock_create(int family, int type, int protocol, struct socket **res)
 {
     struct socket *sock;
     int fd;
-    int ret;
 
     if (!res) {
         return -EINVAL;
@@ -382,7 +381,6 @@ int sock_create(int family, int type, int protocol, struct socket **res)
 int sock_create_kern(int family, int type, int protocol, struct socket **res)
 {
     struct socket *sock;
-    int ret;
 
     if (!res) {
         return -EINVAL;
@@ -706,7 +704,6 @@ int sock_accept(struct socket *sock, struct socket *newsock, int flags)
 int sock_sendmsg(struct socket *sock, void *msg, size_t len, int flags)
 {
     struct sk_buff *skb;
-    int ret;
 
     if (!sock || !msg) {
         return -EINVAL;
@@ -773,7 +770,6 @@ int sock_recvmsg(struct socket *sock, void *msg, size_t len, int flags)
 {
     struct sk_buff *skb;
     size_t copy_len;
-    int ret;
 
     if (!sock || !msg) {
         return -EINVAL;

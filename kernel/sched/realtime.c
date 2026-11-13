@@ -924,15 +924,9 @@ const struct sched_class rt_sched_class = {
 
 extern void resched_cpu(u32 cpu);
 
-/* Scheduler class structure */
-struct sched_class {
-    void (*enqueue_task)(struct rq *rq, struct task_struct *task, int flags);
-    void (*dequeue_task)(struct rq *rq, struct task_struct *task, int flags);
-    void (*put_prev_task)(struct rq *rq, struct task_struct *task);
-    struct task_struct *(*pick_next_task)(struct rq *rq);
-    void (*check_preempt_curr)(struct rq *rq, struct task_struct *task, int flags);
-    void (*task_tick)(struct rq *rq, struct task_struct *task);
-    void (*switched_from)(struct rq *rq, struct task_struct *task);
-    void (*switched_to)(struct rq *rq, struct task_struct *task);
-    void (*prio_changed)(struct rq *rq, struct task_struct *task);
-};
+/*
+ * struct sched_class is defined in kernel/sched/sched.h, which this file
+ * already includes. The byte-identical copy that used to live here made
+ * every build fail with "redefinition of 'struct sched_class'".
+ */
+

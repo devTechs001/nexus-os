@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 /*===========================================================================*/
 /*                         WIDGET CLASS DEFINITION                           */
 /*===========================================================================*/
@@ -88,6 +89,10 @@ typedef struct widget {
     /* Reference counting */
     atomic_t refcount;
 } widget_t;
+
+/* Forward declarations: defined further down this file. */
+int widget_add_child(widget_t *parent, widget_t *child);
+int widget_remove_child(widget_t *parent, widget_t *child);
 
 /*===========================================================================*/
 /*                         WIDGET CLASS REGISTRY                             */

@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declaration: defined further down this file. */
+int restore_delete(u32 point_id);
+
 /* Forward declarations */
 int restore_create(const char *name, const char *description, u32 type, bool protected);
 

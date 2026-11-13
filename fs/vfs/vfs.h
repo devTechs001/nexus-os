@@ -918,6 +918,19 @@ void vfs_shrink_inode_cache(void);
 void vfs_shrink_dentry_cache(void);
 void vfs_drop_caches(void);
 
+/*
+ * Cache/mount lifecycle entry points. Implemented in dentry.c, inode.c and
+ * mount.c; vfs_core.c calls them before they are declared anywhere, which
+ * made the compiler assume an int return type for a u32/s32 function.
+ */
+s32 vfs_dentry_cache_init(void);
+void vfs_dentry_cache_exit(void);
+s32 vfs_inode_cache_init(void);
+void vfs_inode_cache_exit(void);
+u32 vfs_dentry_shrink(void);
+u32 vfs_inode_shrink(void);
+s32 vfs_mount_init(void);
+
 /* Utility Functions */
 s32 vfs_path_split(const char *path, char **dir, char **base);
 bool vfs_path_is_absolute(const char *path);

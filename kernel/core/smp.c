@@ -6,6 +6,14 @@
  */
 
 #include "../include/kernel.h"
+#include "../sched/sched.h"
+
+/* Architecture entry points - defined at the bottom of this file and by
+ * architecture-specific code. Declared here because they are called early. */
+extern int arch_cpu_up(u32 cpu);
+extern int arch_cpu_down(u32 cpu);
+extern void arch_send_ipi(u32 cpu, u32 vector);
+extern void arch_scheduler_enable(u32 cpu);
 
 /* Spinlock initializer */
 #define SPINLOCK_UNLOCKED  { .lock = 0 }
@@ -213,17 +221,11 @@ int cpu_down(u32 cpu)
 /*                         IPI (Inter-Processor Interrupt)                   */
 /*===========================================================================*/
 
-/**
- * IPI Message Types
+/*
+ * ipi_type_t (IPI_RESCHEDULE ... IPI_INVALIDATE_TLB) is declared in
+ * kernel/include/kernel.h. This was a second, identical definition, so
+ * every build of this file failed with "redeclaration of enum ipi_type".
  */
-typedef enum ipi_type {
-    IPI_RESCHEDULE      = 0,
-    IPI_CALL_FUNC       = 1,
-    IPI_CPU_STOP        = 2,
-    IPI_CPU_HALT        = 3,
-    IPI_WAKEUP          = 4,
-    IPI_INVALIDATE_TLB  = 5,
-} ipi_type_t;
 
 /**
  * IPI Message
@@ -448,12 +450,8 @@ void smp_debug_print(void)
 /*                         ARCHITECTURE INTERFACES                           */
 /*===========================================================================*/
 
-/* These functions must be implemented by architecture-specific code */
-
-extern int arch_cpu_up(u32 cpu);
-extern int arch_cpu_down(u32 cpu);
-extern void arch_send_ipi(u32 cpu, u32 vector);
-extern void arch_scheduler_enable(u32 cpu);
+/* These functions must be implemented by architecture-specific code.
+ * (Kept near the top: cpu_up()/cpu_down() call them long before this point.) */
 
 /* Architecture stubs */
 void arch_smp_detect(void)

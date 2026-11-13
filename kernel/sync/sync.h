@@ -326,6 +326,8 @@ struct mutex_stats {
 /* Spinlock functions */
 void spinlock_init(spinlock_t *lock);
 void spinlock_init_named(spinlock_t *lock, const char *name);
+/* Linux-style alias implemented in spinlock.c; widely used by hal/ */
+void spin_lock_init_named(spinlock_t *lock, const char *name);
 void spinlock_lock(spinlock_t *lock);
 void spinlock_unlock(spinlock_t *lock);
 bool spinlock_trylock(spinlock_t *lock);
@@ -391,6 +393,10 @@ bool atomic_bitmask_test_and_clear(atomic_bitmask_t *mask, u32 bit);
 /* Wait queue functions */
 void wait_queue_init(wait_queue_head_t *wq);
 void wait_queue_init_named(wait_queue_head_t *wq, const char *name);
+/* Linux-style aliases implemented in waitqueue.c */
+void init_waitqueue_head_named(wait_queue_head_t *wq, const char *name);
+void init_waitqueue_head(wait_queue_head_t *wq);
+void wake_up(wait_queue_head_t *wq);
 void wait_queue_add(wait_queue_head_t *wq, wait_queue_entry_t *entry);
 void wait_queue_remove(wait_queue_head_t *wq, wait_queue_entry_t *entry);
 void wait_queue_wake(wait_queue_head_t *wq);

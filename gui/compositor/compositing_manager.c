@@ -8,7 +8,7 @@
 
 #include "../gui.h"
 #include "compositor.h"
-#include "../kernel/include/kernel.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         COMPOSITOR CONFIGURATION                          */

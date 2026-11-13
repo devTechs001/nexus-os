@@ -38,8 +38,12 @@ static int sd_wait_command(sd_controller_t *ctrl, u32 timeout_ms);
 static int sd_wait_data(sd_controller_t *ctrl, u32 timeout_ms);
 
 /* Helper functions */
-static u32 sd_calc_capacity(sd_device_t *dev);
-static int sd_parse_cid(sd_device_t *dev);
+/*
+ * sd_calc_capacity() and sd_parse_cid() used to be declared here and were
+ * never defined anywhere - dead prototypes that only produced warnings.
+ * Capacity is derived directly from the CSD / EXT_CSD in sd_parse_csd()
+ * and the init paths instead.
+ */
 static int sd_parse_csd(sd_device_t *dev);
 
 /*===========================================================================*/

@@ -173,8 +173,20 @@ static inline bool list_empty(const struct list_head *head) {
          &pos->member != (head); \
          pos = n, n = list_entry(n->member.next, typeof(*pos), member))
 
-/* Atomic Operations - now implemented in kernel/sync/atomic.c */
-/*
+/* Atomic Operations - implemented in kernel/sync/atomic.c */
+s32  atomic_read(const atomic_t *v);
+void atomic_set(atomic_t *v, s32 i);
+void atomic_inc(atomic_t *v);
+void atomic_dec(atomic_t *v);
+s32  atomic_add_return(s32 i, atomic_t *v);
+s32  atomic_cmpxchg(atomic_t *v, s32 old, s32 new);
+s32  atomic_inc_return(atomic_t *v);
+s32  atomic_dec_return(atomic_t *v);
+bool atomic_dec_and_test(atomic_t *v);
+s32  atomic_sub_return(s32 i, atomic_t *v);
+s32  atomic_xchg(atomic_t *v, s32 new);
+
+/* Historical inline versions, kept for reference (superseded above):
 static inline s32 atomic_read(const atomic_t *v) {
     return v->counter;
 }
@@ -300,10 +312,17 @@ char *strncat(char *dest, const char *src, size_t n);
 char *kstrdup(const char *s);
 char *strtok_r(char *str, const char *delim, char **saveptr);
 int snprintf(char *str, size_t size, const char *fmt, ...);
+int vsnprintf(char *buf, size_t size, const char *fmt, __builtin_va_list args);
+unsigned long strtoul(const char *nptr, char **endptr, int base);
 void *memcpy(void *dest, const void *src, size_t n);
 void *memset(void *s, int c, size_t n);
 void *memmove(void *dest, const void *src, size_t n);
 int memcmp(const void *s1, const void *s2, size_t n);
+
+/* Constant-time helpers (kernel/core/string.c) - used by the auth stack,
+ * which previously called them with no prototype at all. */
+void crypto_memzero(void *s, size_t n);
+int crypto_memcmp(const void *a, const void *b, size_t n);
 
 /* Per-CPU */
 percpu_data_t *get_percpu(void);
@@ -350,6 +369,8 @@ bool is_graphics_mode(void);
 bool is_safe_mode(void);
 bool is_debug_mode(void);
 unsigned long simple_strtoul(const char *cp, char **endp, unsigned int base);
+int atoi(const char *nptr);
+char *strcasestr(const char *haystack, const char *needle);
 char *strsep(char **stringp, const char *delim);
 
 /* Interrupts */
@@ -373,6 +394,14 @@ u64 arch_get_ticks(void);
 u64 get_ticks(void);
 u64 get_time_ms(void);
 void delay_ms(u64 ms);
+void mdelay(u32 ms);
+void udelay(u32 us);
+
+/* Kernel time probes (kernel/arch/x86_64/cpu/timer.c) */
+u64 ktime_get_ns(void);
+u64 ktime_get_us(void);
+u64 ktime_get_ms(void);
+u64 ktime_get_sec(void);
 
 /* Scheduler & SMP */
 void scheduler_migrate_tasks(u32 cpu);
@@ -393,6 +422,8 @@ void spinlock_unlock_irq(spinlock_t *lock);
 
 /* Spinlock compatibility macros */
 #define spin_lock_init(lock)            spinlock_init(lock)
+/* Function (not macro) alias implemented in kernel/sync/spinlock.c */
+void spin_lock_init_named(spinlock_t *lock, const char *name);
 #define spin_lock(lock)                 spinlock_lock(lock)
 #define spin_unlock(lock)               spinlock_unlock(lock)
 #define spin_trylock(lock)              spinlock_trylock(lock)

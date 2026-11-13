@@ -13,6 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Forward declaration: defined further down this file. */
+int window_manager_register_class(const char *name,
+                                   void (*wnd_proc)(window_t *, u32, void *, void *),
+                                   u32 style, color_t background);
+
 /*===========================================================================*/
 /*                         WINDOW MANAGER STATE                              */
 /*===========================================================================*/

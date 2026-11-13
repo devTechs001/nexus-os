@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declaration: defined further down this file. */
+int container_stop(u32 container_id);
+
 /*===========================================================================*/
 /*                         CONTAINER CONFIGURATION                           */
 /*===========================================================================*/

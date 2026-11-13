@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declaration: defined further down this file. */
+int mqtt_disconnect(u32 client_id);
+
 /*===========================================================================*/
 /*                         IoT CONFIGURATION                                 */
 /*===========================================================================*/

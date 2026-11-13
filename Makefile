@@ -189,7 +189,7 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(VIRT_DIR)/containers/container_runtime.c \
             $(VIRT_DIR)/containers/container_orchestration.c \
             $(VIRT_DIR)/hypervisor/nexus_hypervisor_core.c \
-            /* $(VIRT_DIR)/vm/vm_manager.c - disabled for build */ \
+            $(VIRT_DIR)/vm/vm_manager.c \
             $(VIRT_DIR)/emulation/nested_virt.c \
             $(FS_DIR)/procfs/procfs.c \
             $(MOBILE_DIR)/telephony/telephony_manager.c \
@@ -231,6 +231,20 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/ipc.o \
             $(BUILD_DIR)/sync.o \
             $(BUILD_DIR)/vfs_core.o \
+            $(BUILD_DIR)/inode.o \
+            $(BUILD_DIR)/dentry.o \
+            $(BUILD_DIR)/mount.o \
+            $(BUILD_DIR)/widget.o \
+            $(BUILD_DIR)/socket.o \
+            $(BUILD_DIR)/ip.o \
+            $(BUILD_DIR)/icmp.o \
+            $(BUILD_DIR)/udp.o \
+            $(BUILD_DIR)/tcp.o \
+            $(BUILD_DIR)/security_manager.o \
+            $(BUILD_DIR)/ahci.o \
+            $(BUILD_DIR)/nvme.o \
+            $(BUILD_DIR)/sd.o \
+            $(BUILD_DIR)/emmc.o \
             $(BUILD_DIR)/inode.o \
             $(BUILD_DIR)/dentry.o \
             $(BUILD_DIR)/mount.o \
@@ -345,6 +359,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/container_runtime.o \
             $(BUILD_DIR)/container_orchestration.o \
             $(BUILD_DIR)/nexus_hypervisor_core.o \
+            $(BUILD_DIR)/vm_manager.o \
             $(BUILD_DIR)/nested_virt.o \
             $(BUILD_DIR)/procfs.o \
             $(BUILD_DIR)/telephony_manager.o \

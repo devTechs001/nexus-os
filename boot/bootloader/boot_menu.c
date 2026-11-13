@@ -10,6 +10,7 @@
  */
 
 #include "../../kernel/include/kernel.h"
+#include "../../drivers/video/font8x16.h"
 
 /*===========================================================================*/
 /*                         BOOT MENU CONFIGURATION                           */
@@ -188,6 +189,9 @@ static void vga_init_text_mode(void)
 /*                         VGA TEXT MODE OUTPUT                              */
 /*===========================================================================*/
 
+/* Mirrored into the framebuffer from vga_putchar(); defined below. */
+static void menu_gfx_cell(int gx, int gy, char c, u8 attr);
+
 /**
  * vga_putchar - Print character to VGA buffer
  */
@@ -195,6 +199,134 @@ static void vga_putchar(int x, int y, char c, u8 attr)
 {
     if (x >= 0 && x < VGA_WIDTH && y >= 0 && y < VGA_HEIGHT) {
         vga_buffer[y * VGA_WIDTH + x] = c | (attr << 8);
+    }
+
+    /* Keep the on-screen copy in step when we are in graphics mode */
+    menu_gfx_cell(x, y, c, attr);
+}
+
+/*===========================================================================*/
+/*                     FRAMEBUFFER MIRROR                                    */
+/*===========================================================================*/
+
+
+/*
+ * When GRUB gives us a linear framebuffer we must NOT switch the card back
+ * to text mode: doing so blanks the display for the whole splash, which is
+ * what used to happen. The menu therefore keeps the framebuffer and mirrors
+ * every character it writes to the VGA text buffer into the framebuffer
+ * using the shared 8x16 font.
+ *
+ * With no framebuffer (pure text boot) these helpers are no-ops and the
+ * menu behaves exactly as before.
+ */
+
+static u32 *g_menu_fb;         /* framebuffer base, NULL in text mode */
+static u32  g_menu_fb_w;
+static u32  g_menu_fb_h;
+static u32  g_menu_fb_pitch;   /* bytes per scanline */
+static bool g_menu_gfx;
+
+/* VGA attribute -> 24bpp foreground. The DOS palette is close enough. */
+static u32 menu_attr_fg(u8 attr)
+{
+    static const u32 palette[16] = {
+        0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+        0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+        0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+        0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
+    };
+    return palette[attr & 0x0F];
+}
+
+static u32 menu_attr_bg(u8 attr)
+{
+    static const u32 palette[16] = {
+        0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+        0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+        0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+        0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
+    };
+    return palette[(attr >> 4) & 0x0F];
+}
+
+/**
+ * menu_gfx_init - Bind the menu's mirror to the bootloader framebuffer
+ */
+static void menu_gfx_init(void)
+{
+    boot_params_t *params = get_boot_params();
+
+    g_menu_fb = NULL;
+    g_menu_gfx = false;
+
+    if (!params || !params->gfx_addr || params->gfx_width == 0 ||
+        params->gfx_height == 0 || params->gfx_depth != 32) {
+        return;
+    }
+
+    g_menu_fb = (u32 *)(uintptr_t)params->gfx_addr;
+    g_menu_fb_w = params->gfx_width;
+    g_menu_fb_h = params->gfx_height;
+    /* Fall back to a packed scanline if the tag omitted the pitch */
+    g_menu_fb_pitch = params->gfx_pitch ? params->gfx_pitch
+                                        : params->gfx_width * 4;
+    g_menu_gfx = true;
+}
+
+/**
+ * menu_gfx_cell - Draw one character cell into the framebuffer
+ *
+ * The VGA grid is 80x25; scale the cell to fill the framebuffer so the menu
+ * looks right at any resolution.
+ */
+static void menu_gfx_cell(int gx, int gy, char c, u8 attr)
+{
+    if (!g_menu_gfx || !g_menu_fb) {
+        return;
+    }
+
+    u32 scale_x = g_menu_fb_w / VGA_WIDTH;
+    u32 scale_y = g_menu_fb_h / VGA_HEIGHT;
+
+    if (scale_x == 0) scale_x = 1;
+    if (scale_y == 0) scale_y = 1;
+
+    s32 px = (s32)((u32)gx * scale_x);
+    s32 py = (s32)((u32)gy * scale_y);
+
+    /* Cell background first */
+    for (u32 y = 0; y < scale_y; y++) {
+        u32 *row = (u32 *)((u8 *)g_menu_fb + (u32)(py + (s32)y) * g_menu_fb_pitch);
+        for (u32 x = 0; x < scale_x; x++) {
+            s32 fx = px + (s32)x;
+            if (fx >= 0 && (u32)fx < g_menu_fb_w &&
+                (u32)(py + (s32)y) < g_menu_fb_h) {
+                row[fx] = menu_attr_bg(attr);
+            }
+        }
+    }
+
+    /* Glyph, centred in the cell */
+    if (c > ' ') {
+        const u8 *glyph = font8x16_glyph(c);
+        u32 fg = menu_attr_fg(attr);
+        u32 gx0 = (u32)px + (scale_x > FONT8X16_WIDTH ? (scale_x - FONT8X16_WIDTH) / 2 : 0);
+        u32 gy0 = (u32)py + (scale_y > FONT8X16_HEIGHT ? (scale_y - FONT8X16_HEIGHT) / 2 : 0);
+
+        for (u32 row_i = 0; row_i < FONT8X16_HEIGHT && gy0 + row_i < g_menu_fb_h; row_i++) {
+            u8 bits = glyph[row_i];
+            u32 *row = (u32 *)((u8 *)g_menu_fb + (gy0 + row_i) * g_menu_fb_pitch);
+
+            for (u32 col = 0; col < FONT8X16_WIDTH; col++) {
+                if (bits & (0x80 >> col)) {
+                    u32 fx = gx0 + col;
+                    if (fx < g_menu_fb_w) {
+                        row[fx] = fg;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -383,11 +515,7 @@ static void menu_draw_header(void)
     vga_fill_box(0, 0, VGA_WIDTH - 1, 2, ' ', COLOR_TITLE);
     vga_center_text(1, MENU_TITLE, COLOR_TITLE);
 
-    /* Version */
-    char version_str[32];
-    version_str[0] = 'v';
-    version_str[1] = '\0';
-    /* Simple version append */
+    /* Version (right-aligned in the title bar) */
     vga_print_at(VGA_WIDTH - 10, 1, MENU_VERSION, COLOR_TITLE);
 }
 
@@ -452,11 +580,25 @@ static void menu_draw_entries(void)
 static void menu_draw_timeout(void)
 {
     if (menu.timeout > 0) {
-        char msg[64];
-        /* Simple message */
-        vga_print_at(30, VGA_HEIGHT - 4, "Booting in ", COLOR_NORMAL);
-        /* Would print number here */
-        vga_print_at(45, VGA_HEIGHT - 4, " seconds...", COLOR_NORMAL);
+        /*
+         * Show the real remaining time. The old code declared msg[64] and
+         * never filled it, then printed a hard-coded label with no number.
+         */
+        char msg[40];
+        u32 seconds = (u32)(menu.timeout / 10);
+        u32 pos = 0;
+
+        const char *prefix = "Booting in ";
+        while (*prefix) msg[pos++] = *prefix++;
+
+        if (seconds >= 10) msg[pos++] = (char)('0' + (seconds / 10) % 10);
+        msg[pos++] = (char)('0' + seconds % 10);
+
+        const char *suffix = " seconds...";
+        while (*suffix) msg[pos++] = *suffix++;
+        msg[pos] = '\0';
+
+        vga_print_at(30, VGA_HEIGHT - 4, msg, COLOR_NORMAL);
     }
 }
 
@@ -843,6 +985,13 @@ static void timer_handler(void)
     timer_ticks++;
 }
 
+/*
+ * Not wired to IRQ0 yet: menu_wait_ticks() advances timer_ticks in a spin
+ * loop, so the countdown works without an interrupt handler. This is the
+ * intended hook-up point if the menu ever needs to block instead of poll.
+ */
+__attribute__((unused)) static void (*const g_menu_timer_hook)(void) = timer_handler;
+
 /*===========================================================================*/
 /*                         INITIALIZATION                                    */
 /*===========================================================================*/
@@ -885,8 +1034,35 @@ void boot_menu_main(void)
     outb(0x3F8, 'M');
     outb(0x3F8, '\n');
 
-    /* Switch VGA to text mode 3 so VGA buffer (0xB8000) is visible on display */
-    vga_init_text_mode();
+    /*
+     * Do NOT switch VGA back to text mode 3 here.
+     *
+     * GRUB hands the kernel a linear framebuffer (the Multiboot2
+     * framebuffer tag) so the graphical splash can draw on it. Forcing
+     * mode 3 reprograms the CRTC/sequencer back to 80x25 text: the
+     * framebuffer address stays valid, but nothing written to it reaches
+     * the display any more. That is exactly why the VGA window went black
+     * once the kernel switched to graphical mode - the boot menu had
+     * already reverted the video card.
+     *
+     * The menu itself is drawn with BIOS text writes, so only fall back
+     * to text mode when there is no framebuffer to protect.
+     */
+    {
+        boot_params_t *params = get_boot_params();
+        bool have_fb = (params && params->gfx_addr != 0);
+
+        if (!have_fb) {
+            vga_init_text_mode();
+        } else {
+            /* Keep the framebuffer and draw the menu into it */
+            menu_gfx_init();
+            outb(0x3F8, 'K');
+            outb(0x3F8, 'F');
+            outb(0x3F8, 'B');
+            outb(0x3F8, '\n');
+        }
+    }
 
     /* Initialize menu */
     menu_init();

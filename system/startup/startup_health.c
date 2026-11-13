@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Defined below; declared here so dependency_check_version() can call it. */
+int version_compare(const char *a, const char *b);
+
 /*===========================================================================*/
 /*                         CONFIGURATION                                     */
 /*===========================================================================*/
@@ -177,11 +180,18 @@ bool dependency_check_integrity(const char *path, const char *expected_checksum)
 /* Check Dependency Version */
 bool dependency_check_version(const char *path, const char *min_version)
 {
+    /*
+     * actual_version used to be an uninitialised stack buffer: the
+     * get_version() call that was meant to fill it is commented out, so
+     * this compared 32 bytes of stack garbage and printed it as a version
+     * string. There is no dependency version probe in the tree yet, so
+     * start from an empty string - which version_compare() treats as
+     * "unknown" and never satisfies a minimum.
+     */
     char actual_version[32];
-    
-    /* Get actual version */
-    /* get_version(path, actual_version, 32); */
-    
+
+    actual_version[0] = '\0';
+
     /* Compare versions */
     if (version_compare(actual_version, min_version) >= 0) {
         return true;
@@ -189,9 +199,52 @@ bool dependency_check_version(const char *path, const char *min_version)
     
     printk("[HEALTH] Version check failed: %s\n", path);
     printk("[HEALTH] Required: >= %s\n", min_version);
-    printk("[HEALTH] Found: %s\n", actual_version);
+    printk("[HEALTH] Found: %s\n", actual_version[0] ? actual_version : "unknown");
     
     return false;
+}
+
+/**
+ * version_compare - Compare two dotted version strings, e.g. "1.2.10"
+ *
+ * Returns <0 if @a precedes @b, 0 if equal, >0 if @a follows @b.
+ * Components are compared numerically, so "1.10" correctly outranks
+ * "1.9" (a lexicographic compare would get that backwards). A missing
+ * component counts as zero, so "1.2" == "1.2.0". An empty string is
+ * treated as unknown and always compares lower.
+ */
+int version_compare(const char *a, const char *b)
+{
+    if (!a || !a[0]) {
+        return (b && b[0]) ? -1 : 0;
+    }
+    if (!b || !b[0]) {
+        return 1;
+    }
+
+    while (*a || *b) {
+        u32 na = 0;
+        u32 nb = 0;
+
+        while (*a >= '0' && *a <= '9') {
+            na = na * 10 + (u32)(*a - '0');
+            a++;
+        }
+        while (*b >= '0' && *b <= '9') {
+            nb = nb * 10 + (u32)(*b - '0');
+            b++;
+        }
+
+        if (na != nb) {
+            return (na > nb) ? 1 : -1;
+        }
+
+        /* Skip the separator if present */
+        if (*a == '.') a++;
+        if (*b == '.') b++;
+    }
+
+    return 0;
 }
 
 /* Check Dependency Permissions */

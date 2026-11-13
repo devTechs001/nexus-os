@@ -7,7 +7,7 @@
  */
 
 #include "../gui.h"
-#include "../kernel/include/kernel.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         APP LAUNCHER CONFIGURATION                        */

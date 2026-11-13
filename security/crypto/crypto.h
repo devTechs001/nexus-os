@@ -397,9 +397,14 @@ s32 crypto_random_bytes(u8 *buffer, u32 length);
 s32 crypto_random_u32(u32 *value);
 s32 crypto_random_u64(u64 *value);
 
-/* Memory Utilities */
-void crypto_memzero(void *ptr, u32 size);
-s32 crypto_memcmp(const void *a, const void *b, u32 size);
+/* Memory Utilities
+ *
+ * These are implemented in kernel/core/string.c against size_t, and are also
+ * declared in kernel.h. Keeping u32 here made the two declarations conflict
+ * in any translation unit that included both headers.
+ */
+void crypto_memzero(void *ptr, size_t size);
+int crypto_memcmp(const void *a, const void *b, size_t size);
 
 /* Encoding/Decoding */
 s32 base64_encode(const u8 *input, u32 input_len, u8 *output, u32 *output_len);
