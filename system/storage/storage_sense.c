@@ -295,8 +295,9 @@ int storage_cleanup_all(void)
     
     g_storage.is_cleaning = false;
     
-    printk("[STORAGE] Cleanup complete: freed %d MB\n",
-           (u32)(total_freed / (1024 * 1024)));
+    /* Report the file count as well; it was counted and then never shown. */
+    printk("[STORAGE] Cleanup complete: freed %u MB across %u files\n",
+           (u32)(total_freed / (1024 * 1024)), total_deleted);
     
     return 0;
 }

@@ -388,26 +388,68 @@ int desktop_grid_render(void *surface, rect_t *clip)
     /* Render wallpaper */
     /* In real implementation, would draw wallpaper image */
     
-    /* Render icons */
+    /*
+     * Render icons.
+     *
+     * This loop used to compute each icon's tile position, apply the slide
+     * animation offset, and then do nothing with any of it: the three draw
+     * steps were empty comments. x was therefore set and never read, which
+     * -Wunused-but-set-variable reports on GCC 4.6+ (the build machine's
+     * compiler flags it; GCC 12 does not).
+     *
+     * The tile and its selection state are now actually drawn. Note that this
+     * subsystem is not on the boot path: nothing calls desktop_grid_init() or
+     * desktop_grid_render(), and the live desktop is gui/desktop/desktop.c,
+     * which keeps its own icon list. This grid is dead code today, so the
+     * drawing is correct but unexercised until the two are merged.
+     */
+    s32 spacing = (s32)g_desktop.icon_spacing;
+    u32 tile = g_desktop.icon_size;
+    rect_t clip_rect = clip ? *clip : g_desktop.grid_rect;
+    u32 stride = clip_rect.width > 0 ? (u32)clip_rect.width : 0;
+
+    if (!stride) {
+        update_animation();
+        return -EINVAL;
+    }
+
+    u32 *pixels = (u32 *)surface;
+
     for (u32 i = 0; i < ws->icon_count; i++) {
         desktop_icon_t *icon = &ws->icons[i];
-        
-        s32 x = icon->x * g_desktop.icon_spacing;
-        s32 y = icon->y * g_desktop.icon_spacing;
-        
+
+        s32 x = icon->x * spacing;
+        s32 y = icon->y * spacing;
+
         /* Apply animation offset */
         if (g_desktop.animation.running && g_desktop.animation.type == 1) {
             s32 offset = (s32)((1.0f - g_desktop.animation.progress) * 200);
             x += offset;
         }
-        
-        /* Draw icon background if selected */
-        if (icon->selected) {
-            /* Draw selection rectangle */
+
+        if (x >= clip_rect.width || y >= clip_rect.height) {
+            continue;
         }
-        
-        /* Draw icon image */
-        /* Draw icon label */
+
+        /* Selection / hover highlight behind the tile. */
+        u32 fill = icon->selected ? 0xFF3B82F6u : 0x40FFFFFFu;
+
+        for (u32 row = 0; row < tile; row++) {
+            s32 py = y + (s32)row;
+            if (py < 0 || py >= clip_rect.height) {
+                continue;
+            }
+
+            u32 *line = pixels + (u32)py * stride;
+
+            for (u32 col = 0; col < tile; col++) {
+                s32 px = x + (s32)col;
+                if (px < 0 || px >= clip_rect.width) {
+                    continue;
+                }
+                line[px] = fill;
+            }
+        }
     }
     
     /* Update animations */
