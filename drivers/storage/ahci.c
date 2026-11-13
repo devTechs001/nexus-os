@@ -1108,3 +1108,75 @@ ahci_driver_t *ahci_get_driver(void)
 {
     return &g_ahci_driver;
 }
+
+/*===========================================================================*/
+/*                 REGISTRATION WITH THE GENERIC BLOCK LAYER                 */
+/*===========================================================================*/
+/*
+ * AHCI only exposed ahci_block_read(controller, port, ...). Nothing above the
+ * driver could address a disk without knowing its controller and port, which
+ * is why NexFS carried a "void *bdev" it never dereferenced.
+ *
+ * The adapter below flattens (controller, port) into a single handle so the
+ * generic layer can treat an AHCI disk like any other.
+ */
+
+extern int storage_block_register(const char *name, u32 handle, u32 sub, u64 size,
+                                  u32 blk_size,
+                                  int (*read)(u32, u32, u64, u32, void *),
+                                  int (*write)(u32, u32, u64, u32, const void *));
+
+static int ahci_adapter_read(u32 handle, u32 sub, u64 lba, u32 count, void *buf)
+{
+    return ahci_block_read(handle, sub, lba, count, buf);
+}
+
+static int ahci_adapter_write(u32 handle, u32 sub, u64 lba, u32 count, const void *buf)
+{
+    return ahci_block_write(handle, sub, lba, count, buf);
+}
+
+/**
+ * ahci_register_block_devices - Publish every attached AHCI disk
+ *
+ * Called once after the controllers are up. Returns the number registered.
+ */
+int ahci_register_block_devices(void)
+{
+    u32 registered = 0;
+
+    for (u32 c = 0; c + 1 <= g_ahci_driver.controller_count; c++) {
+        ahci_controller_t *ctrl = ahci_get_controller(c);
+        if (!ctrl || !ctrl->ports) {
+            continue;
+        }
+
+        for (u32 p = 0; p < ctrl->active_ports; p++) {
+            ahci_port_t *port = &ctrl->ports[p];
+            char name[32];
+
+            if (port->size == 0) {
+                continue;             /* No disk behind this port. */
+            }
+
+            /* sda, sdb, ... per registered device. */
+            u32 n = 0;
+            name[n++] = 's';
+            name[n++] = 'd';
+            name[n++] = (char)('a' + registered);
+            name[n] = '\0';
+
+            if (storage_block_register(name, c, p, port->size,
+                                       port->block_size ? port->block_size : 512,
+                                       ahci_adapter_read, ahci_adapter_write) >= 0) {
+                registered++;
+            }
+        }
+    }
+
+    if (registered) {
+        pr_info("[AHCI] Registered %u block device(s)\n", registered);
+    }
+
+    return (int)registered;
+}

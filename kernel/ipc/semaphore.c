@@ -457,7 +457,12 @@ void sem_undo_exit(struct task_struct *task)
 int semop_single(struct sem_array *sma, struct sembuf *sop)
 {
     struct sem *sem;
-    s16 new_val;
+    /*
+     * Must be wider than s16: semval and sem_op are both s16, so computing the
+     * sum in s16 wrapped before the range check could ever see it. The check
+     * "new_val > SEMVMX || new_val < -SEMVMX" was dead code on an s16.
+     */
+    s32 new_val;
 
     if (!sma || !sop) {
         return -EINVAL;

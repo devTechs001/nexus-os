@@ -12,6 +12,13 @@
 #include "../../kernel/include/kernel.h"
 #include "../vfs/vfs.h"
 #include "../../kernel/sync/sync.h"
+/*
+ * kmem_cache_create/alloc live in kernel/mm/mm.h. Without this, nexfs_inode.c
+ * and nexfs_journal.c called them undeclared, so the compiler assumed an int
+ * return and truncated the returned heap pointer to 32 bits before casting it
+ * back to a pointer - a guaranteed crash on 64-bit.
+ */
+#include "../../kernel/mm/mm.h"
 
 /*
  * NexFS global state.
@@ -34,7 +41,21 @@ extern nexfs_global_t nexfs_global;
 /*                         NEXFS CONFIGURATION                               */
 /*===========================================================================*/
 
-#define NEXFS_MAGIC             0x4E4558465300    /* "NEXFS\0" */
+/*
+ * Magic numbers.
+ *
+ * These were 48-bit literals (0x4E4558465300, 0x4A4F55524E414C) compared
+ * against, and stored into, u32 on-disk fields. The compiler truncated them
+ * silently ("changes value from 20916376148263244 to 1380860236"), so the
+ * value written to disk was not the value in the literal - the check could
+ * never match what the comment claimed.
+ *
+ * The fields are 32-bit, so the magic is defined as the 32-bit prefix of the
+ * ASCII tag: "NEXF" and "JOUR". Widening the on-disk field would change the
+ * format; that is a format decision, not a warning to silence.
+ */
+#define NEXFS_MAGIC             0x4E455846U     /* "NEXF" */
+#define NEXFS_JOURNAL_MAGIC     0x4A4F5552U     /* "JOUR" */
 #define NEXFS_VERSION           1
 #define NEXFS_REVISION          0
 
@@ -61,7 +82,6 @@ extern nexfs_global_t nexfs_global;
 /* Journal Configuration */
 #define NEXFS_JOURNAL_SIZE      (8 * 1024 * 1024)   /* 8 MB default */
 #define NEXFS_JOURNAL_BLOCKS    (NEXFS_JOURNAL_SIZE / NEXFS_BLOCK_SIZE)
-#define NEXFS_JOURNAL_MAGIC     0x4A4F55524E414C    /* "JOURNAL" */
 
 /* Superblock Configuration */
 #define NEXFS_SUPERBLOCK_OFFSET 1024
@@ -680,6 +700,14 @@ struct nexfs_block_map {
 extern struct vfs_superblock_operations nexfs_superblock_ops;
 
 /* Inode operations */
+/*
+ * Block I/O. The journal reads and writes whole blocks through these; they
+ * were referenced by commented-out call sites and never existed.
+ */
+struct nexfs_inode;
+s32 nexfs_read_block(struct nexfs_inode *inode, u64 block, void *buf, u32 size);
+s32 nexfs_write_block(struct nexfs_inode *inode, u64 block, const void *buf, u32 size);
+
 extern struct vfs_inode_operations nexfs_inode_ops;
 extern struct vfs_inode_operations nexfs_dir_ops;
 extern struct vfs_inode_operations nexfs_symlink_ops;

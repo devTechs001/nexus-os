@@ -174,6 +174,88 @@ u64 nexfs_inode_to_block(struct nexfs_superblock *sb, u64 ino)
     return block;
 }
 
+/*===========================================================================*/
+/*                        BLOCK DEVICE ACCESS                                */
+/*===========================================================================*/
+/*
+ * nexfs_superblock keeps a "void *bdev", but nothing ever filled it in or read
+ * through it: every call site was a comment reading "block_device_read". The
+ * generic block layer in drivers/storage/storage.c now exists, so these two
+ * wrap it. bdev carries the device id from storage_block_register() as a
+ * small integer, so the superblock can be persisted and reloaded unchanged.
+ */
+
+extern int storage_block_read(u32 dev_id, u64 lba, u32 count, void *buf);
+extern int storage_block_write(u32 dev_id, u64 lba, u32 count, const void *buf);
+
+/** nexfs_bdev_id - Device id encoded in the superblock's bdev field */
+static s32 nexfs_bdev_id(struct nexfs_superblock *sb)
+{
+    if (!sb || !sb->bdev) {
+        return -1;
+    }
+    return (s32)(u64)sb->bdev - 1;      /* +1 on store, so 0 means "none" */
+}
+
+/**
+ * nexfs_read_block_device - Read arbitrary bytes from the backing device
+ *
+ * @sb:     Superblock carrying the device
+ * @block:  Block number
+ * @buf:    Destination
+ * @size:   Byte count (must not exceed one block)
+ */
+static s32 nexfs_read_block_device(struct nexfs_superblock *sb, u64 block,
+                                   void *buf, u32 size)
+{
+    s32 id = nexfs_bdev_id(sb);
+    int rc;
+
+    if (id < 0) {
+        return VFS_EINVAL;
+    }
+
+    if (size > NEXFS_BLOCK_SIZE) {
+        return VFS_EINVAL;
+    }
+
+    rc = storage_block_read((u32)id, block, 1, buf);
+    if (rc != 0) {
+        pr_err("NexFS: block read failed at %llu (%d)\n",
+               (unsigned long long)block, rc);
+        return VFS_EIO;
+    }
+
+    return VFS_OK;
+}
+
+/**
+ * nexfs_write_block_device - Write arbitrary bytes to the backing device
+ */
+static s32 nexfs_write_block_device(struct nexfs_superblock *sb, u64 block,
+                                    const void *buf, u32 size)
+{
+    s32 id = nexfs_bdev_id(sb);
+    int rc;
+
+    if (id < 0) {
+        return VFS_EINVAL;
+    }
+
+    if (size > NEXFS_BLOCK_SIZE) {
+        return VFS_EINVAL;
+    }
+
+    rc = storage_block_write((u32)id, block, 1, buf);
+    if (rc != 0) {
+        pr_err("NexFS: block write failed at %llu (%d)\n",
+               (unsigned long long)block, rc);
+        return VFS_EIO;
+    }
+
+    return VFS_OK;
+}
+
 /**
  * nexfs_block_to_inode - Convert block number to inode number
  * @sb: Superblock
@@ -227,10 +309,9 @@ s32 nexfs_read_superblock(struct nexfs_superblock *sb)
 
     raw = &sb->raw;
 
-    /* Read superblock from disk */
-    /* TODO: Implement actual block device read */
-    /* ret = block_device_read(sb->bdev, NEXFS_SUPERBLOCK_OFFSET / NEXFS_BLOCK_SIZE, raw, NEXFS_BLOCK_SIZE); */
-    ret = VFS_OK;
+    /* Read the superblock from the backing device. */
+    ret = nexfs_read_block_device(sb, NEXFS_SUPERBLOCK_OFFSET / NEXFS_BLOCK_SIZE,
+                                  raw, NEXFS_BLOCK_SIZE);
 
     if (ret != VFS_OK) {
         pr_err("NexFS: Failed to read superblock\n");
@@ -290,9 +371,8 @@ s32 nexfs_write_superblock(struct nexfs_superblock *sb)
     raw->s_write_time = (u32)(get_time_ms() / 1000);
 
     /* Write to disk */
-    /* TODO: Implement actual block device write */
-    /* ret = block_device_write(sb->bdev, NEXFS_SUPERBLOCK_OFFSET / NEXFS_BLOCK_SIZE, raw, NEXFS_BLOCK_SIZE); */
-    ret = VFS_OK;
+    ret = nexfs_write_block_device(sb, NEXFS_SUPERBLOCK_OFFSET / NEXFS_BLOCK_SIZE,
+                                   raw, NEXFS_BLOCK_SIZE);
 
     if (ret != VFS_OK) {
         pr_err("NexFS: Failed to write superblock\n");
@@ -328,16 +408,24 @@ static s32 nexfs_read_group_descriptors(struct nexfs_superblock *sb)
         return VFS_ENOMEM;
     }
 
-    /* Read group descriptors */
+    /* Read group descriptors through the generic block layer. */
     block = (NEXFS_SUPERBLOCK_OFFSET + NEXFS_BLOCK_SIZE) / NEXFS_BLOCK_SIZE;
 
     for (i = 0; i < sb->groups_count; i++) {
-        /* TODO: Implement actual block device read */
-        /* ret = block_device_read(sb->bdev, block + i, &sb->groups[i], sizeof(struct nexfs_group_desc)); */
+        ret = nexfs_read_block_device(sb, block + i, &sb->groups[i],
+                                      sizeof(struct nexfs_group_desc));
+        if (ret != VFS_OK) {
+            pr_err("NexFS: Cannot read group descriptor %u\n", i);
+            return ret;
+        }
 
-        /* Validate checksum */
-        /* u16 csum = nexfs_crc32c(0, &sb->groups[i], sizeof(struct nexfs_group_desc) - 2); */
-        /* if (csum != sb->groups[i].bg_checksum) { ... } */
+        /* The stored checksum covers everything but its own field. */
+        u16 csum = (u16)nexfs_crc32c(0, &sb->groups[i],
+                                     sizeof(struct nexfs_group_desc) - 2);
+        if (csum != sb->groups[i].bg_checksum) {
+            pr_err("NexFS: Group descriptor %u checksum mismatch\n", i);
+            return VFS_EINVAL;
+        }
     }
 
     pr_debug("NexFS: Loaded %u group descriptors\n", sb->groups_count);
@@ -370,8 +458,12 @@ static s32 nexfs_write_group_descriptors(struct nexfs_superblock *sb)
         sb->groups[i].bg_checksum = nexfs_crc32c(0, &sb->groups[i],
                                                   sizeof(struct nexfs_group_desc) - 2);
 
-        /* TODO: Implement actual block device write */
-        /* ret = block_device_write(sb->bdev, block + i, &sb->groups[i], sizeof(struct nexfs_group_desc)); */
+        ret = nexfs_write_block_device(sb, block + i, &sb->groups[i],
+                                       sizeof(struct nexfs_group_desc));
+        if (ret != VFS_OK) {
+            pr_err("NexFS: Cannot write group descriptor %u\n", i);
+            return ret;
+        }
     }
 
     return VFS_OK;

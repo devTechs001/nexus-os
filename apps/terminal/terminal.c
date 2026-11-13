@@ -2336,7 +2336,7 @@ int terminal_open_bookmark(terminal_window_t *win, u32 index)
         last->next = tab;
     }
 
-    win->active_tab = tab;
+    win->active_tab = tab->tab_id;
     win->tab_count++;
 
     /*
