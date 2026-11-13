@@ -103,7 +103,8 @@ static inline struct heap_block *block_get_next(struct heap_arena *arena,
 {
     u8 *next_addr = (u8 *)block + block->total_size;
 
-    if (next_addr >= arena->end) {
+    /* arena->end is an address (virt_addr_t), so compare as addresses. */
+    if ((uintptr_t)next_addr >= (uintptr_t)arena->end) {
         return NULL;
     }
 
@@ -555,27 +556,38 @@ void kfree(void *ptr)
  */
 void *kmalloc_aligned(size_t size, size_t align)
 {
-    void *ptr;
+    uintptr_t raw;
     uintptr_t aligned_ptr;
-    size_t padding;
 
-    /* Align must be power of 2 */
-    if (!IS_ALIGNED(align, align) || align < HEAP_ALIGN) {
+    /*
+     * "Align must be a power of two" was tested with IS_ALIGNED(align, align),
+     * which is ((align & (align - 1)) == 0) only when written that way - as
+     * passed here it compares the value against itself and is always true, so a
+     * non-power-of-two align survived and ALIGN() then produced garbage.
+     */
+    if (align < sizeof(void *) || (align & (align - 1)) != 0) {
         align = HEAP_ALIGN;
     }
 
-    /* Allocate extra space for alignment */
-    ptr = kmalloc(size + align);
-    if (!ptr) {
+    /*
+     * Reserve room for the alignment adjustment AND for the back-pointer that
+     * records the original allocation.
+     *
+     * The previous code allocated size + align but then wrote the back-pointer
+     * at aligned_ptr - sizeof(void *), which can fall before the start of this
+     * allocation when the raw pointer was already aligned - corrupting the
+     * preceding block. Reserving sizeof(void *) up front guarantees the slot
+     * is inside our own block.
+     */
+    raw = (uintptr_t)kmalloc(size + align + sizeof(void *));
+    if (!raw) {
         return NULL;
     }
 
-    /* Calculate aligned address */
-    aligned_ptr = ALIGN((uintptr_t)ptr, align);
-    padding = aligned_ptr - (uintptr_t)ptr;
+    aligned_ptr = ALIGN(raw + sizeof(void *), align);
 
-    /* Store original pointer just before aligned address */
-    ((void **)aligned_ptr)[-1] = ptr;
+    /* The back-pointer lives inside this allocation, never before it. */
+    ((void **)aligned_ptr)[-1] = (void *)raw;
 
     return (void *)aligned_ptr;
 }

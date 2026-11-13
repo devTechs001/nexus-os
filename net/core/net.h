@@ -31,6 +31,7 @@
 #define SOL_IP          0
 #define SOL_TCP         6
 #define SOL_UDP         17
+#define UDP_CORK        1       /* Cork (not implemented) */
 
 /* Network Device Flags */
 #define NETDEV_FLAG_UP      IFF_UP
@@ -50,6 +51,7 @@
 #define SO_RCVTIMEO     20
 #define SO_SNDTIMEO     21
 #define SO_TIMESTAMP    29
+#define SO_NO_CHECK     11      /* Disable checksums on this socket */
 
 /* Address Families */
 #define AF_UNSPEC       PF_UNSPEC

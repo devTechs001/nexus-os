@@ -807,7 +807,7 @@ int udp_setsockopt(struct socket *sock, int level, int optname, void *optval, in
         return -EINVAL;
     }
 
-    if (optlen < sizeof(u32)) {
+    if (optlen < (int)sizeof(u32)) {
         return -EINVAL;
     }
 
@@ -815,15 +815,26 @@ int udp_setsockopt(struct socket *sock, int level, int optname, void *optval, in
 
     spin_lock(&up->lock);
 
+    /*
+     * Every SOL_SOCKET option used to fall through this switch and return 0,
+     * which told callers their setting had been applied when nothing had been
+     * touched. Options are now either honoured or refused.
+     */
     switch (level) {
         case SOL_SOCKET:
-            /* Generic socket options */
-            break;
-
-        case SOL_UDP:
             switch (optname) {
-                case 1:  /* UDP_CORK */
-                    /* Not implemented */
+                case SO_NO_CHECK:
+                    /* Disable the UDP checksum in both directions. */
+                    if (val) {
+                        up->flags |= UDP_FLAG_NO_CHECK;
+                    } else {
+                        up->flags &= ~UDP_FLAG_NO_CHECK;
+                    }
+                    break;
+
+                case SO_RCVBUF:
+                case SO_SNDBUF:
+                    /* Buffer sizing is the socket layer's concern, not UDP's. */
                     break;
 
                 default:
@@ -831,6 +842,22 @@ int udp_setsockopt(struct socket *sock, int level, int optname, void *optval, in
                     return -ENOPROTOOPT;
             }
             break;
+
+        case SOL_UDP:
+            switch (optname) {
+                case UDP_CORK:
+                    /*
+                     * Cork is genuinely not implemented. Reporting success
+                     * would let an application believe its sends were being
+                     * coalesced when they are sent immediately.
+                     */
+                    spin_unlock(&up->lock);
+                    return -ENOPROTOOPT;
+
+                default:
+                    spin_unlock(&up->lock);
+                    return -ENOPROTOOPT;
+            }
 
         default:
             spin_unlock(&up->lock);
@@ -865,7 +892,7 @@ int udp_getsockopt(struct socket *sock, int level, int optname, void *optval, in
         return -EINVAL;
     }
 
-    if (*optlen < sizeof(u32)) {
+    if (*optlen < (int)sizeof(u32)) {
         return -EINVAL;
     }
 

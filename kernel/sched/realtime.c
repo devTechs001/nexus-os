@@ -662,8 +662,8 @@ int rt_mutex_lock(rt_mutex_t *lock)
 
         owner->pi_boosted_prio = owner->rt_priority + boost;
 
-        /* Update owner's effective priority */
-        if (owner->pi_boosted_prio > owner->rt_priority) {
+        /* Update owner's effective priority (rt_priority is unsigned). */
+        if (owner->pi_boosted_prio > (s32)owner->rt_priority) {
             rt_set_priority(owner, owner->pi_boosted_prio);
         }
 
