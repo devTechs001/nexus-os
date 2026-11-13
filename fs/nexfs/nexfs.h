@@ -785,6 +785,15 @@ u32 nexfs_inode_checksum(struct nexfs_inode_raw *inode);
 u32 nexfs_block_checksum(void *block, u32 blocknr);
 u32 nexfs_superblock_checksum(struct nexfs_superblock_raw *sb);
 
+/* Inode slab cache lifecycle */
+void nexfs_inode_cache_exit(void);
+
+/* Backing-device I/O - one block per call, size capped at NEXFS_BLOCK_SIZE */
+s32 nexfs_read_block_device(struct nexfs_superblock *sb, u64 block,
+                            void *buf, u32 size);
+s32 nexfs_write_block_device(struct nexfs_superblock *sb, u64 block,
+                             const void *buf, u32 size);
+
 /* Utility functions */
 u32 nexfs_group_index(struct nexfs_superblock *sb, u64 block);
 u64 nexfs_inode_to_block(struct nexfs_superblock *sb, u64 ino);

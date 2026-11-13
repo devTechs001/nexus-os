@@ -162,9 +162,9 @@ widget_t *widget_create(const char *type, widget_t *parent)
     widget->checked = false;
 
     /* Default colors */
-    widget->foreground = (color_t){{0, 0, 0, 255}};
-    widget->background = (color_t){{255, 255, 255, 255}};
-    widget->border_color = (color_t){{128, 128, 128, 255}};
+    widget->foreground = (color_t){{{0, 0, 0, 255}}};
+    widget->background = (color_t){{{255, 255, 255, 255}}};
+    widget->border_color = (color_t){{{128, 128, 128, 255}}};
     widget->border_width = 1;
     widget->corner_radius = 0;
     widget->padding = 4;

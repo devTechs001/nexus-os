@@ -205,8 +205,8 @@ static s32 nexfs_bdev_id(struct nexfs_superblock *sb)
  * @buf:    Destination
  * @size:   Byte count (must not exceed one block)
  */
-static s32 nexfs_read_block_device(struct nexfs_superblock *sb, u64 block,
-                                   void *buf, u32 size)
+s32 nexfs_read_block_device(struct nexfs_superblock *sb, u64 block,
+                            void *buf, u32 size)
 {
     s32 id = nexfs_bdev_id(sb);
     int rc;
@@ -232,8 +232,8 @@ static s32 nexfs_read_block_device(struct nexfs_superblock *sb, u64 block,
 /**
  * nexfs_write_block_device - Write arbitrary bytes to the backing device
  */
-static s32 nexfs_write_block_device(struct nexfs_superblock *sb, u64 block,
-                                    const void *buf, u32 size)
+s32 nexfs_write_block_device(struct nexfs_superblock *sb, u64 block,
+                             const void *buf, u32 size)
 {
     s32 id = nexfs_bdev_id(sb);
     int rc;
@@ -1019,6 +1019,9 @@ void nexfs_exit(void)
 
     /* Unregister filesystem */
     vfs_unregister_filesystem(&nexfs_filesystem);
+
+    /* Release the inode slab cache. */
+    nexfs_inode_cache_exit();
 
     nexfs_global.initialized = false;
 

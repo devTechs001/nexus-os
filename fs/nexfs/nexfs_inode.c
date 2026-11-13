@@ -34,8 +34,11 @@ static s32 nexfs_inode_cache_init(void)
 
 /**
  * nexfs_inode_cache_exit - Destroy inode cache
+ *
+ * Called from nexfs_exit(); previously static and unreferenced, so the cache
+ * was never torn down.
  */
-static void nexfs_inode_cache_exit(void)
+void nexfs_inode_cache_exit(void)
 {
     if (nexfs_inode_cache) {
         kmem_cache_destroy(nexfs_inode_cache);
@@ -63,6 +66,17 @@ struct nexfs_inode *nexfs_alloc_inode(struct nexfs_superblock *sb)
 
     if (!sb) {
         return NULL;
+    }
+
+    /*
+     * nexfs_inode_cache is created by nexfs_inode_cache_init(), which nothing
+     * called - so kmem_cache_alloc(NULL) failed on the first mkdir and every
+     * inode allocation after it. Create the cache on first use.
+     */
+    if (!nexfs_inode_cache) {
+        if (nexfs_inode_cache_init() != VFS_OK) {
+            return NULL;
+        }
     }
 
     /* Allocate from cache */
@@ -279,6 +293,7 @@ s32 nexfs_read_inode(struct nexfs_inode *inode)
     u64 block;
     u32 offset;
     u32 checksum;
+    void *buffer;
     s32 ret;
 
     if (!inode) {
@@ -295,17 +310,28 @@ s32 nexfs_read_inode(struct nexfs_inode *inode)
     block = nexfs_inode_to_block(sb, inode->ino);
     offset = ((inode->ino - 1) % NEXFS_INODES_PER_BLOCK) * NEXFS_INODE_SIZE;
 
-    /* TODO: Read block from disk */
-    /* ret = block_device_read(sb->bdev, block, buffer, NEXFS_BLOCK_SIZE); */
-    ret = VFS_OK;
+    /*
+     * This used to be a stub: it never read the block, then validated a
+     * checksum over whatever happened to be in inode->raw already. Every
+     * freshly created inode therefore failed validation (or, worse, a stale
+     * raw inode passed), so nothing on disk was ever actually loaded.
+     */
+    buffer = kzalloc(NEXFS_BLOCK_SIZE);
+    if (!buffer) {
+        return VFS_ENOMEM;
+    }
 
+    ret = nexfs_read_block_device(sb, block, buffer, NEXFS_BLOCK_SIZE);
     if (ret != VFS_OK) {
-        pr_err("NexFS: Failed to read inode block %llu\n", (unsigned long long)block);
+        kfree(buffer);
+        pr_err("NexFS: Failed to read inode block %llu\n",
+               (unsigned long long)block);
         return VFS_EIO;
     }
 
-    /* Copy inode data from buffer */
-    /* memcpy(&inode->raw, buffer + offset, NEXFS_INODE_SIZE); */
+    /* Copy inode data out of the block */
+    memcpy(&inode->raw, (u8 *)buffer + offset, NEXFS_INODE_SIZE);
+    kfree(buffer);
 
     /* Validate checksum */
     checksum = nexfs_inode_checksum(&inode->raw);
@@ -375,6 +401,7 @@ s32 nexfs_write_inode(struct nexfs_inode *inode, s32 sync)
     struct nexfs_superblock *sb;
     u64 block;
     u32 offset;
+    void *buffer;
     s32 ret;
 
     if (!inode) {
@@ -397,8 +424,14 @@ s32 nexfs_write_inode(struct nexfs_inode *inode, s32 sync)
     inode->raw.i_gid_high = (vfs_inode->gid >> 16) & 0xFFFF;
     inode->raw.i_size = vfs_inode->size;
     inode->raw.i_links = vfs_inode->nlink;
-    inode->raw.i_blocks_lo = vfs_inode->nblocks & 0xFFFFFFFF;
-    inode->raw.i_blocks_hi = (vfs_inode->nblocks >> 32) & 0xFFFFFFFF;
+    /*
+     * vfs_inode->nblocks is a u32, so "(nblocks >> 32)" is a shift by the full
+     * width of the type - undefined behaviour, and on x86 it yields whatever
+     * the shift instruction leaves behind rather than the intended zero.
+     * Keep the on-disk low/high split, but widen explicitly first.
+     */
+    inode->raw.i_blocks_lo = (u32)(vfs_inode->nblocks & 0xFFFFFFFFu);
+    inode->raw.i_blocks_hi = (u32)(((u64)vfs_inode->nblocks >> 32) & 0xFFFFFFFFu);
     inode->raw.i_atime = (u32)vfs_inode->atime;
     inode->raw.i_mtime = (u32)vfs_inode->mtime;
     inode->raw.i_ctime = (u32)vfs_inode->ctime;
@@ -426,8 +459,36 @@ s32 nexfs_write_inode(struct nexfs_inode *inode, s32 sync)
         return ret;
     }
 
-    /* TODO: Write to disk */
-    /* ret = block_device_write(sb->bdev, block, buffer, NEXFS_BLOCK_SIZE); */
+    /*
+     * Read-modify-write: an inode block holds NEXFS_INODES_PER_BLOCK inodes,
+     * so writing only this inode's bytes would clobber its neighbours. There
+     * was no write here at all before - the journal transaction was started,
+     * nothing was stored, and the transaction was closed as if it succeeded.
+     */
+    buffer = kzalloc(NEXFS_BLOCK_SIZE);
+    if (!buffer) {
+        nexfs_journal_stop(sb);
+        return VFS_ENOMEM;
+    }
+
+    ret = nexfs_read_block_device(sb, block, buffer, NEXFS_BLOCK_SIZE);
+    if (ret != VFS_OK) {
+        kfree(buffer);
+        nexfs_journal_stop(sb);
+        return ret;
+    }
+
+    memcpy((u8 *)buffer + offset, &inode->raw, NEXFS_INODE_SIZE);
+
+    ret = nexfs_write_block_device(sb, block, buffer, NEXFS_BLOCK_SIZE);
+    kfree(buffer);
+
+    if (ret != VFS_OK) {
+        nexfs_journal_stop(sb);
+        pr_err("NexFS: Failed to write inode %llu block %llu\n",
+               (unsigned long long)inode->ino, (unsigned long long)block);
+        return ret;
+    }
 
     /* Dirty metadata */
     ret = nexfs_journal_dirty_metadata(sb, block);
@@ -523,6 +584,7 @@ static s64 nexfs_file_read(struct vfs_file *file, char *buf, u64 count, u64 *pos
     u64 block;
     u32 block_offset;
     u32 to_read;
+    void *block_buf;
     s32 ret;
 
     if (!file || !buf || !pos) {
@@ -567,11 +629,25 @@ static s64 nexfs_file_read(struct vfs_file *file, char *buf, u64 count, u64 *pos
         to_read = MIN(count, NEXFS_BLOCK_SIZE - block_offset);
         to_read = MIN(to_read, (u32)(inode->raw.i_size - offset));
 
-        /* TODO: Read from block device */
-        /* ret = block_device_read(sb->bdev, map.b_blocknr, buf + bytes_read, to_read); */
+        /*
+         * Read the block and copy out the requested slice. This used to
+         * memset() zeros instead, so every file read back as NUL bytes no
+         * matter what had been written.
+         */
+        block_buf = kzalloc(NEXFS_BLOCK_SIZE);
+        if (!block_buf) {
+            return (bytes_read > 0) ? (s64)bytes_read : VFS_ENOMEM;
+        }
 
-        /* For now, zero-fill */
-        memset(buf + bytes_read, 0, to_read);
+        ret = nexfs_read_block_device(sb, map.b_blocknr, block_buf,
+                                      NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            kfree(block_buf);
+            return (bytes_read > 0) ? (s64)bytes_read : ret;
+        }
+
+        memcpy(buf + bytes_read, (u8 *)block_buf + block_offset, to_read);
+        kfree(block_buf);
 
         bytes_read += to_read;
         offset += to_read;
@@ -604,6 +680,7 @@ static s64 nexfs_file_write(struct vfs_file *file, const char *buf, u64 count, u
     u64 block;
     u32 block_offset;
     u32 to_write;
+    void *block_buf;
     s32 ret;
 
     if (!file || !buf || !pos) {
@@ -631,8 +708,45 @@ static s64 nexfs_file_write(struct vfs_file *file, const char *buf, u64 count, u
         /* Calculate bytes to write to this block */
         to_write = MIN(count, NEXFS_BLOCK_SIZE - block_offset);
 
-        /* TODO: Write to block device */
-        /* ret = block_device_write(sb->bdev, map.b_blocknr, buf + bytes_written, to_write); */
+        /*
+         * Read-modify-write the target block: a partial write must preserve
+         * the bytes around it. Previously nothing was written at all, yet the
+         * byte counter and later the file size were still advanced.
+         */
+        block_buf = kzalloc(NEXFS_BLOCK_SIZE);
+        if (!block_buf) {
+            if (bytes_written > 0) {
+                break;
+            }
+            return VFS_ENOMEM;
+        }
+
+        if (!(to_write == NEXFS_BLOCK_SIZE && block_offset == 0)) {
+            ret = nexfs_read_block_device(sb, map.b_blocknr, block_buf,
+                                          NEXFS_BLOCK_SIZE);
+            if (ret != VFS_OK) {
+                kfree(block_buf);
+                if (bytes_written > 0) {
+                    break;
+                }
+                return ret;
+            }
+        } else {
+            memset(block_buf, 0, NEXFS_BLOCK_SIZE);
+        }
+
+        memcpy((u8 *)block_buf + block_offset, buf + bytes_written, to_write);
+
+        ret = nexfs_write_block_device(sb, map.b_blocknr, block_buf,
+                                       NEXFS_BLOCK_SIZE);
+        kfree(block_buf);
+
+        if (ret != VFS_OK) {
+            if (bytes_written > 0) {
+                break;
+            }
+            return ret;
+        }
 
         bytes_written += to_write;
         offset += to_write;
@@ -713,7 +827,12 @@ static s32 nexfs_file_open(struct vfs_inode *inode, struct vfs_file *file)
     nexfs_inode = container_of(inode, struct nexfs_inode, vfs_inode);
 
     /* Check file type */
-    if (nexfs_inode->raw.i_mode & VFS_TYPE_MASK != NEXFS_TYPE_REGULAR) {
+    /*
+     * This read as "i_mode & (VFS_TYPE_MASK != NEXFS_TYPE_REGULAR)" because
+     * != binds tighter than &, i.e. the mask was never applied and the test
+     * degenerated to "i_mode & 1". Parenthesise the mask explicitly.
+     */
+    if ((nexfs_inode->raw.i_mode & VFS_TYPE_MASK) != NEXFS_TYPE_REGULAR) {
         return VFS_EINVAL;
     }
 
@@ -802,7 +921,7 @@ s32 nexfs_add_entry(struct nexfs_inode *dir, const char *name, u64 ino, u8 type)
 {
     struct nexfs_superblock *sb;
     struct nexfs_dir_entry *de;
-    u64 block;
+    void *buffer;
     u32 offset;
     u16 rec_len;
     u16 name_len;
@@ -833,13 +952,44 @@ s32 nexfs_add_entry(struct nexfs_inode *dir, const char *name, u64 ino, u8 type)
         return ret;
     }
 
+    /*
+     * The entry was never actually written: a block was allocated for the
+     * directory, the record was drafted in comments, and then the directory
+     * size was grown as though it had been stored. Write it out for real.
+     */
+    offset = (u32)(dir->raw.i_size % NEXFS_BLOCK_SIZE);
+
+    if (offset + rec_len > NEXFS_BLOCK_SIZE) {
+        /* Entry would straddle a block boundary; directory code does not
+         * support split records yet. */
+        return VFS_EINVAL;
+    }
+
+    buffer = kzalloc(NEXFS_BLOCK_SIZE);
+    if (!buffer) {
+        return VFS_ENOMEM;
+    }
+
+    ret = nexfs_read_block_device(sb, map.b_blocknr, buffer, NEXFS_BLOCK_SIZE);
+    if (ret != VFS_OK) {
+        kfree(buffer);
+        return ret;
+    }
+
     /* Create directory entry */
-    /* de = (struct nexfs_dir_entry *)(buffer + offset); */
-    /* de->inode = ino; */
-    /* de->rec_len = rec_len; */
-    /* de->name_len = name_len; */
-    /* de->file_type = type; */
-    /* memcpy(de->name, name, name_len); */
+    de = (struct nexfs_dir_entry *)((u8 *)buffer + offset);
+    de->inode = (u32)ino;
+    de->rec_len = rec_len;
+    de->name_len = (u8)name_len;
+    de->file_type = type;
+    memcpy(de->name, name, name_len);
+
+    ret = nexfs_write_block_device(sb, map.b_blocknr, buffer, NEXFS_BLOCK_SIZE);
+    kfree(buffer);
+
+    if (ret != VFS_OK) {
+        return ret;
+    }
 
     /* Update directory size */
     dir->raw.i_size += rec_len;
@@ -879,7 +1029,79 @@ s32 nexfs_remove_entry(struct nexfs_inode *dir, const char *name)
         return VFS_ENOENT;
     }
 
-    /* TODO: Remove entry from directory block */
+    /*
+     * Clear the entry's inode number in place rather than compacting the
+     * block: rec_len stays intact so the slot is still walkable, and a zero
+     * inode number is what find_entry/iterate_dir treat as "deleted". The
+     * previous body did nothing here at all and still returned success.
+     */
+    {
+        struct nexfs_superblock *sb =
+            (struct nexfs_superblock *)dir->vfs_inode.i_sb;
+        struct nexfs_block_map map;
+        void *buffer;
+        u64 block;
+        u32 pos;
+
+        /* Locate the record: find_entry gave us a copy, so re-walk. */
+        ret = VFS_ENOENT;
+        for (u64 off = 0; off < dir->raw.i_size; ) {
+            block = off / NEXFS_BLOCK_SIZE;
+
+            if (nexfs_get_block(dir, block, &map, 0) != VFS_OK) {
+                break;
+            }
+
+            buffer = kzalloc(NEXFS_BLOCK_SIZE);
+            if (!buffer) {
+                ret = VFS_ENOMEM;
+                break;
+            }
+
+            if (nexfs_read_block_device(sb, map.b_blocknr, buffer,
+                                        NEXFS_BLOCK_SIZE) != VFS_OK) {
+                kfree(buffer);
+                break;
+            }
+
+            ret = VFS_ENOENT;
+            for (pos = 0; pos + 8 <= NEXFS_BLOCK_SIZE; ) {
+                struct nexfs_dir_entry *cand =
+                    (struct nexfs_dir_entry *)((u8 *)buffer + pos);
+                u16 rl = cand->rec_len;
+
+                if (rl == 0 || pos + rl > NEXFS_BLOCK_SIZE) {
+                    break;
+                }
+
+                if (cand->inode != 0 && cand->name_len == de->name_len &&
+                    memcmp(cand->name, de->name, de->name_len) == 0) {
+                    cand->inode = 0;
+                    ret = nexfs_write_block_device(sb, map.b_blocknr, buffer,
+                                                   NEXFS_BLOCK_SIZE);
+                    break;
+                }
+
+                pos += rl;
+                off += rl;
+            }
+
+            kfree(buffer);
+
+            if (ret == VFS_OK) {
+                break;
+            }
+
+            if (off < block * NEXFS_BLOCK_SIZE + NEXFS_BLOCK_SIZE) {
+                off = (block + 1) * NEXFS_BLOCK_SIZE;
+            }
+        }
+
+        if (ret != VFS_OK) {
+            kfree(result);
+            return ret;
+        }
+    }
 
     kfree(result);
 
@@ -910,6 +1132,7 @@ struct nexfs_dir_entry *nexfs_find_entry(struct nexfs_inode *dir,
     u32 offset;
     u16 rec_len;
     u32 name_len;
+    s32 ret;
 
     if (!dir || !name || !result) {
         return NULL;
@@ -918,34 +1141,84 @@ struct nexfs_dir_entry *nexfs_find_entry(struct nexfs_inode *dir,
     sb = (struct nexfs_superblock *)dir->vfs_inode.i_sb;
     name_len = strlen(name);
 
-    /* Search directory blocks */
+    /*
+     * This function did no searching at all: it commented out the block read,
+     * set de = NULL and returned NULL on the first iteration. Every lookup
+     * therefore reported "no such entry", which made add/remove/create/mkdir
+     * unable to ever find anything. Walk the real directory blocks.
+     */
     for (offset = 0; offset < dir->raw.i_size; ) {
+        struct nexfs_block_map map;
+        void *buffer;
+
         block = offset / NEXFS_BLOCK_SIZE;
 
-        /* TODO: Read directory block */
-        /* ret = nexfs_get_block(dir, block, &map, 0); */
+        ret = nexfs_get_block(dir, block, &map, 0);
+        if (ret != VFS_OK) {
+            return NULL;
+        }
 
-        /* de = (struct nexfs_dir_entry *)(buffer + (offset % NEXFS_BLOCK_SIZE)); */
+        buffer = kzalloc(NEXFS_BLOCK_SIZE);
+        if (!buffer) {
+            return NULL;
+        }
 
-        /* For now, return NULL */
-        de = NULL;
+        ret = nexfs_read_block_device(sb, map.b_blocknr, buffer,
+                                      NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            kfree(buffer);
+            return NULL;
+        }
 
-        if (de) {
-            rec_len = de->rec_len;
+        /* Walk the records inside this block. */
+        for (u32 pos = 0; pos < NEXFS_BLOCK_SIZE;
+             pos += rec_len, offset += rec_len) {
+            struct nexfs_dir_entry *cand;
 
-            if (rec_len == 0) {
+            /*
+             * The entry header is 8 bytes and names are packed after it, so
+             * require room for the header before dereferencing.
+             */
+            if (pos + 8 > NEXFS_BLOCK_SIZE) {
                 break;
             }
 
-            if (de->name_len == name_len &&
-                memcmp(de->name, name, name_len) == 0) {
+            cand = (struct nexfs_dir_entry *)((u8 *)buffer + pos);
+
+            if (cand->rec_len == 0) {
+                break;
+            }
+
+            rec_len = cand->rec_len;
+
+            if (cand->inode == 0) {
+                continue;       /* deleted slot */
+            }
+
+            if (cand->name_len == name_len &&
+                memcmp(cand->name, name, name_len) == 0) {
+                /*
+                 * Hand the caller its own copy: buffer is freed here, and the
+                 * old contract let callers kfree() the result.
+                 */
+                de = kzalloc(rec_len + 1);
+                if (!de) {
+                    kfree(buffer);
+                    return NULL;
+                }
+
+                memcpy(de, cand, rec_len);
+                kfree(buffer);
                 *result = de;
                 return de;
             }
+        }
 
-            offset += rec_len;
-        } else {
-            break;
+        kfree(buffer);
+
+        /* Advance to the next block boundary if this block was exhausted. */
+        if (offset < block * NEXFS_BLOCK_SIZE + NEXFS_BLOCK_SIZE) {
+            offset = (block + 1) * NEXFS_BLOCK_SIZE;
         }
     }
 
@@ -962,7 +1235,78 @@ struct nexfs_dir_entry *nexfs_find_entry(struct nexfs_inode *dir,
  */
 s32 nexfs_iterate_dir(struct nexfs_inode *dir, void *dirent, filldir_t filldir)
 {
-    /* TODO: Implement directory iteration */
+    struct nexfs_superblock *sb;
+    u64 offset;
+    s32 ret;
+
+    if (!dir || !filldir) {
+        return VFS_EINVAL;
+    }
+
+    sb = (struct nexfs_superblock *)dir->vfs_inode.i_sb;
+
+    /*
+     * Returning VFS_OK without calling filldir once told readdir() the
+     * directory was successfully read and empty, however many entries it held.
+     */
+    for (offset = 0; offset < dir->raw.i_size; ) {
+        struct nexfs_block_map map;
+        void *buffer;
+        u64 block = offset / NEXFS_BLOCK_SIZE;
+
+        ret = nexfs_get_block(dir, block, &map, 0);
+        if (ret != VFS_OK) {
+            return ret;
+        }
+
+        buffer = kzalloc(NEXFS_BLOCK_SIZE);
+        if (!buffer) {
+            return VFS_ENOMEM;
+        }
+
+        ret = nexfs_read_block_device(sb, map.b_blocknr, buffer,
+                                      NEXFS_BLOCK_SIZE);
+        if (ret != VFS_OK) {
+            kfree(buffer);
+            return ret;
+        }
+
+        for (u32 pos = 0; pos + 8 <= NEXFS_BLOCK_SIZE; ) {
+            struct nexfs_dir_entry *de;
+            u16 rec_len;
+
+            de = (struct nexfs_dir_entry *)((u8 *)buffer + pos);
+            rec_len = de->rec_len;
+
+            if (rec_len == 0) {
+                break;
+            }
+
+            if (pos + rec_len > NEXFS_BLOCK_SIZE) {
+                break;      /* corrupt record */
+            }
+
+            if (de->inode != 0) {
+                ret = filldir(dirent, de->name, de->name_len,
+                              offset, de->inode, de->file_type);
+                if (ret < 0) {
+                    /* Caller's buffer is full - stop, not an error. */
+                    kfree(buffer);
+                    return VFS_OK;
+                }
+            }
+
+            pos += rec_len;
+            offset += rec_len;
+        }
+
+        kfree(buffer);
+
+        if (offset < block * NEXFS_BLOCK_SIZE + NEXFS_BLOCK_SIZE) {
+            offset = (block + 1) * NEXFS_BLOCK_SIZE;
+        }
+    }
+
     return VFS_OK;
 }
 
