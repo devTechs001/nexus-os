@@ -51,7 +51,19 @@ int gui_framework_init(void)
         return -1;
     }
 
-    /* 3. Initialize Display Info */
+    /* 3. Initialize Window Manager.
+     *
+     * Must come after the compositor (windows composite through it) and before
+     * any module that creates a window. window_create() hard-fails until
+     * window_manager_init() has run; without this call the onboarding wizard
+     * and login screen both failed to build their main window and init aborted
+     * into a kernel panic. */
+    if (window_manager_init() != 0) {
+        pr_err("  Failed to initialize window manager.\n");
+        return -1;
+    }
+
+    /* 4. Initialize Display Info */
     g_gui_framework.num_displays = 1;
     g_gui_framework.primary_display = 0;
     display_info_t *primary = &g_gui_framework.displays[0];
@@ -64,7 +76,7 @@ int gui_framework_init(void)
     primary->color_depth = 32;
     primary->scale_factor = 1.0f;
 
-    /* 4. Initialize Lock */
+    /* 5. Initialize Lock */
     spinlock_init(&g_gui_framework.lock);
 
     g_gui_framework.initialized = true;
@@ -85,6 +97,8 @@ void gui_framework_shutdown(void)
     }
 
     pr_info("Shutting down GUI Framework...\n");
+
+    window_manager_shutdown();
 
     extern void compositor_shutdown(void);
     compositor_shutdown();
