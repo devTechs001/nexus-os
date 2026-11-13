@@ -494,7 +494,6 @@ struct rt_entry *ip_route_output(u32 daddr, u32 saddr, u8 tos)
 struct rt_entry *ip_route_input(struct sk_buff *skb)
 {
     struct iphdr *ip;
-    struct rt_entry *rt;
 
     if (!skb) {
         return NULL;
@@ -502,10 +501,42 @@ struct rt_entry *ip_route_input(struct sk_buff *skb)
 
     ip = (struct iphdr *)skb->data;
 
-    /* Check if destination is local */
-    /* In a full implementation, this would check local addresses */
+    /*
+     * Decide whether this packet is addressed to us. This used to return NULL
+     * unconditionally ("For now, return NULL for non-local destinations"), so
+     * every inbound packet was treated as non-local and delivery stopped here.
+     *
+     * A destination is local when a route for it exists with the RTF_LOCAL
+     * flag, or when a loopback route covers it.
+     */
+    {
+        u32 dst = ntohl(ip->daddr);
+        u32 hash = ip_rt_hash(dst);
+        struct rt_entry *entry;
 
-    /* For now, return NULL for non-local destinations */
+        spin_lock(&ip_rt_lock);
+
+        for (entry = ip_rt_table.hash[hash]; entry; entry = entry->next) {
+            if ((dst & entry->mask) != (entry->dst & entry->mask)) {
+                continue;
+            }
+
+            if (!(entry->flags & RTF_LOCAL) && entry->ifindex != 1) {
+                continue;
+            }
+
+            spin_unlock(&ip_rt_lock);
+            return entry;
+        }
+
+        spin_unlock(&ip_rt_lock);
+    }
+
+    /* 127.0.0.0/8 is always local. */
+    if ((ntohl(ip->daddr) >> 24) == 127) {
+        return ip_route_output(0x7F000001, 0, 0);
+    }
+
     return NULL;
 }
 
@@ -557,9 +588,18 @@ static inline u32 ip_frag_hash_fn(u32 id, u32 saddr, u32 daddr, u8 protocol)
  *
  * Returns: Fragment queue, or NULL on failure
  */
+static void ip_frag_expire(void);
+
 static struct ipq *ip_frag_alloc(u32 id, u32 saddr, u32 daddr, u8 protocol)
 {
     struct ipq *q;
+
+    /*
+     * Reap expired queues before adding another. ip_frag_expire() was a
+     * complete implementation with no caller at all, so every fragment queue
+     * that never completed leaked its ipq and its fragment skbs for good.
+     */
+    ip_frag_expire();
 
     q = kzalloc(sizeof(struct ipq));
     if (!q) {
@@ -704,7 +744,6 @@ static int ip_frag_queue(struct ipq *q, struct sk_buff *skb, u32 offset, int mor
 static struct sk_buff *ip_frag_reasm(struct ipq *q)
 {
     struct sk_buff *skb;
-    struct sk_buff *skb2;
     struct ip_frag *frag;
     u32 offset;
     u32 total_len;

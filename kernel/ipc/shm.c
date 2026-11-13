@@ -145,6 +145,11 @@ static int shm_alloc_id(void)
 
     start_id = next_id;
 
+    /*
+     * Bounded scan. start_id is recorded so we can stop if the counter wraps
+     * all the way back to where we began - otherwise a table that is full apart
+     * from the very first slot we examined would spin for SHM_MAX_ID rounds.
+     */
     while (count < SHM_MAX_ID) {
         id = next_id;
         next_id = (next_id + 1) % SHM_MAX_ID;
@@ -154,6 +159,10 @@ static int shm_alloc_id(void)
         }
 
         count++;
+
+        if (next_id == start_id) {
+            break;      /* wrapped: every slot is taken */
+        }
     }
 
     return -1; /* No free IDs */

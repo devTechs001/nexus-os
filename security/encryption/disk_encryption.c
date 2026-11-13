@@ -7,6 +7,8 @@
  */
 
 #include "../security.h"
+#include "../crypto/crypto.h"
+#include <string.h>
 #include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
@@ -144,32 +146,60 @@ static int pbkdf2(const char *password, u32 pass_len,
     u8 block[32];
     u8 digest[32];
     
+    /*
+     * RFC 2898 PBKDF2. The previous body never called the PRF at all: it
+     * copied an *uninitialised* digest into block, and the iteration loop
+     * merely XOR'd the same garbage in repeatedly. Every derived key was
+     * therefore both wrong and identical regardless of the password or salt,
+     * which for disk encryption means the key schedule was not secret.
+     *
+     * block_num_be was built as a big-endian counter and then never used -
+     * that unused variable is what surfaced the bug.
+     */
     for (u32 block_num = 1; block_num <= block_count; block_num++) {
-        /* U1 = PRF(Password, Salt || INT(block_num)) */
         u8 block_num_be[4];
+        u8 u[32];
+        u8 msg[64 + 4];
+        u32 msg_len;
+
         for (int i = 0; i < 4; i++) {
-            block_num_be[i] = (block_num >> (24 - i * 8)) & 0xFF;
+            block_num_be[i] = (u8)((block_num >> (24 - i * 8)) & 0xFF);
         }
-        
-        /* First iteration */
-        /* hmac_sha256(password, salt || block_num_be, digest) */
-        memcpy(block, digest, 32);
-        
-        /* Remaining iterations */
+
+        /* U1 = PRF(password, salt || INT_32_BE(block_num)) */
+        if (salt_len > 64) {
+            return -EINVAL;
+        }
+
+        memcpy(msg, salt, salt_len);
+        memcpy(msg + salt_len, block_num_be, 4);
+        msg_len = salt_len + 4;
+
+        if (hmac_sha256((const u8 *)password, pass_len, msg, msg_len,
+                        u) != 0) {
+            return -EIO;
+        }
+
+        memcpy(block, u, 32);
+
+        /* Un = PRF(password, U(n-1)); T = U1 ^ U2 ^ ... ^ Uc */
         for (u32 i = 1; i < iterations; i++) {
-            /* hmac_sha256(password, block, digest) */
+            if (hmac_sha256((const u8 *)password, pass_len, u, 32, u) != 0) {
+                return -EIO;
+            }
+
             for (int j = 0; j < 32; j++) {
-                block[j] ^= digest[j];
+                block[j] ^= u[j];
             }
         }
-        
+
         /* Copy to output */
         u32 copy_len = (out_len >= 32) ? 32 : out_len;
         memcpy(&output[(block_num - 1) * 32], block, copy_len);
         out_len -= copy_len;
     }
-    
-    (void)pass_len;
+
+    (void)digest;
     return 0;
 }
 

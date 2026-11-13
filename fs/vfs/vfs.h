@@ -887,6 +887,8 @@ struct vfs_filesystem *vfs_get_filesystem(const char *name);
 s32 vfs_mount(const char *dev_name, const char *dir_name, const char *type,
               u32 flags, void *data);
 s32 vfs_umount(const char *dir_name);
+s32 vfs_umount_by_id(u32 id);
+struct vfs_mount *vfs_find_mount_by_id(u32 id);
 s32 vfs_umount_all(void);
 struct vfs_mount *vfs_lookup_mount(const char *path);
 

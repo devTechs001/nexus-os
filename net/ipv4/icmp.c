@@ -341,11 +341,22 @@ static struct sk_buff *icmp_build_error(u8 type, u8 code,
     struct icmp_error *err;
     u32 ip_hdr_len;
 
-    /* Get original IP header length */
+    /*
+     * RFC 792: quote the original IP header *and* the first 8 bytes of payload.
+     * ip_hdr_len was computed here and then discarded - the quote used
+     * sizeof(struct icmp_bhdr) instead, which is the fixed 20-byte header with
+     * no options. Any packet carrying IP options was therefore quoted wrongly,
+     * and ip_hdr_len was dead.
+     */
     ip_hdr_len = iph->ihl * 4;
 
-    /* Allocate buffer */
-    skb = alloc_skb(sizeof(struct icmp_error));
+    if (ip_hdr_len < sizeof(struct icmp_bhdr) ||
+        ip_hdr_len > sizeof(struct iphdr)) {
+        ip_hdr_len = sizeof(struct icmp_bhdr);
+    }
+
+    /* Allocate buffer: fixed part + the whole quoted header. */
+    skb = alloc_skb(sizeof(struct icmphdr) + ip_hdr_len + 8);
     if (!skb) {
         return NULL;
     }
@@ -357,8 +368,18 @@ static struct sk_buff *icmp_build_error(u8 type, u8 code,
     err->hdr.type = type;
     err->hdr.code = code;
 
-    /* Copy original IP header */
+    /*
+     * Copy the original header at its true length. icmp_error.ip is a fixed
+     * icmp_bhdr, so cap the copy there and append any remainder separately.
+     */
     memcpy(&err->ip, iph, sizeof(struct icmp_bhdr));
+
+    if (ip_hdr_len > sizeof(struct icmp_bhdr)) {
+        u32 extra = ip_hdr_len - sizeof(struct icmp_bhdr);
+
+        memcpy(skb_put(skb, extra),
+               (u8 *)iph + sizeof(struct icmp_bhdr), extra);
+    }
 
     /* Copy first 8 bytes of original data */
     memcpy(err->data, data, 8);
