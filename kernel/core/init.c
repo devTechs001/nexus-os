@@ -540,13 +540,76 @@ void kernel_init_userspace(void)
                  * framebuffer.
                  */
                 boot_params_t *gfx = get_boot_params();
-                if (gfx && gfx->gfx_addr && gfx->gfx_width && gfx->gfx_height) {
+
+                /*
+                 * Report the target framebuffer once, on the first frame.
+                 *
+                 * "The screen is black" is impossible to diagnose from a
+                 * screenshot: the address may be wrong, unmapped, the depth may
+                 * not be 32bpp, or the pitch may not be what we assume. Printing
+                 * exactly what the renderer is writing to, and proving the write
+                 * landed by reading a pixel back, turns that into a fact.
+                 */
+                static bool gfx_reported = false;
+                if (!gfx_reported) {
+                    gfx_reported = true;
+                    if (gfx) {
+                        pr_info("[GUI] Framebuffer: addr=%p %ux%u pitch=%u depth=%u "
+                                "type=%u\n",
+                                (void *)(uintptr_t)gfx->gfx_addr,
+                                gfx->gfx_width, gfx->gfx_height,
+                                gfx->gfx_pitch, gfx->gfx_depth, gfx->gfx_type);
+                        pr_info("[GUI] Boot graphics_mode=%u text_mode=%u "
+                                "vmware=%u native=%u\n",
+                                gfx->graphics_mode, gfx->text_mode,
+                                gfx->vmware_mode, gfx->native_mode);
+                    } else {
+                        pr_err("[GUI] No boot params - cannot get a framebuffer\n");
+                    }
+                }
+
+                /*
+                 * The renderer writes 32-bit 0xAARRGGBB pixels. Anything else
+                 * (16bpp, 24bpp packed) would be drawn as scrambled colours at
+                 * the wrong stride, so refuse rather than corrupt the screen.
+                 */
+                bool gfx_ok = gfx && gfx->gfx_addr && gfx->gfx_width &&
+                              gfx->gfx_height && (gfx->gfx_depth == 0 ||
+                                                  gfx->gfx_depth == 32);
+                if (gfx && gfx->gfx_addr && gfx->gfx_depth &&
+                    gfx->gfx_depth != 32 && !gfx_reported) {
+                    pr_err("[GUI] Framebuffer is %u bpp; renderer needs 32\n",
+                           gfx->gfx_depth);
+                }
+
+                if (gfx_ok) {
                     u32 pitch = gfx->gfx_pitch ? (gfx->gfx_pitch / 4)
                                                : gfx->gfx_width;
                     window_manager_render((u32 *)(uintptr_t)gfx->gfx_addr,
                                           pitch,
                                           gfx->gfx_width,
                                           gfx->gfx_height);
+
+                    /*
+                     * Read one pixel back to prove the write reached the
+                     * framebuffer. If this reads back as the value we wrote,
+                     * the address, mapping and pitch are all correct and any
+                     * remaining blackness is a drawing bug. If it reads back
+                     * unchanged, the scanout buffer is somewhere else.
+                     */
+                    static bool probed = false;
+                    if (!probed) {
+                        probed = true;
+                        volatile u32 *probe = (volatile u32 *)(uintptr_t)gfx->gfx_addr;
+                        u32 sentinel = 0x00FF00FFu;   /* opaque magenta */
+                        u32 saved = probe[0];
+                        probe[0] = sentinel;
+                        u32 readback = probe[0];
+                        probe[0] = saved;
+                        pr_info("[GUI] Framebuffer probe: wrote 0x%08X, read 0x%08X (%s)\n",
+                                sentinel, readback,
+                                (readback == sentinel) ? "WRITABLE" : "WRITE LOST");
+                    }
                 } else {
                     extern struct compositor *compositor_get_instance(void);
                     extern int compositor_present(struct compositor *comp);
