@@ -81,6 +81,20 @@ static struct {
     .bit_operations = ATOMIC_INIT(0),
 };
 
+/*
+ * atomic_stat_inc - Bump the operation counter without going through
+ * atomic_inc().
+ *
+ * Every atomic operation ended with atomic_inc(&total_operations), and
+ * atomic_inc() itself ended with that same call - so the first atomic
+ * operation of any kind recursed until the kernel stack overflowed. Doing
+ * the increment inline breaks the cycle.
+ */
+static inline void atomic_stat_inc(void)
+{
+    __sync_fetch_and_add(&atomic_global.total_operations.counter, 1);
+}
+
 /*===========================================================================*/
 /*                         ATOMIC ARITHMETIC OPERATIONS                      */
 /*===========================================================================*/
@@ -99,7 +113,7 @@ void atomic_add(s32 i, atomic_t *v)
     }
 
     __sync_fetch_and_add(&v->counter, i);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -116,7 +130,7 @@ void atomic_sub(s32 i, atomic_t *v)
     }
 
     __sync_fetch_and_sub(&v->counter, i);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -132,7 +146,7 @@ void atomic_inc(atomic_t *v)
     }
 
     __sync_fetch_and_add(&v->counter, 1);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -148,7 +162,7 @@ void atomic_dec(atomic_t *v)
     }
 
     __sync_fetch_and_sub(&v->counter, 1);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -166,7 +180,7 @@ s32 atomic_add_return(s32 i, atomic_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_add_and_fetch(&v->counter, i);
 }
 
@@ -185,7 +199,7 @@ s32 atomic_sub_return(s32 i, atomic_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_sub_and_fetch(&v->counter, i);
 }
 
@@ -203,7 +217,7 @@ s32 atomic_inc_return(atomic_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_add_and_fetch(&v->counter, 1);
 }
 
@@ -221,7 +235,7 @@ s32 atomic_dec_return(atomic_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_sub_and_fetch(&v->counter, 1);
 }
 
@@ -239,7 +253,7 @@ bool atomic_dec_and_test(atomic_t *v)
         return false;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_sub_and_fetch(&v->counter, 1) == 0;
 }
 
@@ -257,7 +271,7 @@ bool atomic_inc_and_test(atomic_t *v)
         return false;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_add_and_fetch(&v->counter, 1) == 0;
 }
 
@@ -276,7 +290,7 @@ bool atomic_add_negative(s32 i, atomic_t *v)
         return false;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_add_and_fetch(&v->counter, i) < 0;
 }
 
@@ -296,7 +310,7 @@ void atomic64_add(s64 i, atomic64_t *v)
     }
 
     __sync_fetch_and_add(&v->counter, i);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -311,7 +325,7 @@ void atomic64_sub(s64 i, atomic64_t *v)
     }
 
     __sync_fetch_and_sub(&v->counter, i);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -325,7 +339,7 @@ void atomic64_inc(atomic64_t *v)
     }
 
     __sync_fetch_and_add(&v->counter, 1);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -339,7 +353,7 @@ void atomic64_dec(atomic64_t *v)
     }
 
     __sync_fetch_and_sub(&v->counter, 1);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 }
 
 /**
@@ -355,7 +369,7 @@ s64 atomic64_add_return(s64 i, atomic64_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_add_and_fetch(&v->counter, i);
 }
 
@@ -372,7 +386,7 @@ s64 atomic64_sub_return(s64 i, atomic64_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_sub_and_fetch(&v->counter, i);
 }
 
@@ -388,7 +402,7 @@ s64 atomic64_inc_return(atomic64_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_add_and_fetch(&v->counter, 1);
 }
 
@@ -404,7 +418,7 @@ s64 atomic64_dec_return(atomic64_t *v)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_sub_and_fetch(&v->counter, 1);
 }
 
@@ -424,7 +438,7 @@ void atomic_and(u32 mask, atomic_t *v)
     }
 
     __sync_fetch_and_and(&v->counter, mask);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 }
 
@@ -440,7 +454,7 @@ void atomic_or(u32 mask, atomic_t *v)
     }
 
     __sync_fetch_and_or(&v->counter, mask);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 }
 
@@ -456,7 +470,7 @@ void atomic_xor(u32 mask, atomic_t *v)
     }
 
     __sync_fetch_and_xor(&v->counter, mask);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 }
 
@@ -472,7 +486,7 @@ void atomic_andnot(u32 mask, atomic_t *v)
     }
 
     __sync_fetch_and_and(&v->counter, ~mask);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 }
 
@@ -499,7 +513,7 @@ s32 atomic_cmpxchg(atomic_t *v, s32 old, s32 new)
     }
 
     result = __sync_val_compare_and_swap(&v->counter, old, new);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 
     if (result == old) {
         atomic_inc(&atomic_global.cmpxchg_success);
@@ -527,7 +541,7 @@ s64 atomic64_cmpxchg(atomic64_t *v, s64 old, s64 new)
     }
 
     result = __sync_val_compare_and_swap(&v->counter, old, new);
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
 
     if (result == old) {
         atomic_inc(&atomic_global.cmpxchg_success);
@@ -553,7 +567,7 @@ s32 atomic_xchg(atomic_t *v, s32 new)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_lock_test_and_set(&v->counter, new);
 }
 
@@ -570,7 +584,7 @@ s64 atomic64_xchg(atomic64_t *v, s64 new)
         return 0;
     }
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     return __sync_lock_test_and_set(&v->counter, new);
 }
 
@@ -599,7 +613,7 @@ bool atomic_test_and_set_bit(u32 nr, atomic_t *v)
     mask = 1U << nr;
     old = __sync_fetch_and_or(&v->counter, mask);
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 
     return (old & mask) != 0;
@@ -621,7 +635,7 @@ void atomic_set_bit(u32 nr, atomic_t *v)
     mask = 1U << nr;
     __sync_fetch_and_or(&v->counter, mask);
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 }
 
@@ -641,7 +655,7 @@ void atomic_clear_bit(u32 nr, atomic_t *v)
     mask = ~(1U << nr);
     __sync_fetch_and_and(&v->counter, mask);
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 }
 
@@ -685,7 +699,7 @@ bool atomic_test_and_clear_bit(u32 nr, atomic_t *v)
     mask = 1U << nr;
     old = __sync_fetch_and_and(&v->counter, ~mask);
 
-    atomic_inc(&atomic_global.total_operations);
+    atomic_stat_inc();
     atomic_inc(&atomic_global.bit_operations);
 
     return (old & mask) != 0;

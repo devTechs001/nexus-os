@@ -7,6 +7,7 @@
  */
 
 #include "../security.h"
+#include "auth.h"
 
 /*===========================================================================*/
 /*                         AUTHORIZATION CONFIGURATION                       */

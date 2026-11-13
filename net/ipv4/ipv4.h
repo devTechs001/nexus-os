@@ -496,4 +496,9 @@ void ip_stats_reset(void);
 void ip_debug_hdr(struct iphdr *ip);
 void ip_debug_skb(struct sk_buff *skb);
 
+
+/* Ephemeral local port allocator (tcp.c / udp.c) */
+u16 ip_local_port_alloc(void);
+void ip_local_port_free(u16 port);
+
 #endif /* _NEXUS_IPV4_H */

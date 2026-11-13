@@ -9,6 +9,9 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
+/* Forward declaration: defined further down this file. */
+int http_close(u32 connection_id);
+
 /*===========================================================================*/
 /*                         PROTOCOL CONFIGURATION                            */
 /*===========================================================================*/

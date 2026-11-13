@@ -759,12 +759,114 @@ u64 get_ticks(void)
     return arch_get_ticks();
 }
 
+/*
+ * TSC calibration.
+ *
+ * arch_get_ticks() returns the raw TSC cycle counter (see boot.asm: rdtsc).
+ * get_time_ms() divided that by 1e6 as if it were nanoseconds, which made
+ * the clock run at CPU-frequency/1e6 milliseconds per second - roughly 3000x
+ * too fast on a 3 GHz part. Everything built on it was wrong: APIC timer
+ * calibration measured almost no ticks (hence "Timer frequency: 0 Hz"),
+ * delay_ms() returned immediately, and the boot splash could never animate.
+ *
+ * Calibrate once against the PIT so cycles can be converted to real time.
+ */
+static u64 g_tsc_hz = 0;
+
+/**
+ * tsc_calibrate - Measure the TSC frequency using the PIT as reference
+ *
+ * Uses PIT channel 2 (one-shot, gated by port 0x61) which does not disturb
+ * the system tick. Falls back to a sane estimate if the PIT is unavailable,
+ * so timing degrades rather than misbehaving.
+ */
+static u64 tsc_calibrate(void)
+{
+    u64 start, end;
+    u32 guard;
+
+    if (g_tsc_hz) {
+        return g_tsc_hz;
+    }
+
+    /* PIT channel 2, mode 0 (interrupt on terminal count), 1193182 Hz base */
+    outb(0x61, (inb(0x61) & 0xFD) | 0x01);   /* gate on, speaker off */
+    outb(0x43, 0xB0);                        /* ch2, lo/hi, mode 0, binary */
+    u32 reload = 11932;                      /* ~10 ms at 1.193182 MHz */
+    outb(0x42, (u8)(reload & 0xFF));
+    outb(0x42, (u8)(reload >> 8));
+
+    /* Restart the counter cleanly */
+    u8 p61 = inb(0x61) & 0xFE;
+    outb(0x61, p61);
+    outb(0x61, p61 | 0x01);
+
+    start = arch_get_ticks();
+
+    /* Wait for the PIT output bit (0x20) to go high: 10 ms elapsed */
+    guard = 0;
+    while (!(inb(0x61) & 0x20)) {
+        if (++guard > 100000000u) {
+            break;   /* PIT not counting; fall through to the estimate */
+        }
+    }
+
+    end = arch_get_ticks();
+    outb(0x61, inb(0x61) & 0xFC);            /* gate off */
+
+    u64 cycles = end - start;
+
+    if (cycles > 1000 && guard < 100000000u) {
+        /* cycles elapsed in ~10 ms -> multiply by 100 for cycles/second */
+        g_tsc_hz = cycles * 100;
+    } else {
+        /*
+         * Without a working PIT reference, assume 1 GHz. Timing will be off
+         * on real hardware but monotonic and roughly sane, which is far
+         * better than a clock that jumps ~3000x.
+         */
+        g_tsc_hz = 1000000000ULL;
+        printk("[TIME] TSC calibration unavailable, assuming %llu Hz\n",
+               (unsigned long long)g_tsc_hz);
+        return g_tsc_hz;
+    }
+
+    printk("[TIME] TSC frequency: %llu Hz\n", (unsigned long long)g_tsc_hz);
+    return g_tsc_hz;
+}
+
+u64 get_tsc_frequency(void)
+{
+    return tsc_calibrate();
+}
+
+/**
+ * get_time_ns - Get monotonic time in nanoseconds
+ */
+u64 get_time_ns(void)
+{
+    u64 hz = tsc_calibrate();
+    u64 now;
+
+    if (!hz) {
+        return 0;
+    }
+
+    /*
+     * cycles * 1e9 / hz, split so the intermediate product cannot overflow:
+     * a raw TSC value near 2^64 times 1e9 would wrap.
+     */
+    now = arch_get_ticks();
+    return (now / hz) * 1000000000ULL +
+           ((now % hz) * 1000000000ULL) / hz;
+}
+
 /**
  * get_time_ms - Get time in milliseconds
  */
 u64 get_time_ms(void)
 {
-    return arch_get_ticks() / 1000000;
+    return get_time_ns() / 1000000;
 }
 
 /**
@@ -790,6 +892,26 @@ void delay_ms(u64 ms)
         }
         __asm__ __volatile__("pause" ::: "memory");
     }
+}
+
+/**
+ * mdelay - Delay for specified milliseconds (Linux-style alias)
+ *
+ * drivers/video/dsi.c calls this during panel power sequencing; it was
+ * never defined, so the file relied on an implicit declaration.
+ */
+void mdelay(u32 ms)
+{
+    delay_ms((u64)ms);
+}
+
+/**
+ * udelay - Delay for specified microseconds
+ */
+void udelay(u32 us)
+{
+    /* delay_ms() cannot express sub-millisecond waits; round up to 1 ms */
+    delay_ms(us >= 1000 ? (u64)(us / 1000) : 1);
 }
 
 /**

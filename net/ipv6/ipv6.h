@@ -236,4 +236,8 @@ typedef struct {
 
 void ipv6_get_stats(ipv6_stats_t *stats);
 
+
+/* Link-layer transmit, implemented in net/core/net_device.c */
+int netdev_transmit(struct net_device *dev, struct sk_buff *skb);
+
 #endif /* _NEXUS_IPV6_H */

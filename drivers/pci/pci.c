@@ -8,6 +8,7 @@
 
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
+#include "pci.h"
 
 /*===========================================================================*/
 /*                         PCI CONFIGURATION                                 */

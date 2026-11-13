@@ -9,9 +9,14 @@
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
 
-/* Forward declarations from hypervisor core */
-typedef struct vm_config vm_config_t;
-typedef struct vm_state vm_state_t;
+/*
+ * Real hypervisor types. This file used to forward-declare
+ * "struct vm_config"/"struct vm_state", which only produced incomplete
+ * types: sizeof(vm_config_t) failed, storage for a config could not be
+ * allocated, and the struct fields could not be embedded in vm_template_t
+ * or vm_checkpoint_t. The hypervisor header now publishes them.
+ */
+#include "../hypervisor/nexus_hypervisor_core.h"
 
 #define VM_SCHEDULER_QUANTUM_MS   10
 #define VM_MAX_PRIORITY           10

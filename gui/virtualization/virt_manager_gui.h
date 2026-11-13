@@ -12,6 +12,65 @@
 #include "../../kernel/include/types.h"
 
 /*===========================================================================*/
+/*                     CONFIGURATION TYPES                                   */
+/*===========================================================================*/
+
+typedef struct {
+    bool host_only;
+    bool bridged;
+    bool nat;
+    bool nat_network;
+    bool internal;
+    char bridge_interface[32];
+    char nat_network_name[64];
+    char internal_name[64];
+    bool dhcp_enabled;
+    char static_ip[32];
+    char static_gateway[32];
+    char static_netmask[32];
+    bool port_forwarding;
+    u32 port_forward_count;
+} network_config_t;
+
+typedef struct {
+    char name[128];
+    char host_path[256];
+    char guest_path[256];
+    bool writable;
+    bool auto_mount;
+    bool enabled;
+} shared_folder_t;
+
+typedef struct {
+    bool auto_optimize;
+    u32 cpu_overcommit_ratio;
+    u32 memory_overcommit_ratio;
+    bool dynamic_memory;
+    u64 min_memory_mb;
+    u64 max_memory_mb;
+    bool balloon_driver;
+    bool memory_sharing;
+    bool transparent_hugepages;
+    bool numa_balancing;
+    bool cpu_hotplug;
+    bool memory_hotplug;
+} resource_optimization_t;
+
+typedef struct {
+    bool vmware_tools;
+    bool drag_drop;
+    bool copy_paste;
+    bool shared_clipboard;
+    bool unity_mode;
+    bool auto_fit_guest;
+    bool auto_fit_host;
+    u32 display_scale;
+    bool accelerate_3d;
+    u32 video_memory_mb;
+    bool monitor_multiple;
+} vmware_settings_t;
+
+/*===========================================================================*/
 /*                         GUI API                                           */
 /*===========================================================================*/
 

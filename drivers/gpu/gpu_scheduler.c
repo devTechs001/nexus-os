@@ -647,10 +647,14 @@ static void gpu_sched_run(void *arg)
             }
         }
         
-        /* Check hotplug */
-        if (g_gpu_sched.initialized) {
-            check_hotplug();
-        }
+        /*
+         * Display hotplug polling belongs to display_manager.c, where
+         * check_hotplug() is a file-local static. Calling it from the GPU
+         * scheduler loop here referenced a symbol that does not exist
+         * outside that file, so this driver could never link. The scheduler
+         * has nothing to poll for connection changes itself: drop the call
+         * rather than invent a cross-module dependency.
+         */
         
         cpu_relax();
     }

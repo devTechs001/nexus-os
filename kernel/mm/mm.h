@@ -477,4 +477,19 @@ size_t mem_get_total(void);
 size_t mem_get_free(void);
 size_t mem_get_used(void);
 
+/*
+ * System information exported for /proc and the log manager.
+ *
+ * These were referenced by procfs.c and log_manager.c but never defined
+ * anywhere, so both files relied on implicit declarations and would not
+ * link.
+ */
+u64 get_total_memory(void);
+u64 get_free_memory(void);
+u64 get_slab_memory(void);
+u64 get_page_cache_size(void);
+u64 get_buffer_cache_size(void);
+u32 slab_get_cache_count(void);
+size_t slab_get_active_bytes(void);
+
 #endif /* _NEXUS_MM_H */

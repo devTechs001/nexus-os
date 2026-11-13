@@ -427,8 +427,13 @@ extern s32 security_tpm_init(void);
 
 /* Crypto API (from crypto subsystem) */
 extern s32 crypto_init(void);
-extern void *crypto_alloc_context(void);
-extern void crypto_free_context(void *ctx);
+/*
+ * crypto_alloc_context() / crypto_free_context() used to be declared here
+ * as void *-based functions (and never implemented). security/crypto/crypto.h
+ * declares them with the real crypto_context_t type; that header is the
+ * authority, and declaring both in one translation unit is a hard error.
+ * They have no callers in the tree today.
+ */
 
 /* Auth API (from auth subsystem) */
 extern s32 auth_init(void);

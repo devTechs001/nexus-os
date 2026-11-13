@@ -8,6 +8,7 @@
 
 #include "../input.h"
 #include "../../../kernel/include/kernel.h"
+#include "../../../kernel/include/math.h"
 
 /*===========================================================================*/
 /*                         TOUCHSCREEN CONFIGURATION                         */

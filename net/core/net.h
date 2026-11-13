@@ -805,4 +805,8 @@ void net_debug_skb(struct sk_buff *skb);
 void net_debug_socket(struct socket *sock);
 void net_debug_device(struct net_device *dev);
 
+
+/* SKB teardown (net/core/net_device.c) */
+void dev_kfree_skb(struct sk_buff *skb);
+
 #endif /* _NEXUS_NET_H */

@@ -252,9 +252,17 @@ static struct slab *slab_create(struct slab_cache *cache, u32 order)
     size_t slab_size;
     u32 i;
 
-    /* Allocate pages for slab */
+    /*
+     * Allocate pages for slab.
+     *
+     * A slab of order N spans (1 << N) pages - that is what slab_size and
+     * slab_get_slab_size() both assume, and what the free-list setup below
+     * writes into. Allocation asked for (order + 1) pages, i.e. twice that,
+     * while only the first 1 << N pages were ever tracked or freed: every
+     * slab leaked half its allocation on destroy.
+     */
     slab_size = PAGE_SIZE << order;
-    paddr = pmm_alloc_pages(order + 1);
+    paddr = pmm_alloc_pages(slab_size / PAGE_SIZE);
     if (paddr == 0) {
         return NULL;
     }
@@ -262,7 +270,7 @@ static struct slab *slab_create(struct slab_cache *cache, u32 order)
     /* Allocate slab descriptor */
     slab = (struct slab *)kmalloc(sizeof(struct slab));
     if (!slab) {
-        pmm_free_pages(paddr, order + 1);
+        pmm_free_pages(paddr, slab_size / PAGE_SIZE);
         return NULL;
     }
 
@@ -318,9 +326,13 @@ static void slab_destroy(struct slab *slab)
     /* Get physical address */
     paddr = vmm_virt_to_phys((virt_addr_t)slab->mem);
 
-    /* Free pages */
+    /*
+     * Free pages. Must match the (1 << order) allocation in slab_create().
+     * This previously freed order + 1 pages, i.e. twice what was allocated,
+     * returning pages to the PMM that the slab never owned.
+     */
     slab_size = PAGE_SIZE << slab->order;
-    pmm_free_pages(paddr, slab->order + 1);
+    pmm_free_pages(paddr, slab_size / PAGE_SIZE);
 
     /* Free descriptor */
     kfree(slab);
@@ -992,4 +1004,39 @@ void slab_reap_all(void)
     }
 
     spin_unlock(&slab_caches_lock);
+}
+
+/**
+ * slab_get_active_bytes - Total bytes currently held by active slab objects.
+ *
+ * procfs reported a slab figure via a symbol that was never defined, so
+ * /proc/meminfo could not be built. Sum the per-cache active object counts
+ * multiplied by the object size.
+ */
+size_t slab_get_active_bytes(void)
+{
+    size_t total = 0;
+    u32 i;
+
+    spin_lock(&slab_caches_lock);
+
+    for (i = 0; i < num_slab_caches; i++) {
+        struct slab_cache *cache = slab_caches[i];
+        int active = atomic_read(&cache->active_objects);
+        if (active > 0) {
+            total += (size_t)active * cache->size;
+        }
+    }
+
+    spin_unlock(&slab_caches_lock);
+
+    return total;
+}
+
+/**
+ * slab_get_cache_count - Number of live slab caches.
+ */
+u32 slab_get_cache_count(void)
+{
+    return num_slab_caches;
 }

@@ -134,6 +134,8 @@ typedef struct onboarding_wizard onboarding_wizard_t;
 /* Use real instances from GUI modules if they exist, otherwise null stubs */
 extern int gui_framework_init(void);
 extern int desktop_init_global(void);
+extern int nexus_app_launch(int app);   /* gui/apps_nexus.c */
+#define NEXUS_APP_VM_MANAGER 1         /* matches nexus_app_t */
 extern login_screen_t *login_screen_get_instance(void);
 extern int login_screen_init(login_screen_t *screen);
 extern int login_screen_run(login_screen_t *screen);
@@ -229,8 +231,16 @@ void kernel_init_cpus(void)
     /* 3. Initialize interrupt controllers */
     interrupt_init();
     
-    /* 4. Initialize system timer (1 GHz default) */
-    arch_init_timer(1000000000);
+    /*
+     * 4. Initialize system timer at 1000 Hz (1 ms tick).
+     *
+     * This used to pass 1000000000. The PIT divisor is
+     * 1193182 / freq, which truncates to 0 at 1 GHz, and a divisor of 0
+     * means 65536 to the hardware - so the PIT actually ticked at ~18 Hz
+     * while the kernel believed it was 1 tick/ms. Every tick-based timeout
+     * and the boot splash animation were therefore wrong by ~55x.
+     */
+    arch_init_timer(1000);
 
     /* 5. Initialize ACPI */
     acpi_init();
@@ -434,6 +444,20 @@ void kernel_init_userspace(void)
             /* Initialize Desktop Environment */
             pr_info("  [GUI] Initializing Desktop Environment...\n");
             desktop_init_global();
+
+            /*
+             * The Virtualization Manager is a self-contained full-screen
+             * application. It used to have no caller at all, so it could
+             * never be seen; with the "vmmanager" boot parameter it comes
+             * up straight over the desktop, which also makes it reachable
+             * on a system whose shell has no command parser yet.
+             */
+            if (params->vm_manager) {
+                pr_info("  [GUI] Starting Virtualization Manager...\n");
+                if (nexus_app_launch(NEXUS_APP_VM_MANAGER) != 0) {
+                    pr_err("  [GUI] Virtualization Manager failed to start\n");
+                }
+            }
 
             /* Check if onboarding is needed (first boot) */
             onboarding_wizard_t *wizard = onboarding_wizard_get_instance();

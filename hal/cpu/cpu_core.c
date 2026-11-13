@@ -38,7 +38,7 @@ typedef struct cpu_core_data {
 typedef struct cpu_manager {
     cpu_core_data_t cpus[MAX_CPUS];     /* CPU array */
     u32 num_cpus;                       /* Total CPU count */
-    u32 num_present;                    /* Present CPU count */
+    atomic_t num_present;               /* Present CPU count (atomic) */
     u32 num_online;                     /* Online CPU count */
     u32 boot_cpu;                       /* Boot CPU ID */
     spinlock_t lock;                    /* Global lock */
@@ -183,7 +183,7 @@ void cpu_early_init(void)
     spin_lock_init_named(&cpu_manager.lock, "cpu_manager");
     cpu_manager.boot_cpu = 0;
     cpu_manager.num_cpus = 1;
-    cpu_manager.num_present = 0;
+    atomic_set(&cpu_manager.num_present, 0);
     cpu_manager.num_online = 0;
     cpu_manager.initialized = false;
 
@@ -246,7 +246,7 @@ void cpu_init(void)
     spin_unlock(&cpu_manager.lock);
 
     pr_info("CPU: %u CPUs detected (%u present)\n",
-            cpu_manager.num_cpus, cpu_manager.num_present);
+            cpu_manager.num_cpus, atomic_read(&cpu_manager.num_present));
 }
 
 /**

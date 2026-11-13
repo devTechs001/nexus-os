@@ -369,6 +369,42 @@ int display_detect_connectors(u32 adapter_id)
  *
  * Returns: 0 on success, negative error code on failure
  */
+/**
+ * display_get_current_mode - Report the mode currently being scanned out
+ *
+ * Declared in display.h and called by display_manager.c, but never
+ * implemented - so that file could not link. Answer from the live primary
+ * framebuffer, which is the mode actually on the display.
+ */
+int display_get_current_mode(u32 crtc_id, display_mode_t *mode)
+{
+    (void)crtc_id;
+
+    if (!mode) {
+        return -EINVAL;
+    }
+
+    display_framebuffer_t *fb = display_get_primary_framebuffer();
+    if (!fb || !fb->width || !fb->height) {
+        return -ENODEV;
+    }
+
+    memset(mode, 0, sizeof(display_mode_t));
+
+    mode->clock = 0;
+    mode->hdisplay = (u16)fb->width;
+    mode->htotal = (u16)fb->width;
+    mode->vdisplay = (u16)fb->height;
+    mode->vtotal = (u16)fb->height;
+    mode->vrefresh = 60;
+    mode->is_preferred = true;
+
+    snprintf(mode->name, sizeof(mode->name), "%ux%u@%u",
+             fb->width, fb->height, fb->bpp);
+
+    return 0;
+}
+
 int display_get_modes(u32 connector_id, display_mode_t *modes, u32 *count)
 {
     if (!modes || !count || *count == 0) {
@@ -988,7 +1024,7 @@ display_driver_t *display_get_driver(void)
 /* External driver initializers */
 extern int vga_init(void);
 extern int framebuffer_init(void);
-extern void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp);
+#include "../video/splash.h"
 
 /**
  * graphics_init - Comprehensive graphics subsystem initialization
@@ -1006,6 +1042,21 @@ void graphics_init(void)
     printk("[GRAPHICS] ========================================\n");
 
     boot_params_t *params = get_boot_params();
+
+    /*
+     * Report the framebuffer state up front. A missing framebuffer used to
+     * be completely silent: the graphical boot screen simply never
+     * appeared, with no indication of why.
+     */
+    if (params && params->gfx_addr) {
+        printk("[GRAPHICS] Multiboot2 framebuffer: %ux%ux%u, pitch %u, addr 0x%llX\n",
+               params->gfx_width, params->gfx_height, params->gfx_depth,
+               params->gfx_pitch, params->gfx_addr);
+    } else {
+        printk("[GRAPHICS] WARNING: bootloader supplied no framebuffer "
+               "(graphics_mode=%s) - no graphical output available\n",
+               (params && params->graphics_mode) ? "yes" : "no");
+    }
 
     /* 1. Initialize hardware-specific drivers (VGA/SVGA/VESA) */
     /* Skip VGA hardware init if we already have a Multiboot2 framebuffer */
@@ -1048,18 +1099,22 @@ void graphics_init(void)
                 printk("[GRAPHICS] Splash screen active on %dx%dx%d FB\n", 
                        fb->width, fb->height, fb->bpp);
             } else {
-                /* Fallback: Create a standard 1024x768 framebuffer */
-                display_framebuffer_t new_fb;
-                if (display_create_framebuffer(1024, 768, PIXEL_FORMAT_XRGB8888, &new_fb) == 0) {
-                    splash_init((u32*)new_fb.base, 1024, 768, new_fb.stride, new_fb.bpp);
-                    printk("[GRAPHICS] Splash screen active on new 1024x768 FB\n");
-                } else {
-                    printk("[ERROR] Failed to create framebuffer for splash screen!\n");
-                }
+                /*
+                 * There is no scan-out surface at all. Creating a private
+                 * 1024x768 buffer and pointing the splash at it would "succeed"
+                 * while drawing into RAM nobody displays - a black screen with
+                 * a cheerful success message. Say so instead.
+                 */
+                printk("[GRAPHICS] WARNING: no displayable framebuffer - "
+                       "graphical splash skipped (output goes to console/serial "
+                       "only). The bootloader did not provide a Multiboot2 "
+                       "framebuffer and no VESA mode was set.\n");
             }
         }
     } else {
-        printk("[GRAPHICS] Booting in text mode, skipping graphical splash.\n");
+        printk("[GRAPHICS] Booting in text mode (graphics_mode=%s), "
+               "skipping graphical splash.\n",
+               (params && params->graphics_mode) ? "yes" : "no");
     }
 
     outb(0x3F8, 'G');

@@ -434,9 +434,53 @@ struct sched_class {
 /*===========================================================================*/
 
 /* Scheduler Initialization */
+/*
+ * Process statistics used by /proc and the log manager. These had no
+ * declarations, so callers were compiled against an implicit int.
+ */
+int get_process_count(void);
+int get_thread_count(void);
+u32 get_running_process_count(void);
+u32 get_last_pid(void);
+u32 get_load_average(u32 minutes);
+u64 get_cpu_idle_time(u32 cpu);
+
+/* Time helpers (kernel/arch/x86_64/cpu/timer.c) */
+u64 ktime_get_ns(void);
+u64 ktime_get_us(void);
+u64 ktime_get_ms(void);
+u64 ktime_get_sec(void);
+
+/* Run-queue locking used by the per-class scheduler code */
+void rq_lock_irqsave(struct rq *rq, u64 *flags);
+void rq_unlock_irqrestore(struct rq *rq, u64 flags);
+
+/* Thread / process waiting */
+bool signal_pending_current(void);
+pid_t wait_for_task(struct task_struct *task, int *exit_code, int options);
+pid_t wait_for_children(int *exit_code, int options);
+
 void scheduler_init(void);
 void scheduler_start(void);
 void scheduler_enable_all(void);
+
+/*
+ * Per-class scheduler operations (kernel/sched/realtime.c, cfs.c).
+ * These were called from several places before their definitions and never
+ * declared, so the compiler assumed an implicit int return type.
+ */
+int preempt_count(void);
+void set_preempt_count(int count);
+
+void enqueue_task_rt(struct rq *rq, struct task_struct *task, int flags);
+void dequeue_task_rt(struct rq *rq, struct task_struct *task, int flags);
+void put_prev_task_rt(struct rq *rq, struct task_struct *prev);
+void update_rt_runtime(struct rq *rq);
+
+void enqueue_task_fair(struct rq *rq, struct task_struct *task, int flags);
+void dequeue_task_fair(struct rq *rq, struct task_struct *task, int flags);
+void put_prev_task_fair(struct rq *rq, struct task_struct *prev);
+void update_curr_fair(struct rq *rq, struct task_struct *task);
 
 /* Task Creation/Destruction */
 struct task_struct *alloc_task_struct(void);
@@ -529,4 +573,10 @@ void hrtimer_init(void);
 void hrtimer_start(u64 expires_ns);
 void hrtimer_cancel(void);
 
+
+/* Process lifecycle (kernel/sched/process.c) - called from the syscall layer
+ * before their definitions, previously with no prototype anywhere. */
+pid_t fork_process(struct task_struct *parent);
+int exec_process(struct task_struct *task, const char *path, char **argv, char **envp);
+void task_exit(int code);
 #endif /* _NEXUS_SCHED_H */

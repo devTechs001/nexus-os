@@ -7,7 +7,7 @@
  */
 
 #include "../gui.h"
-#include "../kernel/include/kernel.h"
+#include "../../kernel/include/kernel.h"
 
 /* Forward declaration for string function */
 extern char *strrchr(const char *s, int c);

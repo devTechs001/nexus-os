@@ -8,6 +8,7 @@
 
 #include "auth.h"
 #include "../security.h"
+#include "../crypto/crypto.h"
 
 /*===========================================================================*/
 /*                         AUTH CONFIGURATION                                */
@@ -68,7 +69,7 @@ static auth_session_t *auth_session_table[AUTH_MAX_SESSIONS];
 
 static s32 auth_hash_password(const char *password, const u8 *salt,
                               u32 iterations, u8 *hash);
-static s32 auth_verify_password(const auth_password_t *stored, const char *password);
+s32 auth_verify_password(const auth_password_t *stored, const char *password);
 static s32 auth_generate_token(u8 *token, u32 length);
 static void auth_cleanup_expired_sessions(void);
 
@@ -209,7 +210,7 @@ static s32 auth_hash_password(const char *password, const u8 *salt,
  *
  * Returns: OK if password matches, error code otherwise
  */
-static s32 auth_verify_password(const auth_password_t *stored, const char *password)
+s32 auth_verify_password(const auth_password_t *stored, const char *password)
 {
     u8 hash[AUTH_HASH_SIZE];
     s32 ret;
@@ -253,7 +254,7 @@ static void auth_generate_salt(u8 *salt)
  *
  * Returns: OK on success, error code on failure
  */
-static s32 auth_set_password(auth_user_t *user, const char *password)
+s32 auth_set_password(auth_user_t *user, const char *password)
 {
     u32 password_len;
 

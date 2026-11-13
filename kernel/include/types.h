@@ -386,4 +386,23 @@ typedef struct {
 #define FD_ISSET(fd, fdsetp)    (((fdsetp)->fds_bits[(fd)/64] & (1ULL << ((fd) % 64))) != 0)
 #define FD_ZERO(fdsetp)         memset((fdsetp), 0, sizeof(*(fdsetp)))
 
+/*===========================================================================*/
+/*                         PORT I/O                                          */
+/*===========================================================================*/
+
+/*
+ * x86 port I/O. The implementations live in kernel/core/kernel.c and
+ * boot/bootloader/bootloader.c as weak symbols, but they were never
+ * declared in a header, so every driver that used them (console.c,
+ * display.c, boot_menu.c, ...) compiled against an implicit int
+ * declaration.
+ */
+void outb(u16 port, u8 val);
+u8   inb(u16 port);
+void outw(u16 port, u16 val);
+u16  inw(u16 port);
+void outl(u16 port, u32 val);
+u32  inl(u16 port);
+void io_wait(void);
+
 #endif /* _NEXUS_TYPES_H */

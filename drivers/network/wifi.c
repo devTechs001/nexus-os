@@ -8,6 +8,7 @@
 
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
+#include "../pci/pci.h"
 
 /* PCI constants */
 #define PCI_ANY_ID  0xFFFF

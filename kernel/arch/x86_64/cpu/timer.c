@@ -4,6 +4,7 @@
  */
 
 #include "../../../include/kernel.h"
+#include "../../../../drivers/video/splash.h"
 
 /* PIT Ports */
 #define PIT_CHANNEL_0   0x40
@@ -30,7 +31,29 @@ static u64 ticks = 0;
  */
 void arch_init_timer(u64 freq)
 {
-    u32 divisor = PIT_BASE_FREQ / (u32)freq;
+    u32 divisor;
+
+    /*
+     * Clamp the requested rate to what the PIT can actually produce.
+     * A divisor of 0 is interpreted as 65536 by the hardware, and any
+     * request above 1193182 Hz truncates to exactly that - silently
+     * running the timer at ~18 Hz instead of the rate asked for.
+     */
+    if (freq == 0) {
+        freq = 1000;
+    }
+    if (freq > PIT_BASE_FREQ) {
+        pr_warn("x86_64: cannot run PIT at %llu Hz (max %d), clamping\n",
+                freq, PIT_BASE_FREQ);
+        freq = PIT_BASE_FREQ;
+    }
+
+    divisor = PIT_BASE_FREQ / (u32)freq;
+    if (divisor == 0) {
+        divisor = 1;
+    } else if (divisor > 65535) {
+        divisor = 65535;
+    }
 
     /* Send command byte */
     outb(PIT_COMMAND, PIT_CMD_CHANNEL_0 | PIT_CMD_LOBYTE | PIT_CMD_HIBYTE | PIT_CMD_SQUARE_WAVE | PIT_CMD_BINARY);
@@ -48,6 +71,19 @@ void arch_init_timer(u64 freq)
 void timer_tick(void)
 {
     ticks++;
+
+    /*
+     * Drive the boot splash animation from the PIT.
+     *
+     * splash_animate() self-throttles (it only repaints every 16th call)
+     * and returns immediately once the splash is torn down, so this is a
+     * couple of instructions per tick after boot. Without it the splash
+     * would be a single static frame: there is no other periodic work in
+     * the tree that could animate it while init is running.
+     */
+    if (splash_is_active()) {
+        splash_animate();
+    }
 }
 
 /**
@@ -73,10 +109,12 @@ u64 ktime_get_ns(void)
     return ticks * 1000000;
 }
 
-u64 get_time_ns(void)
-{
-    return ktime_get_ns();
-}
+/*
+ * get_time_ns() is provided by kernel/core/kernel.c, where it is derived from
+ * the TSC after calibration against the PIT. Defining it here as well produced
+ * a duplicate symbol at link time, and the tick-based version was the one that
+ * reported nonsense whenever IRQ0 was not running.
+ */
 
 u64 ktime_get_sec(void)
 {

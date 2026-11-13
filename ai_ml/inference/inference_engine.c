@@ -8,6 +8,10 @@
 
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
+#include "../../kernel/include/math.h"
+
+/* Forward declarations for functions used before their definitions. */
+int inference_unload_model(u32 model_id);
 
 /*===========================================================================*/
 /*                         INFERENCE ENGINE CONFIGURATION                    */

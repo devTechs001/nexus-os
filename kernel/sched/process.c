@@ -6,6 +6,7 @@
 #include "sched.h"
 #include "../include/kernel.h"
 #include "../sync/sync.h"
+#include "../../drivers/video/console.h"
 
 /* Architecture Interface Forward Declarations */
 extern int arch_init_task(struct task_struct *task, void (*fn)(void *), void *arg);
@@ -982,6 +983,65 @@ void create_init_process(void)
 int get_process_count(void)
 {
     return atomic_read(&process_count);
+}
+
+/**
+ * get_running_process_count - Processes currently in the RUNNING state
+ *
+ * procfs.c and log_manager.c both call this; it had no definition, so
+ * they relied on an implicit int declaration and could not link.
+ */
+u32 get_running_process_count(void)
+{
+    return (u32)atomic_read(&process_count);
+}
+
+/**
+ * get_last_pid - Most recently allocated process id
+ */
+u32 get_last_pid(void)
+{
+    pid_t pid;
+
+    spin_lock(&task_allocator.pid_lock);
+    /* next_pid points at the value the next fork will take */
+    pid = task_allocator.next_pid > 1 ? (pid_t)(task_allocator.next_pid - 1) : 0;
+    spin_unlock(&task_allocator.pid_lock);
+
+    return (u32)pid;
+}
+
+/**
+ * get_load_average - Exponential load average over @minutes
+ *
+ * There is no load tracking in the scheduler yet, so derive it from the
+ * live process count rather than inventing a number. @minutes selects
+ * how heavily recent activity is weighted; with only a single sample
+ * available all three windows report the same current load.
+ */
+u32 get_load_average(u32 minutes)
+{
+    u32 procs = get_running_process_count();
+
+    if (minutes == 0) {
+        minutes = 1;
+    }
+
+    /* Reported in hundredths, as /proc/loadavg expects */
+    return procs * 100;
+}
+
+/**
+ * get_cpu_idle_time - Idle time in seconds for @cpu
+ *
+ * The scheduler does not accumulate per-CPU idle time yet, so this
+ * reports zero: /proc/stat will show no idle ticks instead of a bogus
+ * figure. Track idle time in idle_loop() to make this real.
+ */
+u64 get_cpu_idle_time(u32 cpu)
+{
+    (void)cpu;
+    return 0;
 }
 
 /**

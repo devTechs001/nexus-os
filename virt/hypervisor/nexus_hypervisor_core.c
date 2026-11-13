@@ -8,6 +8,7 @@
 
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
+#include "nexus_hypervisor_core.h"
 
 /*===========================================================================*/
 /*                         HYPERVISOR CONFIGURATION                          */
@@ -17,6 +18,8 @@
 #define MAX_VCPUS_PER_VM          128
 #define MAX_VM_MEMORY_GB          1024
 #define MAX_VIRTUAL_DEVICES       256
+#define HV_MAX_MEMORY_REGIONS        64
+#define HV_EPT_MAX_ENTRIES           4096
 #define NESTED_VIRT_LEVELS        3
 
 /* Hypervisor Features */
@@ -48,138 +51,6 @@
 /*===========================================================================*/
 /*                         DATA STRUCTURES                                   */
 /*===========================================================================*/
-
-/* Virtual CPU State */
-typedef struct {
-    u64 rip;
-    u64 rsp;
-    u64 rbp;
-    u64 rax, rbx, rcx, rdx;
-    u64 rsi, rdi;
-    u64 r8, r9, r10, r11;
-    u64 r12, r13, r14, r15;
-    u64 rflags;
-    u64 cr0, cr2, cr3, cr4;
-    u64 dr0, dr1, dr2, dr3, dr6, dr7;
-    u64 gdtr_base, gdtr_limit;
-    u64 idtr_base, idtr_limit;
-    u16 cs, ds, es, fs, gs, ss;
-    u16 tr, ldt;
-    u64 efer;
-    u64 apic_base;
-    u64 tsc_offset;
-    u64 vmcs_pointer;
-    bool interruptible;
-    bool pending_nmi;
-    bool pending_smi;
-} vcpu_state_t;
-
-/* Virtual CPU Configuration */
-typedef struct {
-    u32 vcpu_id;
-    u32 host_cpu_id;
-    bool pinned;
-    u64 tsc_frequency;
-    u64 apic_frequency;
-    bool x2apic;
-    bool xsave;
-    bool fpu;
-    bool vmx;
-    bool svm;
-} vcpu_config_t;
-
-/* Virtual Memory Region */
-typedef struct {
-    u64 guest_physical;
-    u64 host_physical;
-    u64 size;
-    u64 flags;
-    bool mapped;
-    bool writable;
-    bool executable;
-    bool cached;
-} vm_memory_region_t;
-
-/* Virtual Device */
-typedef struct {
-    u32 device_id;
-    u32 vendor_id;
-    u32 device_type;
-    u32 irq;
-    u64 mmio_base;
-    u64 mmio_size;
-    u64 pio_base;
-    u64 pio_size;
-    bool enabled;
-    bool passthrough;
-    bool msix;
-    void *private_data;
-} vm_virtual_device_t;
-
-/* VM Configuration */
-typedef struct {
-    char name[128];
-    char uuid[64];
-    u32 vm_id;
-    u32 vm_type;
-    u32 execution_mode;
-    u32 num_vcpus;
-    u64 memory_size_mb;
-    u64 max_memory_mb;
-    bool memory_hotplug;
-    bool nested_virt;
-    u32 nested_level;
-    u64 features;
-    bool secure_boot;
-    bool encrypted;
-    bool live_migration;
-    bool snapshot_support;
-    bool gpu_passthrough;
-    u32 gpu_count;
-    char boot_image[256];
-    char kernel_cmdline[512];
-    u32 num_network;
-    u32 num_storage;
-    u32 num_usb;
-    u32 num_pci;
-} vm_config_t;
-
-/* VM State */
-typedef struct {
-    u32 state;
-    u64 uptime;
-    u64 cpu_time;
-    u64 memory_used;
-    u64 disk_read;
-    u64 disk_write;
-    u64 network_rx;
-    u64 network_tx;
-    u32 exit_count;
-    u32 interrupt_count;
-    u32 exception_count;
-    u32 vmexit_reason;
-    u64 last_exit_timestamp;
-} vm_state_t;
-
-/* Virtual Machine */
-typedef struct {
-    vm_config_t config;
-    vm_state_t state;
-    vcpu_state_t *vcpus;
-    vcpu_config_t *vcpu_configs;
-    vm_memory_region_t *memory_regions;
-    u32 num_memory_regions;
-    vm_virtual_device_t *devices;
-    u32 num_devices;
-    u64 *page_tables;
-    u64 ept_pointer;
-    u32 vpid;
-    void *vmcs;
-    bool running;
-    bool paused;
-    bool stopped;
-    spinlock_t lock;
-} virtual_machine_t;
 
 /* Hypervisor Statistics */
 typedef struct {
@@ -232,7 +103,7 @@ static hypervisor_manager_t g_hypervisor;
 /*===========================================================================*/
 
 /* CPUID Feature Masking for VMs */
-static void cpuid_virtualize(u32 leaf, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
+void cpuid_virtualize(u32 leaf, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 {
     switch (leaf) {
     case 0x00000001:
@@ -262,7 +133,7 @@ static void cpuid_virtualize(u32 leaf, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 /*===========================================================================*/
 
 /* MSR Read/Write Handlers */
-static u64 msr_read_virtualize(u32 msr)
+u64 msr_read_virtualize(u32 msr)
 {
     switch (msr) {
     case 0x174:  /* IA32_SYSENTER_CS */
@@ -285,7 +156,7 @@ static u64 msr_read_virtualize(u32 msr)
     return 0;
 }
 
-static void msr_write_virtualize(u32 msr, u64 value)
+void msr_write_virtualize(u32 msr, u64 value)
 {
     switch (msr) {
     case 0x174:
@@ -312,20 +183,20 @@ static void msr_write_virtualize(u32 msr, u64 value)
 /*===========================================================================*/
 
 /* APIC Virtualization */
-static void apic_virtualize_init(virtual_machine_t *vm)
+void apic_virtualize_init(virtual_machine_t *vm)
 {
     printk("[HYPERVISOR] Initializing virtual APIC for VM %u\n", vm->config.vm_id);
     /* Initialize virtual APIC state */
 }
 
-static void apic_virtualize_intr(virtual_machine_t *vm, u32 vector)
+void apic_virtualize_intr(virtual_machine_t *vm, u32 vector)
 {
     /* Inject virtual interrupt */
     printk("[HYPERVISOR] Injecting interrupt 0x%x into VM %u\n", vector, vm->config.vm_id);
 }
 
 /* IOAPIC Virtualization */
-static void ioapic_virtualize_init(virtual_machine_t *vm)
+void ioapic_virtualize_init(virtual_machine_t *vm)
 {
     printk("[HYPERVISOR] Initializing virtual IOAPIC for VM %u\n", vm->config.vm_id);
 }
@@ -335,22 +206,40 @@ static void ioapic_virtualize_init(virtual_machine_t *vm)
 /*===========================================================================*/
 
 /* EPT (Extended Page Tables) Setup */
-static int ept_init(virtual_machine_t *vm)
+int ept_init(virtual_machine_t *vm)
 {
     printk("[HYPERVISOR] Initializing EPT for VM %u\n", vm->config.vm_id);
     
-    /* Allocate EPT page tables */
-    vm->page_tables = (u64 *)kmalloc(4096);
+    /*
+     * Allocate EPT page tables.
+     *
+     * The old code kmalloc'd a fixed 4096 bytes (512 entries) and then
+     * wrote memory_size_mb / 4 entries into it. A 4 GB VM needs 2048
+     * entries = 16 KB, so building its EPT ran off the end of the
+     * allocation and corrupted the heap. Size the table from the VM's
+     * actual memory and clamp it.
+     */
+    u32 entries = (u32)(vm->config.memory_size_mb / 2);  /* 2 MB pages */
+    if (entries == 0) {
+        entries = 1;
+    }
+    if (entries > HV_EPT_MAX_ENTRIES) {
+        printk("[HYPERVISOR] WARNING: VM %u memory (%lu MB) exceeds EPT coverage, clamping\n",
+               vm->config.vm_id, vm->config.memory_size_mb);
+        entries = HV_EPT_MAX_ENTRIES;
+    }
+
+    vm->page_tables = (u64 *)kmalloc((u64)entries * sizeof(u64));
     if (!vm->page_tables) {
         printk("[HYPERVISOR] ERROR: Failed to allocate EPT\n");
         return -1;
     }
-    
-    memset(vm->page_tables, 0, 4096);
-    
-    /* Set up identity mapping for guest physical memory */
-    for (u32 i = 0; i < vm->config.memory_size_mb / 4; i++) {
-        vm->page_tables[i] = (i * 0x100000) | 0x83;  /* Present + Writable + 2MB */
+
+    memset(vm->page_tables, 0, (u64)entries * sizeof(u64));
+
+    /* Identity map guest physical memory using 2 MB pages */
+    for (u32 i = 0; i < entries; i++) {
+        vm->page_tables[i] = ((u64)i * 0x200000) | 0x83;  /* Present + RW + 2MB + Accessed */
     }
     
     vm->ept_pointer = (u64)vm->page_tables;
@@ -360,9 +249,18 @@ static int ept_init(virtual_machine_t *vm)
 }
 
 /* Memory Region Management */
-static int vm_memory_add(virtual_machine_t *vm, u64 guest_phys, u64 host_phys, u64 size, u64 flags)
+int vm_memory_add(virtual_machine_t *vm, u64 guest_phys, u64 host_phys, u64 size, u64 flags)
 {
-    if (vm->num_memory_regions >= 256) {
+    /*
+     * vm_create() allocates exactly HV_MAX_MEMORY_REGIONS (64) regions.
+     * The bound check used to say 256, so region 65 onwards wrote past
+     * the end of the array into the next heap block.
+     */
+    if (!vm->memory_regions || !vm->devices) {
+        printk("[HYPERVISOR] ERROR: VM not created, cannot add memory\n");
+        return -1;
+    }
+    if (vm->num_memory_regions >= HV_MAX_MEMORY_REGIONS) {
         printk("[HYPERVISOR] ERROR: Too many memory regions\n");
         return -1;
     }
@@ -388,8 +286,12 @@ static int vm_memory_add(virtual_machine_t *vm, u64 guest_phys, u64 host_phys, u
 /*===========================================================================*/
 
 /* Virtual Device Creation */
-static vm_virtual_device_t *vm_device_create(virtual_machine_t *vm, u32 type)
+vm_virtual_device_t *vm_device_create(virtual_machine_t *vm, u32 type)
 {
+    if (!vm->devices) {
+        printk("[HYPERVISOR] ERROR: VM not created, cannot add device\n");
+        return NULL;
+    }
     if (vm->num_devices >= MAX_VIRTUAL_DEVICES) {
         printk("[HYPERVISOR] ERROR: Too many devices\n");
         return NULL;
@@ -408,7 +310,7 @@ static vm_virtual_device_t *vm_device_create(virtual_machine_t *vm, u32 type)
 }
 
 /* VirtIO Device Support */
-static void virtio_device_init(vm_virtual_device_t *dev)
+void virtio_device_init(vm_virtual_device_t *dev)
 {
     dev->vendor_id = 0x1AF4;  /* VirtIO vendor ID */
     
@@ -431,7 +333,7 @@ static void virtio_device_init(vm_virtual_device_t *dev)
 }
 
 /* PCI Passthrough Support */
-static int pci_passthrough_attach(virtual_machine_t *vm, u32 bus, u32 dev, u32 func)
+int pci_passthrough_attach(virtual_machine_t *vm, u32 bus, u32 dev, u32 func)
 {
     printk("[HYPERVISOR] Attaching PCI device %02x:%02x.%x to VM %u\n",
            bus, dev, func, vm->config.vm_id);
@@ -448,9 +350,30 @@ static int pci_passthrough_attach(virtual_machine_t *vm, u32 bus, u32 dev, u32 f
 /* VM Creation */
 virtual_machine_t *vm_create(vm_config_t *config)
 {
+    if (!config) {
+        printk("[HYPERVISOR] ERROR: NULL VM config\n");
+        return NULL;
+    }
+
     if (g_hypervisor.vm_count >= MAX_VMS) {
         printk("[HYPERVISOR] ERROR: Maximum VMs reached\n");
         return NULL;
+    }
+
+    /*
+     * A config with zero vCPUs allocates a zero-length vcpu array, which
+     * kmalloc() may return as NULL - vm_create() then fails with a
+     * misleading "Failed to allocate VCPUs". Clamp to a sane minimum,
+     * and make sure % num_physical_cpus below can never divide by zero.
+     */
+    if (config->num_vcpus == 0) {
+        config->num_vcpus = 1;
+    }
+    if (config->num_vcpus > MAX_VCPUS_PER_VM) {
+        config->num_vcpus = MAX_VCPUS_PER_VM;
+    }
+    if (g_hypervisor.num_physical_cpus == 0) {
+        g_hypervisor.num_physical_cpus = 1;
     }
     
     virtual_machine_t *vm = &g_hypervisor.vms[g_hypervisor.vm_count++];
@@ -482,14 +405,14 @@ virtual_machine_t *vm_create(vm_config_t *config)
     }
     
     /* Allocate memory regions */
-    vm->memory_regions = (vm_memory_region_t *)kmalloc(sizeof(vm_memory_region_t) * 64);
+    vm->memory_regions = (vm_memory_region_t *)kmalloc(sizeof(vm_memory_region_t) * HV_MAX_MEMORY_REGIONS);
     if (!vm->memory_regions) {
         printk("[HYPERVISOR] ERROR: Failed to allocate memory regions\n");
         return NULL;
     }
     
     /* Allocate devices */
-    vm->devices = (vm_virtual_device_t *)kmalloc(sizeof(vm_virtual_device_t) * 32);
+    vm->devices = (vm_virtual_device_t *)kmalloc(sizeof(vm_virtual_device_t) * MAX_VIRTUAL_DEVICES);
     if (!vm->devices) {
         printk("[HYPERVISOR] ERROR: Failed to allocate devices\n");
         return NULL;
@@ -546,21 +469,34 @@ int vm_start(virtual_machine_t *vm)
 {
     printk("[HYPERVISOR] Starting VM %u...\n", vm->config.vm_id);
     
-    if (vm->state.state != 1) {
-        printk("[HYPERVISOR] ERROR: VM not in CREATED state\n");
+    /*
+     * A VM may only be started from a non-running state. The old check
+     * required state == 1 (CREATED) exactly, which meant a VM that had
+     * been stopped (state 4) could never be started again - "Restart" in
+     * the GUI silently did nothing. Accept CREATED, PAUSED and STOPPED.
+     */
+    if (vm->state.state == 2) {
+        printk("[HYPERVISOR] ERROR: VM %u is already running\n", vm->config.vm_id);
+        return -1;
+    }
+    if (vm->state.state != 1 && vm->state.state != 3 && vm->state.state != 4) {
+        printk("[HYPERVISOR] ERROR: VM %u not in a startable state (%u)\n",
+               vm->config.vm_id, vm->state.state);
         return -1;
     }
     
-    /* Set VCPU initial state */
-    for (u32 i = 0; i < vm->config.num_vcpus; i++) {
-        vcpu_state_t *vcpu = &vm->vcpus[i];
-        vcpu->rip = 0xFFF0;  /* BIOS reset vector */
-        vcpu->rflags = 0x00000002;
-        vcpu->cr0 = 0x60000010;
-        vcpu->interruptible = true;
+    /* Put every vCPU into the architectural reset state */
+    if (vm_boot_from_reset_vector(vm) < 0) {
+        printk("[HYPERVISOR] ERROR: Failed to reset vCPUs\n");
+        return -1;
     }
-    
+
+    for (u32 i = 0; i < vm->config.num_vcpus; i++) {
+        vm->vcpus[i].interruptible = true;  /* run loop is now live */
+    }
+
     vm->running = true;
+    vm->paused = false;
     vm->state.state = 2;  /* RUNNING */
     vm->state.uptime = 0;
     
@@ -576,35 +512,179 @@ int vm_stop(virtual_machine_t *vm)
 {
     printk("[HYPERVISOR] Stopping VM %u...\n", vm->config.vm_id);
     
+    if (!vm->running && vm->state.state == 4) {
+        printk("[HYPERVISOR] VM %u is already stopped\n", vm->config.vm_id);
+        return 0;
+    }
+
     vm->running = false;
     vm->state.state = 4;  /* STOPPED */
-    
-    g_hypervisor.stats.running_vms--;
+
+    /*
+     * Only decrement if this VM was actually counted as running. Destroy
+     * calls vm_stop() on an already-stopped VM, and the unguarded
+     * decrement underflowed running_vms to 0xFFFFFFFF.
+     */
+    if (g_hypervisor.stats.running_vms > 0) {
+        g_hypervisor.stats.running_vms--;
+    }
     
     printk("[HYPERVISOR] VM %u stopped\n", vm->config.vm_id);
     
     return 0;
 }
 
+/*
+ * vm_boot_from_reset_vector - Bring a vCPU up at the architectural reset
+ * vector, the way real hardware and every real hypervisor does it.
+ *
+ * On x86-64 a vCPU does not begin life in long mode. Reset leaves it in
+ * real mode with CS.base = 0xFFFF0000, EIP = 0xFFF0, which is why the
+ * very first instruction fetch lands at 0xFFFFFFF0 - the top of the 4 GB
+ * address space where the firmware ROM is mapped. Setting only RIP =
+ * 0xFFF0, as the old vm_start() did, starts execution at *4 GB lower*
+ * than intended and never gives the guest a valid real-mode segment.
+ *
+ * Being in real mode also means CR0.PE must be clear on entry, but CR0
+ * also needs PE set again once the guest's firmware switches to
+ * protected mode. We start the guest in the documented reset state and
+ * let the guest's own firmware take it from there.
+ */
+int vm_boot_from_reset_vector(virtual_machine_t *vm)
+{
+    if (!vm || !vm->vcpus) {
+        return -1;
+    }
+
+    for (u32 i = 0; i < vm->config.num_vcpus; i++) {
+        vcpu_state_t *vcpu = &vm->vcpus[i];
+
+        /* Real-mode architectural reset state */
+        vcpu->cs  = 0xF000;      /* segment selector */
+        vcpu->rip = 0xFFF0;      /* offset within the segment */
+        vcpu->rflags = 0x0002;   /* IF clear, reserved bit 1 set */
+        vcpu->cr0 = 0x60000010;  /* CD + NW set, PE/PG clear (cache off at reset) */
+        vcpu->cr4 = 0;
+        vcpu->efer = 0;          /* long mode off until the guest enables it */
+
+        memset(&vcpu->ds, 0, sizeof(u16) * 5);  /* ds/es/fs/gs/ss = 0 */
+        vcpu->interruptible = false;  /* interrupts masked until the guest enables them */
+
+        /* Reset state starts executing at the firmware entry point. */
+        u64 entry = ((u64)vcpu->cs << 4) + vcpu->rip;   /* 0xFFFF0 + 0xF0 = 0xFFFFFFF0 */
+
+        printk("[HYPERVISOR] vCPU %u reset: CS:IP %04lX:%04lX -> 0x%lX, CR0 0x%lX\n",
+               i, (u64)vcpu->cs, vcpu->rip, entry, vcpu->cr0);
+    }
+
+    printk("[HYPERVISOR] VM %u at reset vector (waiting for firmware)\n",
+           vm->config.vm_id);
+
+    return 0;
+}
+
+/* VM Pause */
+int vm_pause(virtual_machine_t *vm)
+{
+    if (!vm) {
+        return -1;
+    }
+
+    if (!vm->running || vm->paused) {
+        printk("[HYPERVISOR] VM %u is not running, cannot pause\n", vm->config.vm_id);
+        return -1;
+    }
+
+    vm->paused = true;
+    vm->state.state = 3;  /* PAUSED */
+
+    g_hypervisor.stats.paused_vms++;
+
+    printk("[HYPERVISOR] VM %u paused at RIP 0x%lX\n",
+           vm->config.vm_id, vm->vcpus ? vm->vcpus[0].rip : 0);
+
+    return 0;
+}
+
+/* VM Resume */
+int vm_resume(virtual_machine_t *vm)
+{
+    if (!vm) {
+        return -1;
+    }
+
+    if (!vm->paused) {
+        printk("[HYPERVISOR] VM %u is not paused\n", vm->config.vm_id);
+        return -1;
+    }
+
+    vm->paused = false;
+    vm->running = true;
+    vm->state.state = 2;  /* RUNNING */
+
+    g_hypervisor.stats.paused_vms--;
+
+    printk("[HYPERVISOR] VM %u resumed\n", vm->config.vm_id);
+
+    return 0;
+}
+
+/* Find VM by id */
+virtual_machine_t *vm_find(u32 vm_id)
+{
+    for (u32 i = 0; i < g_hypervisor.vm_count; i++) {
+        if (g_hypervisor.vms[i].config.vm_id == vm_id &&
+            g_hypervisor.vms[i].state.state != 0) {
+            return &g_hypervisor.vms[i];
+        }
+    }
+    return NULL;
+}
+
 /* VM Destroy */
 void vm_destroy(virtual_machine_t *vm)
 {
-    printk("[HYPERVISOR] Destroying VM %u...\n", vm->config.vm_id);
-    
+    if (!vm) {
+        return;
+    }
+
+    /* Capture the id first: vm_destroy() used to print it *after* the
+     * memset(), so the log always claimed "VM 0 destroyed". */
+    u32 vm_id = vm->config.vm_id;
+
+    printk("[HYPERVISOR] Destroying VM %u...\n", vm_id);
+
     vm_stop(vm);
-    
+
     /* Free resources */
     if (vm->vcpus) kfree(vm->vcpus);
     if (vm->vcpu_configs) kfree(vm->vcpu_configs);
     if (vm->memory_regions) kfree(vm->memory_regions);
     if (vm->devices) kfree(vm->devices);
     if (vm->page_tables) kfree(vm->page_tables);
-    
-    memset(vm, 0, sizeof(virtual_machine_t));
-    g_hypervisor.vm_count--;
-    g_hypervisor.stats.total_vms--;
-    
-    printk("[HYPERVISOR] VM %u destroyed\n", vm->config.vm_id);
+
+    /*
+     * VMs live in a packed array. Simply decrementing vm_count left a
+     * hole in the middle and silently dropped whichever VM happened to
+     * be last, so deleting VM #1 of 3 destroyed the slot of VM #3 and
+     * left VM #1 alive. Slide the tail down instead.
+     */
+    u32 idx = (u32)(vm - &g_hypervisor.vms[0]);
+    if (idx < g_hypervisor.vm_count) {
+        u32 tail = g_hypervisor.vm_count - idx - 1;
+        if (tail > 0) {
+            memmove(&g_hypervisor.vms[idx], &g_hypervisor.vms[idx + 1],
+                    tail * sizeof(virtual_machine_t));
+        }
+        g_hypervisor.vm_count--;
+        memset(&g_hypervisor.vms[g_hypervisor.vm_count], 0, sizeof(virtual_machine_t));
+    }
+
+    if (g_hypervisor.stats.total_vms > 0) {
+        g_hypervisor.stats.total_vms--;
+    }
+
+    printk("[HYPERVISOR] VM %u destroyed\n", vm_id);
 }
 
 /*===========================================================================*/

@@ -91,6 +91,16 @@ typedef struct {
     void *private;                /* Private data */
 } auth_user_t;
 
+/*
+ * Password operations.
+ *
+ * PAM calls these across translation units, but they were defined static
+ * in auth.c - so pam.c compiled against an implicit declaration and the
+ * kernel could not link.
+ */
+s32 auth_verify_password(const auth_password_t *stored, const char *password);
+s32 auth_set_password(auth_user_t *user, const char *password);
+
 /**
  * auth_session_t - User session information
  */
@@ -156,5 +166,11 @@ s32 auth_pam_chauthtok(const char *service, const char *username, const char *ol
 void auth_stats(void);
 void auth_dump_users(void);
 void auth_dump_sessions(void);
+
+
+/* Authorization rule/group management (security/auth/authorization.c) */
+s32 authz_rule_create(u32 type, u32 uid, u32 gid, const char *resource,
+                      u32 permissions, u32 priority);
+s32 authz_group_create(const char *name, u32 max_members);
 
 #endif /* _NEXUS_AUTH_H */
