@@ -101,15 +101,25 @@ int window_manager_init(void)
         return 0;
     }
 
-    spin_lock(&g_window_manager.lock);
-
     pr_info("Initializing window manager...\n");
 
+    /* Zero the whole structure BEFORE taking its lock.
+     *
+     * memset used to run while g_window_manager.lock was held. That wipes the
+     * lock word (and the bookkeeping spinlock_init would have set up) out from
+     * under the caller, so the matching spin_unlock at the end released a lock
+     * nobody held. Reset first, then initialise the lock properly, and only
+     * then take it. */
     memset(&g_window_manager, 0, sizeof(g_window_manager));
     g_window_manager.next_window_id = 1;
-    g_window_manager.lock.lock = 0;
+    spinlock_init(&g_window_manager.lock);
 
-    /* Register default window classes */
+    /* Register default window classes.
+     *
+     * Done WITHOUT the manager lock held: window_manager_register_class()
+     * takes it itself, and spinlock_t is not recursive, so holding it across
+     * these calls deadlocked the boot the moment the window manager was
+     * actually initialised. */
     window_manager_register_class("Normal", NULL, 0, (color_t)COLOR_WHITE);
     window_manager_register_class("Dialog", NULL, WINDOW_FLAG_MODAL, (color_t)COLOR_WHITE);
     window_manager_register_class("Popup", NULL, WINDOW_FLAG_POPUP | WINDOW_FLAG_BORDERLESS, 
@@ -122,13 +132,18 @@ int window_manager_init(void)
     desktop_props.flags = WINDOW_FLAG_VISIBLE;
     desktop_props.background = (color_t){{{0, 100, 200, 255}}};  /* Blue desktop */
     
-    g_window_manager.desktop_window = window_manager_create_internal(&desktop_props);
-
+    /* Publish the flag before creating the desktop window: the flag is what
+     * makes the manager usable, and create_internal needs it set. */
     g_window_manager.initialized = true;
 
-    pr_info("Window manager initialized\n");
+    g_window_manager.desktop_window = window_manager_create_internal(&desktop_props);
+    if (!g_window_manager.desktop_window) {
+        pr_err("Window manager: failed to create desktop window\n");
+        g_window_manager.initialized = false;
+        return -1;
+    }
 
-    spin_unlock(&g_window_manager.lock);
+    pr_info("Window manager initialized\n");
 
     return 0;
 }
@@ -257,9 +272,14 @@ static window_t *window_manager_create_internal(window_props_t *props)
         g_window_manager.on_window_created(window);
     }
 
-    /* Auto-focus first window */
+    /* Auto-focus first window.
+     *
+     * Calls the internal variant on purpose: the public window_focus() takes
+     * g_window_manager.lock, which window_create() already holds when it gets
+     * here, and spinlock_t is not recursive - the first window created through
+     * the public API would have locked the machine. */
     if (g_window_manager.num_windows == 1) {
-        window_focus(window);
+        window_manager_set_focus(window);
     }
 
     return window;
@@ -998,7 +1018,13 @@ int window_restore(window_t *window)
         }
     }
 
-    window_show(window);
+    /* Restore visibility inline rather than through window_show(): that
+     * function takes g_window_manager.lock, and we are already holding it.
+     * spinlock_t is not recursive, so calling it here deadlocked the first
+     * time a minimised window was restored. */
+    window->visible = true;
+    window->dirty = true;
+    window->z_order = ++g_window_manager.top_z_order;
 
     if (g_window_manager.on_window_restored) {
         g_window_manager.on_window_restored(window);

@@ -443,6 +443,17 @@ int display_get_primary(display_info_t *info);
 int display_set_primary(u32 display_id);
 int display_get_virtual_rect(rect_t *rect);
 
+/* Window manager lifecycle.
+ *
+ * window_create()/window_destroy() below are the public face of the window
+ * manager, and window_create() refuses to run until window_manager_init() has
+ * set the initialized flag. That init used to have no declaration here and no
+ * caller anywhere in the tree, so every GUI module that tried to create its
+ * main window got NULL, logged "Window manager not initialized", and the boot
+ * sequence ended in a kernel panic. gui_framework_init() now calls it. */
+int window_manager_init(void);
+void window_manager_shutdown(void);
+
 /* Window management */
 window_t *window_create(window_props_t *props);
 void window_destroy(window_t *window);
