@@ -899,14 +899,32 @@ static void widget_default_paint(widget_t *widget, graphics_context_t *ctx)
  * accumulated down the tree and each widget's bounds are translated into screen
  * space before its paint callback sees them.
  */
-void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
-                       s32 origin_x, s32 origin_y)
+static void widget_paint_siblings(widget_t *first, graphics_context_t *ctx,
+                                  s32 origin_x, s32 origin_y)
 {
-    if (!widget || !ctx) {
+    if (!first) {
         return;
     }
 
-    for (widget_t *w = widget; w; w = w->next_sibling) {
+    /*
+     * Paint in CREATION order, oldest first.
+     *
+     * widget_add_child() prepends, so parent->children runs newest-to-oldest.
+     * Walking it forwards painted the newest widget first and the OLDEST last,
+     * on top - and the oldest child of every screen is its full-screen
+     * background panel. The background therefore covered every control that
+     * had just been drawn beneath it, which is why a fully built login screen
+     * still came out as a single flat rectangle.
+     *
+     * Walking backwards through prev_sibling restores creation order: the
+     * background goes down first and later widgets stack on top of it.
+     */
+    widget_t *last = first;
+    while (last->next_sibling) {
+        last = last->next_sibling;
+    }
+
+    for (widget_t *w = last; w; w = w->prev_sibling) {
         if (!w->visible || !w->enabled) {
             continue;
         }
@@ -929,9 +947,20 @@ void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
         w->window.props.bounds = saved;
 
         if (w->children) {
-            widget_paint_tree(w->children, ctx, abs_x, abs_y);
+            widget_paint_siblings(w->children, ctx, abs_x, abs_y);
         }
     }
+}
+
+void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
+                       s32 origin_x, s32 origin_y)
+{
+    if (!widget || !ctx) {
+        return;
+    }
+
+    /* A single widget is treated as a one-entry sibling list. */
+    widget_paint_siblings(widget, ctx, origin_x, origin_y);
 }
 
 /**
