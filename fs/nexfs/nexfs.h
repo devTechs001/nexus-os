@@ -74,6 +74,7 @@ extern nexfs_global_t nexfs_global;
 /* Direct/Indirect Blocks */
 #define NEXFS_DIRECT_BLOCKS     12
 #define NEXFS_INDIRECT_BLOCKS   1
+#define NEXFS_ADDRS_PER_BLOCK   (NEXFS_BLOCK_SIZE / sizeof(u32))
 #define NEXFS_DOUBLE_INDIRECT   1
 #define NEXFS_TRIPLE_INDIRECT   1
 #define NEXFS_MAX_BLOCKS        (NEXFS_DIRECT_BLOCKS + NEXFS_INDIRECT_BLOCKS + \
@@ -635,6 +636,10 @@ struct nexfs_transaction {
     struct list_head t_meta_data;   /* Metadata buffers */
     struct list_head t_log_buffers; /* Log buffers */
 
+    /* Revoked blocks (freed inside this transaction) */
+    struct list_head t_revoke_list;
+    u32 t_nr_revokes;
+
     /* Block counts */
     u32 t_nr_buffers;
     u32 t_nr_meta_data;
@@ -748,6 +753,7 @@ struct nexfs_inode *nexfs_alloc_inode(struct nexfs_superblock *sb);
 s32 nexfs_delete_inode(struct nexfs_inode *inode);
 
 /* Block allocation */
+s32 nexfs_truncate_blocks(struct nexfs_inode *inode);
 s32 nexfs_get_block(struct nexfs_inode *inode, u64 iblock,
                     struct nexfs_block_map *map, s32 create);
 s32 nexfs_alloc_blocks(struct nexfs_inode *inode, u64 start, u64 count);
@@ -778,6 +784,8 @@ s32 nexfs_journal_get_write_access(struct nexfs_superblock *sb, u64 block);
 s32 nexfs_journal_dirty_metadata(struct nexfs_superblock *sb, u64 block);
 s32 nexfs_journal_commit(struct nexfs_superblock *sb);
 s32 nexfs_journal_recovery(struct nexfs_superblock *sb);
+s32 nexfs_journal_flush(struct nexfs_superblock *sb);
+s32 nexfs_journal_revoke(struct nexfs_superblock *sb, u64 block);
 
 /* Checksum functions */
 u32 nexfs_crc32c(u32 crc, const void *buf, size_t len);
