@@ -14,6 +14,8 @@
 #include "../../gui/window-manager/window-manager.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
+#include "../../drivers/display/display.h"
+#include "../../drivers/video/font8x16.h"
 
 /*===========================================================================*/
 /*                         GLOBAL TERMINAL APPLICATION                       */
@@ -40,6 +42,8 @@ static int update_tab_titles(terminal_window_t *win);
 /* Rendering */
 static int render_screen(terminal_window_t *win);
 static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *cell);
+static u32 terminal_ansi_color(u8 index);
+static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y, u32 w, u32 h, u32 color);
 static int update_cursor(terminal_window_t *win);
 
 /* PTY operations */
@@ -1183,11 +1187,91 @@ static int render_screen(terminal_window_t *win)
  */
 static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *cell)
 {
-    (void)win; (void)x; (void)y; (void)cell;
-    
-    /* In real implementation, would render character with colors */
-    
+    display_framebuffer_t *fb;
+    u32 fg, bg;
+    u32 px, py;
+
+    if (!win || !cell) {
+        return -EINVAL;
+    }
+
+    fb = display_get_primary_framebuffer();
+    if (!fb || !fb->base || fb->bpp != 32) {
+        return -ENODEV;
+    }
+
+    /*
+     * This used to return 0 without drawing anything, which is why the
+     * terminal showed no colour at all. Colours are the ANSI 16-colour
+     * palette indexed by terminal_cell_t.fg_color / bg_color.
+     */
+    fg = terminal_ansi_color(cell->fg_color);
+    bg = terminal_ansi_color(cell->bg_color);
+
+    if (cell->reverse) {
+        u32 tmp = fg;
+        fg = bg;
+        bg = tmp;
+    }
+
+    if (!cell->character || cell->character == ' ') {
+        fg = bg;                       /* Nothing to draw, just clear. */
+    }
+
+    px = (u32)(win->wm_window ? win->wm_window->geometry.x : 0) + x * win->cell_width;
+    py = (u32)(win->wm_window ? win->wm_window->geometry.y : 0) + y * win->cell_height;
+
+    /* Background cell first, then the glyph on top. */
+    terminal_fill_cell(fb, px, py, win->cell_width, win->cell_height, bg);
+
+    if (cell->character && cell->character != ' ') {
+        font8x16_draw_char((u32 *)fb->base, fb->width, fb->height, fb->stride,
+                           (s32)px, (s32)py, cell->character, fg, 1, 255);
+    }
+
     return 0;
+}
+
+/**
+ * terminal_ansi_color - Map an ANSI colour index to 0x00RRGGBB
+ *
+ * Covers the standard 16 colours. Indices past 15 fall back to the default
+ * foreground so a malformed escape sequence cannot invent a colour.
+ */
+static u32 terminal_ansi_color(u8 index)
+{
+    static const u32 palette[16] = {
+        0x000000, 0xAA0000, 0x00AA00, 0xAA5500,
+        0x0000AA, 0xAA00AA, 0x00AAAA, 0xAAAAAA,
+        0x555555, 0xFF5555, 0x55FF55, 0xFFFF55,
+        0x5555FF, 0xFF55FF, 0x55FFFF, 0xFFFFFF,
+    };
+
+    return palette[index & 0x0F];
+}
+
+/**
+ * terminal_fill_cell - Fill one cell rectangle
+ */
+static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y,
+                               u32 w, u32 h, u32 color)
+{
+    u32 *pixels = (u32 *)fb->base;
+    u32 stride = fb->stride / 4;
+
+    for (u32 row = 0; row < h; row++) {
+        u32 dy = y + row;
+        if (dy >= fb->height) {
+            break;
+        }
+        for (u32 col = 0; col < w; col++) {
+            u32 dx = x + col;
+            if (dx >= fb->width) {
+                break;
+            }
+            pixels[dy * stride + dx] = color;
+        }
+    }
 }
 
 /**
@@ -1833,12 +1917,52 @@ static void on_key_press(terminal_window_t *win, u32 key, u32 modifiers)
  */
 static void on_mouse_click(terminal_window_t *win, s32 x, s32 y, u32 button)
 {
-    (void)win; (void)x; (void)y; (void)button;
-    
-    /* In real implementation, would handle mouse clicks */
-    /* - Left click: Place cursor / select text */
-    /* - Right click: Show context menu */
-    /* - Middle click: Paste */
+    u32 col, row;
+
+    if (!win || !win->screen) {
+        return;
+    }
+
+    if (win->cell_width == 0 || win->cell_height == 0) {
+        return;
+    }
+
+    /* Convert window-relative pixels to a cell coordinate. */
+    col = (u32)(x > 0 ? x : 0) / win->cell_width;
+    row = (u32)(y > 0 ? y : 0) / win->cell_height;
+
+    if (col >= win->screen->width) {
+        col = win->screen->width ? win->screen->width - 1 : 0;
+    }
+    if (row >= win->screen->height) {
+        row = win->screen->height ? win->screen->height - 1 : 0;
+    }
+
+    switch (button) {
+        case 0:     /* Left: place cursor and begin a selection. */
+            win->screen->cursor_x = col;
+            win->screen->cursor_y = row;
+            win->is_selecting = true;
+            win->selection_start_x = col;
+            win->selection_start_y = row;
+            win->selection_end_x = col;
+            win->selection_end_y = row;
+            break;
+
+        case 1:     /* Middle: paste the clipboard at the cursor. */
+            if (win->clipboard && win->clipboard[0]) {
+                pty_write(win, win->clipboard, (u32)strlen(win->clipboard));
+            }
+            break;
+
+        case 2:     /* Right: the menu is owned by the desktop environment, so
+                     * positioning it is its job, not the terminal's. All the
+                     * terminal knows is that a context menu exists. */
+            break;
+
+        default:
+            break;
+    }
 }
 
 /**
@@ -2350,4 +2474,75 @@ int terminal_open_bookmark(terminal_window_t *win, u32 index)
     }
 
     return 0;
+}
+
+/*===========================================================================*/
+/*                       RENDERING AND EVENT ENTRY POINTS                    */
+/*===========================================================================*/
+/*
+ * render_cell, on_mouse_click and on_resize were static functions with
+ * implementations (or stubs) that nothing ever called: the terminal had no
+ * render loop and no event path at all. These entry points give the window
+ * manager something to call.
+ */
+
+/**
+ * terminal_render_window - Draw a window's visible screen
+ *
+ * Renders every cell in the screen buffer, then the cursor if it is due to be
+ * shown. Returns the number of cells drawn, or a negative error code.
+ */
+int terminal_render_window(terminal_window_t *win)
+{
+    u32 drawn = 0;
+
+    if (!win || !win->screen) {
+        return -EINVAL;
+    }
+
+    if (win->cell_width == 0 || win->cell_height == 0) {
+        return -EINVAL;
+    }
+
+    for (u32 row = 0; row < win->screen->height; row++) {
+        for (u32 col = 0; col < win->screen->width; col++) {
+            terminal_cell_t *cell = &win->screen->cells[row * win->screen->width + col];
+
+            if (render_cell(win, col, row, cell) == 0) {
+                drawn++;
+            }
+        }
+    }
+
+    return (int)drawn;
+}
+
+/**
+ * terminal_handle_mouse - Forward a mouse event to a window
+ */
+void terminal_handle_mouse(terminal_window_t *win, s32 x, s32 y, u32 button)
+{
+    on_mouse_click(win, x, y, button);
+}
+
+/**
+ * terminal_handle_resize - Forward a window resize to the terminal
+ *
+ * Recomputes rows and columns from the pixel size and the cell size.
+ */
+void terminal_handle_resize(terminal_window_t *win, u32 width, u32 height)
+{
+    if (!win) {
+        return;
+    }
+
+    /* A zero cell size would divide by zero; fall back to 8x16. */
+    if (win->cell_width == 0) {
+        win->cell_width = 8;
+    }
+    if (win->cell_height == 0) {
+        win->cell_height = 16;
+    }
+
+    on_resize(win, width, height);
 }
