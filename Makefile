@@ -1163,6 +1163,14 @@ $(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
 # ---------------------------------------------------------------------------
 # Build guard
 #
+# This target DEPENDS ON $(OBJECTS). It verifies that every object listed in
+# C_OBJECTS exists on disk, so it must run last, after everything is compiled.
+# It previously had no prerequisites and was listed BEFORE $(OBJECTS) on the
+# kernel's dependency line, so on a clean tree it inspected an empty build/
+# directory, reported "objects never built (compile failed, see log above)" and
+# exited 1 - before a single source had been compiled. That is why a failed
+# build showed no [CC] lines and no compiler diagnostics.
+#
 # Every compile recipe ends in "2>&1", which routes diagnostics into the log
 # without touching the exit status. That let `make` report success while a
 # source failed to compile, and a repeated entry in C_OBJECTS put the same
@@ -1170,7 +1178,7 @@ $(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
 # checked here so the build fails loudly at the point of the mistake.
 # ---------------------------------------------------------------------------
 .PHONY: check-build
-check-build:
+check-build: $(OBJECTS)
 	@dupes=$$(printf '%s\n' $(C_OBJECTS) | sort | uniq -d); \
 	if [ -n "$$dupes" ]; then \
 	  echo "  [ERR]   duplicate objects in C_OBJECTS:"; \
@@ -1189,7 +1197,17 @@ check-build:
 	@echo "  [CHECK] link inputs OK - $(words $(C_OBJECTS)) C objects"
 
 # Link kernel
-$(KERNEL_BIN): check-build $(OBJECTS)
+#
+# ORDER MATTERS: $(OBJECTS) must be built BEFORE check-build runs.
+#
+# check-build verifies that every object listed in C_OBJECTS exists on disk.
+# With "check-build $(OBJECTS)", make evaluates prerequisites left to right, so
+# the guard ran first - against a freshly cleaned build/ directory - found
+# nothing, printed "objects never built (compile failed, see log above)" and
+# exited 1. Nothing had been compiled yet, which is why there were no [CC] lines
+# and no compiler diagnostics above the failure: the build aborted before the
+# first source was touched.
+$(KERNEL_BIN): $(OBJECTS) check-build
 	@echo "  [LD]    $@"
 	@$(LD) $(LDFLAGS) -o $@ $(OBJECTS) 2>&1
 	@echo "  [INFO]  Kernel size: $$(stat -c %s $@ 2>/dev/null || stat -f %z $@ 2>/dev/null || echo 0) bytes"
