@@ -284,6 +284,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/apps_nexus.o \
             $(BUILD_DIR)/vm_manager_enhanced.o \
             $(BUILD_DIR)/login-screen.o \
+            $(BUILD_DIR)/session-manager.o \
             $(BUILD_DIR)/onboarding-wizard.o \
             $(BUILD_DIR)/registry.o \
             $(BUILD_DIR)/booster.o \
@@ -601,6 +602,10 @@ $(BUILD_DIR)/gui_core.o: $(GUI_DIR)/gui_core.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/app-store.o: $(GUI_DIR)/app-store/app-store.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/session-manager.o: $(GUI_DIR)/session/session-manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
