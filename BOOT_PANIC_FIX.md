@@ -124,3 +124,100 @@ is booted under QEMU (the documented `make run` path) or VirtualBox.
 
 QEMU/NASM are not present in this sandbox, so the ISO could not be booted
 here; the analysis above is static plus object-level verification.
+
+---
+
+# Round 2 — Page fault at the kernel heap (`CR2=0xffffffff90000008`)
+
+With the ISR stub fixed, boot now reaches heap initialisation and dies with:
+
+```
+[INFO] Initializing Kernel Heap...
+[DEBUG] Spinlock: Initialized lock 0x000000000349038
+[ERR ] EXCEPTION 14 (error 0xa) at 0x110b90, CR2=0xffffffff90000008
+!! KERNEL PANIC !!  Error: CPU Exception: 14
+```
+
+## Root cause: NX bit set while `EFER.NXE` is clear
+
+Two halves of the codebase disagreed about the no-execute bit:
+
+* `mm/vmm.c` → `pte_create()` adds **`PTE_NX` (bit 63)** to every mapping that
+  is not requested with `VMA_EXEC`.
+* `mm/heap.c` → `heap_init()` maps the heap with `VMA_READ | VMA_WRITE`
+  (correctly not executable), so those PTEs get bit 63.
+* `boot.asm` only ever set **`EFER.LME` (bit 8)** — `EFER.NXE` (bit 11) was
+  never enabled.
+
+With `EFER.NXE = 0`, bit 63 is a **reserved bit**. Hardware raises `#PF`
+with error code **`0xa` = 0b1010 = bit1 (write) + bit3 (RSVD)**. The fault
+address confirms it exactly:
+
+```
+KERNEL_HEAP_START = 0xFFFFFFFF90000000
+struct heap_arena { start @ +0x00, end @ +0x08, ... }
+CR2 = 0xffffffff90000008  ==  &arena->end
+```
+
+`arena_init()` writes `arena->end` immediately after the page is mapped, so
+the very first heap touch faults.
+
+## Fix (defence in depth)
+
+1. **`boot.asm`**: `EFER` is now programmed with `(1 << 8) | (1 << 11)`, i.e.
+   `LME | NXE`.
+2. **`mm/vmm.c`**: added `vmm_nx_detect()`, called at the top of `vmm_init()`
+   **before any mapping is created**. It confirms CPUID
+   `8000_0001H:EDX[20]` (NX support), forces `EFER.NXE` if it is not already
+   set, and verifies the write stuck. `pte_create()` only emits `PTE_NX` when
+   `vmm_nx_enabled` is true.
+
+Point 2 matters independently of point 1: it means a CPU without NX, or a
+boot stub that forgets the bit, degrades to executable-everything instead of
+faulting on the first heap write.
+
+## Also fixed: duplicated serial output
+
+Every kernel log line appeared twice on the serial console. `vprintk()`
+already mirrors the formatted line to COM1, and `console_putchar()` in
+`drivers/video/console.c` wrote the same character to `0x3F8` *again*. The
+serial write in the per-character console path is removed; `vprintk()` is
+now the single writer. This also halves the cost of every `printk()`, which
+busy-waits on the UART.
+
+## VM feature work: hypervisor capability detection was wrong
+
+`hypervisor_detect_support()` reported features that do not exist as CPUID
+bits, so `hypervisor_print_stats()` and the GUI claimed support that wasn't
+there:
+
+| Claim | Old check | Reality |
+|---|---|---|
+| EPT | `CPUID.7:ECX[7]` | That is **SMEP**. EPT is **not** a CPUID feature — it is `IA32_VMX_PROCBASED_CTLS2` (MSR `0x48B`) bit 33. |
+| VPID | `CPUID.7:ECX[10]` | Wrong register/leaf entry. VPID is `CTLS2` bit 37. |
+| Subleaf | leaf 7 with `ECX` unset | Leaf 7 is subleaf-indexed; must pass `ECX = 0`. |
+| SVM | `8000_0001:ECX[2]` | Correct. |
+| Guest state | never checked | `CPUID.1:ECX[31]` = hypervisor present was ignored. |
+
+Rewritten to:
+* use a proper `cpuid(leaf, subleaf)` helper;
+* read VMX capability MSRs (guarded — `rdmsr` of a VMX MSR faults if VMX is
+  off) and honour the "allowed to be 1" / "must be 0" MSR halves;
+* detect AMD **NPT** via `CPUID.8000_000A:EDX[0]`;
+* detect and report the L0 hypervisor signature when running nested;
+* take the CPU count from `get_num_cpus()` instead of hardcoding 1;
+* print an explicit `VMX / SVM / EPT / VPID / guest-mode` summary.
+
+Every boot-menu entry and existing feature is preserved.
+
+## Verification
+
+* Every changed translation unit compiles with the real project flags with
+  zero errors.
+* `EFER = (1<<8)|(1<<11)` = `0x900` confirmed; the NX bit is emitted from a
+  single gated site.
+* `0xa` error code decoded as write + reserved-bit, matching the faulting
+  `CR2` offset within `struct heap_arena`.
+
+QEMU/NASM are still unavailable in this sandbox, so the boot was validated
+statically and at object level rather than by running the ISO.

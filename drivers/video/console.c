@@ -62,13 +62,14 @@ static void console_putchar(char c)
     u16 *cell;
     u16 ch_attr;
 
-    /* Always output to serial for debugging */
-    while (!(inb(0x3FD) & 0x20));
-    outb(0x3F8, (u8)c);
-    if (c == '\n') {
-        while (!(inb(0x3FD) & 0x20));
-        outb(0x3F8, '\r');
-    }
+    /*
+     * NOTE: no serial output here.
+     *
+     * vprintk() already mirrors the whole formatted line to COM1. Writing
+     * to 0x3F8 from this per-character console path as well made every
+     * kernel log line appear twice on the serial console (and doubled the
+     * cost of a printk, which busy-waits on the UART).
+     */
 
     if (!g_console.initialized)
         return;

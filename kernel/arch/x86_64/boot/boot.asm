@@ -264,10 +264,18 @@ _start_kernel:
     mov cr3, eax
 
     ; Enable EFER (Extended Feature Enable Register)
-    ; EFER.LME = bit 8 (Long Mode Enable)
+    ;   EFER.LME = bit 8  (Long Mode Enable)
+    ;   EFER.NXE = bit 11 (No-Execute Enable)
+    ;
+    ; NXE is REQUIRED, not optional: mm/vmm.c pte_create() sets the NX bit
+    ; (bit 63) on every mapping that is not requested with VMA_EXEC - the
+    ; kernel heap is mapped READ|WRITE. If EFER.NXE is clear, bit 63 is a
+    ; reserved bit and any access to (or page walk through) such a mapping
+    ; raises #PF with error code bit 3 (RSVD) set, e.g. 0xa. That is what
+    ; killed boot at CR2=0xffffffff90000008, the kernel heap arena.
     mov ecx, 0xC0000080
     rdmsr
-    or eax, 1 << 8
+    or eax, (1 << 8) | (1 << 11)
     wrmsr
 
     ; Enable paging - CR0.PG = bit 31
