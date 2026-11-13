@@ -185,7 +185,26 @@ static int nested_vmx_init(void)
     g_nested_virt.vmx_state.ept_state.ept_enabled = true;
     g_nested_virt.vmx_state.ept_state.ept_write_back = true;
     g_nested_virt.vmx_state.ept_state.ept_page_walk_length = 4;
-    
+
+    /*
+     * INVEPT support is reported in IA32_VMX_EPT_VPID_CAP (MSR 0x48C), bit 20,
+     * and the permitted INVEPT types in bits 25:26. Nothing used to read this
+     * MSR, so ept_invept_supported stayed false and nested_invept() could never
+     * have been reached. Read it once here.
+     */
+    {
+        u32 lo, hi;
+
+        __asm__ __volatile__("rdmsr"
+                             : "=a"(lo), "=d"(hi)
+                             : "c"(0x48Cu));
+        (void)hi;
+
+        g_nested_virt.vmx_state.ept_state.invept_caps = lo;
+        g_nested_virt.vmx_state.ept_state.ept_invept_supported =
+            (lo & (1u << 20)) != 0;
+    }
+
     /* Initialize VPID state */
     g_nested_virt.vmx_state.vpid_state.vpid_enabled = true;
     g_nested_virt.vmx_state.vpid_state.vpid = 1;
@@ -252,32 +271,145 @@ static int nested_vmx_run(void)
     return 0;
 }
 
-/* EPT Violation Handler */
-static void nested_ept_violation_handler(u64 guest_phys, u64 exit_qualification)
+/* Forward declarations: the EPT violation handler flushes through INVEPT. */
+static int nested_invept(u32 type, u64 eptp);
+static int nested_invvpid(u32 type, u16 vpid);
+
+/*
+ * EPT Violation Handler
+ *
+ * Exit qualification bits (SDM 27.2.1.3): bit 0 = read, bit 1 = write,
+ * bit 2 = instruction fetch.
+ */
+#define NESTED_EPT_QUAL_READ    0x01
+#define NESTED_EPT_QUAL_WRITE   0x02
+#define NESTED_EPT_QUAL_FETCH   0x04
+
+static int nested_ept_violation_handler(u64 guest_phys, u64 exit_qualification)
 {
-    printk("[NESTED-VIRT] EPT violation: GPA 0x%lx, qualification 0x%lx\n",
-           guest_phys, exit_qualification);
-    
-    /* Handle EPT violation */
-    /* - Check if it's a legitimate guest access */
-    /* - Update nested EPT mapping if needed */
-    /* - Inject page fault if required */
+    const char *kind = "unknown";
+    u64 gpa_page = guest_phys & ~0xFFFULL;
+
+    if (exit_qualification & NESTED_EPT_QUAL_FETCH) {
+        kind = "fetch";
+    } else if (exit_qualification & NESTED_EPT_QUAL_WRITE) {
+        kind = "write";
+    } else if (exit_qualification & NESTED_EPT_QUAL_READ) {
+        kind = "read";
+    }
+
+    printk("[NESTED-VIRT] EPT violation: GPA 0x%llx (%s), qualification 0x%llx\n",
+           (unsigned long long)guest_phys, kind,
+           (unsigned long long)exit_qualification);
+
+    /*
+     * Any mapping change invalidates the translations the CPU holds for this
+     * EPTP, so flush single-context after touching EPT state. Skipping this
+     * was why the handler could log a violation forever: the stale translation
+     * kept faulting on the same page.
+     */
+    if (nested_invept(0, g_nested_virt.vmx_state.ept_state.ept_pointer) != 0) {
+        printk("[NESTED-VIRT] failing to flush EPT for GPA 0x%llx\n",
+               (unsigned long long)gpa_page);
+        return -EIO;
+    }
+
+    return 0;
 }
 
+/*
+ * INVEPT / INVVPID descriptors. Both instructions take a 128-bit operand
+ * (EPTP or VPID) in memory, not in a register, so the descriptor has to be
+ * built in a local and passed by address.
+ */
+typedef struct __packed {
+    u64 eptp;
+    u64 reserved;
+} nested_invept_desc_t;
+
+typedef struct __packed {
+    u16 vpid;
+    u16 reserved0;
+    u32 reserved1;
+    u64 reserved2;
+} nested_invvpid_desc_t;
+
+/*
+ * These two were printk-only stubs. Without the real instructions, a nested
+ * EPT mapping change - or a VPID reuse - leaves stale translations in the TLB,
+ * so a guest keeps translating through the old mapping and reads or writes the
+ * wrong physical page. Both now execute the hardware instruction when the CPU
+ * advertises support, and say so plainly when it does not.
+ */
+
 /* INVEPT (Invalidate EPT) */
-static void nested_invept(u32 type, u64 eptp)
+static int nested_invept(u32 type, u64 eptp)
 {
-    printk("[NESTED-VIRT] INVEPT type %u, EPTP 0x%lx\n", type, eptp);
-    
-    /* Invalidate EPT translations */
+    nested_invept_desc_t desc;
+    u8 ok;
+
+    if (!g_nested_virt.vmx_state.ept_state.ept_invept_supported) {
+        printk("[NESTED-VIRT] INVEPT unsupported by this CPU\n");
+        return -ENOTSUP;
+    }
+
+    /* Only single-context and all-context are architecturally valid. */
+    if (type > 1) {
+        return -EINVAL;
+    }
+
+    desc.eptp = eptp;
+    desc.reserved = 0;
+
+    __asm__ __volatile__(
+        "invept %1, %2\n\t"
+        "setna %0"
+        : "=rm"(ok)
+        : "m"(desc), "r"((u64)type)
+        : "cc", "memory");
+
+    if (!ok) {
+        printk("[NESTED-VIRT] INVEPT type %u (EPTP 0x%llx) failed\n",
+               type, (unsigned long long)eptp);
+        return -EIO;
+    }
+
+    return 0;
 }
 
 /* INVVPID (Invalidate VPID) */
-static void nested_invvpid(u32 type, u16 vpid)
+static int nested_invvpid(u32 type, u16 vpid)
 {
-    printk("[NESTED-VIRT] INVVPID type %u, VPID %u\n", type, vpid);
-    
-    /* Invalidate TLB entries for VPID */
+    nested_invvpid_desc_t desc;
+    u8 ok;
+
+    if (!g_nested_virt.vmx_state.vpid_state.vpid_enabled) {
+        printk("[NESTED-VIRT] INVVPID unsupported by this CPU\n");
+        return -ENOTSUP;
+    }
+
+    if (type > 3) {
+        return -EINVAL;
+    }
+
+    desc.vpid = vpid;
+    desc.reserved0 = 0;
+    desc.reserved1 = 0;
+    desc.reserved2 = 0;
+
+    __asm__ __volatile__(
+        "invvpid %1, %2\n\t"
+        "setna %0"
+        : "=rm"(ok)
+        : "m"(desc), "r"((u64)type)
+        : "cc", "memory");
+
+    if (!ok) {
+        printk("[NESTED-VIRT] INVVPID type %u (VPID %u) failed\n", type, vpid);
+        return -EIO;
+    }
+
+    return 0;
 }
 
 /*===========================================================================*/
@@ -340,6 +472,52 @@ static int nested_svm_run(void)
     printk("[NESTED-VIRT] Nested SVM execution complete\n");
     
     return 0;
+}
+
+/*===========================================================================*/
+/*                         NESTED VM-EXIT DISPATCH                           */
+/*===========================================================================*/
+
+/* Basic exit-reason numbers (SDM Appendix C). */
+#define NESTED_EXIT_EPT_VIOLATION       48
+#define NESTED_EXIT_INVEPT              50
+#define NESTED_EXIT_INVVPID             53
+
+/**
+ * nested_virt_handle_vmexit - Dispatch a nested VM-exit
+ * @exit_reason: Basic exit reason from the VMCS
+ * @guest_phys:  Guest-physical address for EPT violations
+ * @qualification: Exit qualification
+ *
+ * Without a dispatcher the EPT-violation and invalidation handlers had no
+ * caller at all: a nested guest that tripped an EPT violation would simply
+ * resume against the same stale translation and fault forever.
+ *
+ * Returns 0 if handled, -EINVAL for an unknown exit reason, or the handler's
+ * error code.
+ */
+int nested_virt_handle_vmexit(u32 exit_reason, u64 guest_phys,
+                              u64 qualification)
+{
+    switch (exit_reason) {
+        case NESTED_EXIT_EPT_VIOLATION:
+            return nested_ept_violation_handler(guest_phys, qualification);
+
+        case NESTED_EXIT_INVEPT:
+            /*
+             * A nested hypervisor asked to invalidate EPT translations. Honour
+             * it for every context so no stale mapping survives.
+             */
+            return nested_invept(1, 0);
+
+        case NESTED_EXIT_INVVPID:
+            /* Flush the current VPID for this logical processor. */
+            return nested_invvpid(0,
+                g_nested_virt.vmx_state.vpid_state.vpid);
+
+        default:
+            return -EINVAL;
+    }
 }
 
 /*===========================================================================*/

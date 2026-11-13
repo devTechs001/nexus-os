@@ -704,40 +704,209 @@ int sd_wait_ready(sd_controller_t *ctrl, u32 timeout_ms)
     return -ETIMEDOUT;
 }
 
+/*
+ * SDHCI register offsets used by the command and data paths.
+ */
+#define SDHCI_REG_ARG2               0x00
+#define SDHCI_REG_BLOCK_SIZE         0x04
+#define SDHCI_REG_BLOCK_COUNT        0x06
+#define SDHCI_REG_ARG1               0x08
+#define SDHCI_REG_TRANSFER_MODE      0x0C
+#define SDHCI_REG_COMMAND            0x0E
+#define SDHCI_REG_RESPONSE           0x10
+#define SDHCI_REG_BUFFER_PORT        0x20
+#define SDHCI_REG_NORMAL_INT_STATUS  0x30
+#define SDHCI_REG_ERROR_INT_STATUS   0x32
+#define SDHCI_REG_NORMAL_INT_ENABLE  0x34
+#define SDHCI_REG_ERROR_INT_ENABLE   0x36
+
+/* Normal interrupt status bits */
+#define SDHCI_INT_CMD_COMPLETE       (1u << 0)
+#define SDHCI_INT_TRANSFER_COMPLETE  (1u << 1)
+#define SDHCI_INT_BUFFER_WRITE_READY (1u << 4)
+#define SDHCI_INT_BUFFER_READ_READY  (1u << 5)
+
+/* Error interrupt status bits */
+#define SDHCI_ERR_TIMEOUT            (1u << 0)
+#define SDHCI_ERR_CMD_CRC            ((1u << 1) | (1u << 3))
+#define SDHCI_ERR_DATA_END_BIT       ((1u << 2) | (1u << 4))
+#define SDHCI_ERR_ADMA               (1u << 5)
+#define SDHCI_ERR_ALL                0xFFFFu
+
+/* Transfer mode bits */
+#define SDHCI_TM_DMA_ENABLE          (1u << 0)
+#define SDHCI_TM_BLOCK_COUNT_ENABLE  (1u << 1)
+#define SDHCI_TM_READ                (1u << 4)
+#define SDHCI_TM_MULTI_BLOCK         (1u << 5)
+
+static u16 sd_read16(sd_controller_t *ctrl, u32 off)
+{
+    return *(volatile u16 *)((u8 *)ctrl->base + off);
+}
+
+static void sd_write16(sd_controller_t *ctrl, u32 off, u16 val)
+{
+    *(volatile u16 *)((u8 *)ctrl->base + off) = val;
+}
+
+static u32 sd_read32(sd_controller_t *ctrl, u32 off)
+{
+    return *(volatile u32 *)((u8 *)ctrl->base + off);
+}
+
+static void sd_write32(sd_controller_t *ctrl, u32 off, u32 val)
+{
+    *(volatile u32 *)((u8 *)ctrl->base + off) = val;
+}
+
 /**
  * sd_send_command - Send SD/MMC command
  */
 int sd_send_command(sd_controller_t *ctrl, sd_cmd_t *cmd)
 {
+    u32 arg;
+    u16 cmd_reg;
+    u32 timeout;
+    int ret;
+
     if (!ctrl || !cmd) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would write to controller registers */
-    /* and wait for response */
-    
+
+    if (!ctrl->base) {
+        return -ENODEV;
+    }
+
+    timeout = cmd->timeout_ms ? cmd->timeout_ms : SD_CMD_TIMEOUT_MS;
+
     printk("[SD] CMD%d arg=0x%08X\n", cmd->cmd_idx, cmd->arg);
-    
-    /* Simulate successful response */
-    cmd->resp[0] = R1_CARD_STATUS;  /* Ready status */
-    
+
+    /*
+     * This function used to print the command, skip the controller entirely and
+     * stuff R1_CARD_STATUS into the response - so every command "succeeded"
+     * with a canned reply and the card was never actually talked to.
+     */
+
+    /* APP_CMD prefix is carried in the command byte, not sent separately. */
+    arg = cmd->arg;
+
+    sd_write16(ctrl, SDHCI_REG_NORMAL_INT_STATUS, 0xFFFF);
+    sd_write16(ctrl, SDHCI_REG_ERROR_INT_STATUS, 0xFFFF);
+    sd_write16(ctrl, SDHCI_REG_NORMAL_INT_ENABLE,
+               SDHCI_INT_CMD_COMPLETE | SDHCI_INT_TRANSFER_COMPLETE);
+    sd_write16(ctrl, SDHCI_REG_ERROR_INT_ENABLE, SDHCI_ERR_ALL);
+
+    sd_write32(ctrl, SDHCI_REG_ARG1, arg);
+
+    if (cmd->has_data && cmd->blocks) {
+        u16 mode = SDHCI_TM_BLOCK_COUNT_ENABLE | SDHCI_TM_DMA_ENABLE;
+
+        if (cmd->blocks > 1) {
+            mode |= SDHCI_TM_MULTI_BLOCK;
+        }
+        if (cmd->is_read) {
+            mode |= SDHCI_TM_READ;
+        }
+
+        sd_write16(ctrl, SDHCI_REG_BLOCK_SIZE, (u16)cmd->block_size);
+        sd_write16(ctrl, SDHCI_REG_BLOCK_COUNT, (u16)cmd->blocks);
+        sd_write16(ctrl, SDHCI_REG_TRANSFER_MODE, mode);
+    }
+
+    /*
+     * Command register layout: bits 7:6 response type, bit 5 data-present
+     * (not set here - DMA is driven through the transfer mode register),
+     * bit 4 command CRC check, bit 3 index check, bits 1:0 command index.
+     */
+    cmd_reg = (u16)(cmd->cmd_idx & 0x3F);
+
+    switch (cmd->resp_type) {
+        case RESP_NONE:
+            break;
+        case RESP_R2:                       /* 136-bit, no CRC/index */
+            cmd_reg |= (1u << 0);
+            cmd_reg |= (cmd->is_app_cmd ? 0 : 0);
+            break;
+        default:                            /* R1/R3/R6/R7: 48-bit + CRC */
+            cmd_reg |= (3u << 6) | (1u << 4) | (1u << 3);
+            break;
+    }
+
+    sd_write16(ctrl, SDHCI_REG_COMMAND, cmd_reg);
+
+    ret = sd_wait_command(ctrl, timeout);
+    if (ret != 0) {
+        printk("[SD] CMD%d failed (%d)\n", cmd->cmd_idx, ret);
+        return ret;
+    }
+
+    /* Fetch the response for anything that expects one. */
+    if (cmd->resp_type != RESP_NONE) {
+        if (cmd->resp_type == RESP_R2) {
+            /* 128-bit response occupies all four words, MSB in resp[3]. */
+            cmd->resp[3] = sd_read32(ctrl, SDHCI_REG_RESPONSE + 0);
+            cmd->resp[2] = sd_read32(ctrl, SDHCI_REG_RESPONSE + 4);
+            cmd->resp[1] = sd_read32(ctrl, SDHCI_REG_RESPONSE + 8);
+            cmd->resp[0] = sd_read32(ctrl, SDHCI_REG_RESPONSE + 12);
+        } else {
+            cmd->resp[0] = sd_read32(ctrl, SDHCI_REG_RESPONSE);
+            cmd->resp[1] = 0;
+            cmd->resp[2] = 0;
+            cmd->resp[3] = 0;
+        }
+    }
+
+    /* Data phase, if any. */
+    if (cmd->has_data && cmd->blocks) {
+        ret = sd_wait_data(ctrl, timeout);
+        if (ret != 0) {
+            printk("[SD] CMD%d data phase failed (%d)\n", cmd->cmd_idx, ret);
+            return ret;
+        }
+    }
+
     return 0;
 }
 
 /**
  * sd_wait_command - Wait for command completion
+ *
+ * Polls the SDHCI normal/error interrupt status registers. Previously this was
+ * a bare "while (1)" that could only ever return -ETIMEDOUT: it never read a
+ * register, so a command could complete immediately and the wait would still
+ * spin out the full timeout and fail.
  */
 static int sd_wait_command(sd_controller_t *ctrl, u32 timeout_ms)
 {
-    if (!ctrl) {
+    u64 start;
+
+    if (!ctrl || !ctrl->base) {
         return -EINVAL;
     }
-    
-    u64 start = get_time_ms();
-    
+
+    start = get_time_ms();
+
     while (1) {
-        /* In real implementation, would check controller status */
-        
+        u16 norm = sd_read16(ctrl, SDHCI_REG_NORMAL_INT_STATUS);
+        u16 err  = sd_read16(ctrl, SDHCI_REG_ERROR_INT_STATUS);
+
+        if (err & SDHCI_ERR_TIMEOUT) {
+            sd_write16(ctrl, SDHCI_REG_ERROR_INT_STATUS, SDHCI_ERR_ALL);
+            return -ETIMEDOUT;
+        }
+
+        if (err & (SDHCI_ERR_CMD_CRC | SDHCI_ERR_DATA_END_BIT | SDHCI_ERR_ADMA)) {
+            sd_write16(ctrl, SDHCI_REG_ERROR_INT_STATUS, SDHCI_ERR_ALL);
+            return -EIO;
+        }
+
+        if (norm & SDHCI_INT_CMD_COMPLETE) {
+            /* Write-1-to-clear. */
+            sd_write16(ctrl, SDHCI_REG_NORMAL_INT_STATUS,
+                       SDHCI_INT_CMD_COMPLETE);
+            return 0;
+        }
+
         if (get_time_ms() - start >= timeout_ms) {
             return -ETIMEDOUT;
         }
@@ -746,18 +915,40 @@ static int sd_wait_command(sd_controller_t *ctrl, u32 timeout_ms)
 
 /**
  * sd_wait_data - Wait for data transfer completion
+ *
+ * Same story as sd_wait_command(): no register was ever read, so a completed
+ * transfer was indistinguishable from a hung one.
  */
 static int sd_wait_data(sd_controller_t *ctrl, u32 timeout_ms)
 {
-    if (!ctrl) {
+    u64 start;
+
+    if (!ctrl || !ctrl->base) {
         return -EINVAL;
     }
-    
-    u64 start = get_time_ms();
-    
+
+    start = get_time_ms();
+
     while (1) {
-        /* In real implementation, would check data status */
-        
+        u16 norm = sd_read16(ctrl, SDHCI_REG_NORMAL_INT_STATUS);
+        u16 err  = sd_read16(ctrl, SDHCI_REG_ERROR_INT_STATUS);
+
+        if (err & SDHCI_ERR_TIMEOUT) {
+            sd_write16(ctrl, SDHCI_REG_ERROR_INT_STATUS, SDHCI_ERR_ALL);
+            return -ETIMEDOUT;
+        }
+
+        if (err & (SDHCI_ERR_DATA_END_BIT | SDHCI_ERR_ADMA)) {
+            sd_write16(ctrl, SDHCI_REG_ERROR_INT_STATUS, SDHCI_ERR_ALL);
+            return -EIO;
+        }
+
+        if (norm & SDHCI_INT_TRANSFER_COMPLETE) {
+            sd_write16(ctrl, SDHCI_REG_NORMAL_INT_STATUS,
+                       SDHCI_INT_TRANSFER_COMPLETE);
+            return 0;
+        }
+
         if (get_time_ms() - start >= timeout_ms) {
             return -ETIMEDOUT;
         }
