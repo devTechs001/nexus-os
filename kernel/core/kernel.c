@@ -936,60 +936,13 @@ void shutdown(void)
 /*                         MEMORY ALLOCATION (Kernel)                        */
 /*===========================================================================*/
 
-/* Simple early boot allocator - will be replaced by proper heap */
-static unsigned char early_heap[1024 * 1024];  /* 1MB early heap */
-static unsigned long early_heap_offset = 0;
-
-/**
- * kmalloc - Allocate kernel memory
- * Note: Now implemented in mm/heap.c - this early version commented out
- */
 /*
-void *kmalloc(size_t size)
-{
-    void *ptr;
-
-    // Align to 8 bytes
-    size = (size + 7) & ~7;
-
-    if (early_heap_offset + size > sizeof(early_heap)) {
-        return NULL;  // Out of memory
-    }
-
-    ptr = &early_heap[early_heap_offset];
-    early_heap_offset += size;
-
-    return ptr;
-}
-*/
-
-/**
- * kzalloc - Allocate zeroed kernel memory
- * Note: Now implemented in mm/heap.c
+ * The kernel heap lives in kernel/mm/heap.c and owns early-boot allocation
+ * (early_alloc()). The 1 MB static scratch array that used to sit here, plus
+ * the commented-out kmalloc/kzalloc/kfree copies that consumed it, were dead:
+ * nothing referenced either, and keeping a second 1 MB .bss arena around only
+ * shadowed the real allocator.
  */
-/*
-void *kzalloc(size_t size)
-{
-    void *ptr = kmalloc(size);
-    if (ptr) {
-        memset(ptr, 0, size);
-    }
-    return ptr;
-}
-*/
-
-/**
- * kfree - Free kernel memory
- * Note: Now implemented in mm/heap.c
- */
-/*
-void kfree(void *ptr)
-{
-    // Early boot allocator - no free support
-    // Proper kfree will be implemented in mm/heap.c
-    (void)ptr;
-}
-*/
 
 /*===========================================================================*/
 /*                         STRING FUNCTIONS                                  */
@@ -1085,7 +1038,7 @@ u32 kernel_get_state(void)
 /*         These will be properly implemented in respective modules          */
 /*===========================================================================*/
 
-/* Memory Management - now implemented in mm/*.c */
+/* Memory Management - now implemented in kernel/mm/ (mm.h) */
 
 /* Interrupt initialization */
 extern void interrupt_init(void);

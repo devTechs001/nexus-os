@@ -40,6 +40,8 @@
 #define AHCI_REG_OFFSET             0x100   /* Port Register Offset */
 
 /* Port Register Offsets */
+#define AHCI_CMD_TIMEOUT_MS         5000    /* Command completion timeout */
+
 #define AHCI_PX_REG_CLB             0x00    /* Command List Base Address */
 #define AHCI_PX_REG_FB              0x08    /* FIS Base Address */
 #define AHCI_PX_REG_IS              0x10    /* Interrupt Status */
@@ -332,6 +334,7 @@ typedef struct __packed {
  * AHCI Port
  */
 typedef struct {
+    struct ahci_controller *ctrl;  /* Owning controller (for MMIO access) */
     u32 port_id;              /* Port ID */
     u32 port_num;             /* Port Number */
     bool is_present;          /* Is Port Present */
@@ -348,6 +351,7 @@ typedef struct {
     /* Command Structures */
     ahci_cmd_header_t *cmd_list;  /* Command List */
     ahci_cmd_table_t *cmd_table;  /* Command Table */
+    phys_addr_t cmd_table_phys;   /* Command Table Physical */
     ahci_received_fis_t *fis;     /* Received FIS */
     
     /* Device Information */
