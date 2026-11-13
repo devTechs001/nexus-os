@@ -13,6 +13,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * A window can carry a widget tree in user_data. Widgets are laid out in local
+ * coordinates, so the tree is painted with the window origin as its base.
+ * widget_t is opaque here on purpose: this file only needs to know that the
+ * paint entry exists.
+ */
+typedef struct widget widget_t;
+extern void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
+                              s32 origin_x, s32 origin_y);
+
 /* Forward declaration: defined further down this file. */
 int window_manager_register_class(const char *name,
                                    void (*wnd_proc)(window_t *, u32, void *, void *),
@@ -84,6 +94,9 @@ static void window_manager_set_focus(window_t *window);
 static void window_manager_update_z_order(window_t *window);
 static window_t *window_manager_find_parent(window_t *window);
 static void window_manager_notify_event(window_t *window, u32 event, void *param);
+static void window_manager_render_scanline(window_t **windows, u32 count,
+                                           u32 *fb, u32 pitch,
+                                           u32 fb_w, u32 fb_h, s32 y);
 
 /*===========================================================================*/
 /*                         WINDOW MANAGER INITIALIZATION                     */
@@ -125,11 +138,27 @@ int window_manager_init(void)
     window_manager_register_class("Popup", NULL, WINDOW_FLAG_POPUP | WINDOW_FLAG_BORDERLESS, 
                                    (color_t)COLOR_TRANSPARENT);
 
-    /* Create desktop window */
+    /*
+     * Create the desktop window.
+     *
+     * It is the bottom of the z-order and the thing that guarantees a defined
+     * background, so it has to cover the screen. Its bounds used to be left at
+     * zero, so it was created as a 0x0 window at the origin and painted
+     * nothing at all - which is why the screen stayed black even once the
+     * windows were finally being drawn.
+     */
+    rect_t screen = {0, 0, 1024, 768};
+    boot_params_t *bp = get_boot_params();
+    if (bp && bp->gfx_width && bp->gfx_height) {
+        screen.width = (s32)bp->gfx_width;
+        screen.height = (s32)bp->gfx_height;
+    }
+
     window_props_t desktop_props = {0};
     strncpy(desktop_props.title, "Desktop", sizeof(desktop_props.title) - 1);
     desktop_props.type = WINDOW_TYPE_SYSTEM;
     desktop_props.flags = WINDOW_FLAG_VISIBLE;
+    desktop_props.bounds = screen;
     desktop_props.background = (color_t){{{0, 100, 200, 255}}};  /* Blue desktop */
     
     /* Publish the flag before creating the desktop window: the flag is what
@@ -1058,4 +1087,133 @@ void window_manager_get_stats(u32 *num_windows, u32 *num_minimized, u32 *focused
     }
 
     spin_unlock(&g_window_manager.lock);
+}
+
+/*===========================================================================*/
+/*                            DISPLAY OUTPUT                                 */
+/*===========================================================================*/
+
+/*
+ * Nothing in the tree ever called window->on_paint, so windows never drew a
+ * single pixel: the compositor sat on a separate, unused layer stack that no
+ * window was ever registered with, and init.c called compositor_present()
+ * directly, which only swaps and memcpy's a framebuffer nobody had rendered
+ * into. The result was the black screen after a perfectly healthy boot.
+ *
+ * These two functions close that loop. The window manager owns the window
+ * list and its z-order, so it is the right place to walk them back-to-front.
+ * Window #1 is the desktop, which fills the screen; that guarantees a defined
+ * background even when no other window has painted anything yet.
+ */
+
+/**
+ * window_manager_render_scanline - Paint one row of every visible window
+ * @windows: Registered window array, already in draw order
+ * @count:   Number of entries in @windows
+ * @fb:      Destination (0xAARRGGBB pixels)
+ * @pitch:  Pixels per row
+ * @fb_w:   Framebuffer width
+ * @fb_h:   Framebuffer height
+ * @y:      Screen row to produce
+ */
+static void window_manager_render_scanline(window_t **windows, u32 count,
+                                           u32 *fb, u32 pitch,
+                                           u32 fb_w, u32 fb_h, s32 y)
+{
+    if (!fb || !pitch || !fb_w || !fb_h) {
+        return;
+    }
+    if (y < 0 || y >= (s32)fb_h) {
+        return;
+    }
+
+    u32 *row = fb + (u32)y * pitch;
+
+    for (u32 i = 0; i < count; i++) {
+        window_t *w = windows[i];
+        if (!w->visible || !w->enabled) {
+            continue;
+        }
+
+        rect_t b = w->props.bounds;
+        if (b.width <= 0 || b.height <= 0) {
+            continue;
+        }
+        if (y < b.y || y >= b.y + b.height) {
+            continue;
+        }
+
+        /* Horizontal span of this window on this row, clipped to the screen. */
+        s32 x0 = b.x;
+        s32 x1 = b.x + b.width;
+        if (x0 < 0) x0 = 0;
+        if (x1 > (s32)fb_w) x1 = (s32)fb_w;
+        if (x1 <= x0) {
+            continue;
+        }
+
+        /* If the window owns a widget tree, paint it. Widgets paint in full
+         * surface space; the renderer clips to the current scanline so only
+         * this row survives. */
+        if (w->user_data) {
+            graphics_context_t *wctx = graphics_create_context(row);
+            if (wctx) {
+                /* One row of pixels, so the geometry must say one row. */
+                wctx->width = fb_w;
+                wctx->height = 1;
+                wctx->clip_rect = (rect_t){0, 0, (s32)fb_w, 1};
+                widget_paint_tree((widget_t *)w->user_data, wctx,
+                                  b.x, b.y - y);
+                graphics_destroy_context(wctx);
+            }
+        }
+
+        /* Give the window a chance to draw itself into the row. A widget-backed
+         * window has an on_paint that needs a context, so hand it a context
+         * whose surface is this scanline: everything it draws is positioned in
+         * screen space and the renderer's clipping keeps it inside the row. */
+        if (w->on_paint && w->surface) {
+            graphics_context_t *ctx = graphics_create_context(row);
+            if (ctx) {
+                ctx->clip_rect = (rect_t){0, 0, (s32)pitch, 1};
+                w->on_paint(w, ctx);
+                graphics_destroy_context(ctx);
+            }
+        }
+
+        /* Fall back to the window's own background colour so every visible
+         * window shows something even when it has no paint callback. */
+        color_t bg = w->props.background;
+        if (bg.a != 0) {
+            u32 px = ((u32)bg.a << 24) | ((u32)bg.r << 16) |
+                     ((u32)bg.g << 8) | (u32)bg.b;
+            for (s32 x = x0; x < x1; x++) {
+                row[x] = px;
+            }
+        }
+    }
+}
+
+/**
+ * window_manager_render - Draw every visible window to the framebuffer
+ * @fb:    Destination (0xAARRGGBB pixels)
+ * @pitch: Pixels per row of @fb
+ * @fb_w:  Framebuffer width
+ * @fb_h:  Framebuffer height
+ *
+ * Returns: 0 on success, -EINVAL on a bad framebuffer
+ */
+int window_manager_render(u32 *fb, u32 pitch, u32 fb_w, u32 fb_h)
+{
+    if (!fb || !pitch || !fb_w || !fb_h) {
+        return -EINVAL;
+    }
+
+    for (s32 y = 0; y < (s32)fb_h; y++) {
+        window_manager_render_scanline(g_window_manager.windows,
+                                       g_window_manager.num_windows,
+                                       fb, pitch, fb_w, fb_h, y);
+    }
+
+    return 0;
 }

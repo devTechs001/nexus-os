@@ -190,7 +190,30 @@ graphics_context_t *graphics_create_context(void *surface)
     }
 
     ctx->surface = surface;
-    ctx->clip_rect = (rect_t){0, 0, 4096, 4096};  /* Large default clip */
+    /*
+     * Surface geometry must be set here: graphics_fill_rect() and friends draw
+     * using ctx->width/ctx->height, not the clip rectangle. Leaving them at
+     * zero meant every fill was clipped away to nothing, so a widget that
+     * painted correctly produced no pixels at all.
+     *
+     * Default to the primary display size; callers that render into a
+     * sub-surface (a window backing store, a single scanline) override these
+     * along with clip_rect.
+     */
+    {
+        u32 w = 1024;
+        u32 h = 768;
+
+        boot_params_t *bp = get_boot_params();
+        if (bp && bp->gfx_width && bp->gfx_height) {
+            w = bp->gfx_width;
+            h = bp->gfx_height;
+        }
+
+        ctx->width = w;
+        ctx->height = h;
+        ctx->clip_rect = (rect_t){0, 0, (s32)w, (s32)h};
+    }
     ctx->foreground = g_renderer.default_foreground;
     ctx->background = g_renderer.default_background;
     ctx->line_width = g_renderer.default_line_width;
@@ -386,6 +409,52 @@ int graphics_draw_rect(graphics_context_t *ctx, rect_t *rect)
  *
  * Returns: 0 on success, error code on failure
  */
+/*
+ * Fill a rectangle honouring the context's clip rectangle.
+ *
+ * This is the scanline-safe path: a context may describe a surface only one
+ * row tall (the window manager paints a screen row at a time), in which case
+ * the rectangle must be clipped to that row instead of being indexed with the
+ * full screen height and walking off the end of the buffer.
+ */
+int graphics_fill_rect_clipped(graphics_context_t *ctx, rect_t *rect, color_t color)
+{
+    if (!ctx || !ctx->surface || !rect) {
+        return -1;
+    }
+
+    rect_t clip = ctx->clip_rect;
+
+    s32 x0 = rect->x;
+    s32 y0 = rect->y;
+    s32 x1 = rect->x + rect->width;
+    s32 y1 = rect->y + rect->height;
+
+    if (x0 < clip.x) x0 = clip.x;
+    if (y0 < clip.y) y0 = clip.y;
+    if (x1 > clip.x + clip.width)  x1 = clip.x + clip.width;
+    if (y1 > clip.y + clip.height) y1 = clip.y + clip.height;
+
+    if (x1 <= x0 || y1 <= y0) {
+        return 0;
+    }
+
+    spin_lock(&g_renderer.lock);
+
+    /* Subtract the clip origin so the fill lands on the right pixels of a
+     * sub-surface. */
+    rect_t clipped = {x0 - clip.x, y0 - clip.y, x1 - x0, y1 - y0};
+    color.a = (color.a * ctx->alpha) / 255;
+    renderer_fill_rect_sw(ctx->surface, ctx->width, ctx->height, &clipped, color);
+
+    g_renderer.draw_calls++;
+    g_renderer.pixels_drawn += (u32)(clipped.width * clipped.height);
+
+    spin_unlock(&g_renderer.lock);
+
+    return 0;
+}
+
 int graphics_fill_rect(graphics_context_t *ctx, rect_t *rect, color_t color)
 {
     if (!ctx || !ctx->surface || !rect) {
@@ -470,11 +539,31 @@ int graphics_draw_text(graphics_context_t *ctx, s32 x, s32 y, const char *text)
     s32 char_width = ctx->font_size;
     s32 char_height = ctx->font_size;
 
+    /*
+     * Draw the run of glyph cells clipped against both the context geometry
+     * and its clip rectangle. Using clip_rect.width as the surface width while
+     * indexing a surface only one row tall is what allowed text to walk off
+     * the end of a scanline buffer.
+     */
     while (*text) {
         if (*text != ' ') {
             rect_t char_rect = {x, y, char_width - 2, char_height};
-            renderer_fill_rect_sw(ctx->surface, ctx->clip_rect.width, 
-                                   ctx->clip_rect.height, &char_rect, color);
+
+            s32 cx0 = char_rect.x;
+            s32 cy0 = char_rect.y;
+            s32 cx1 = char_rect.x + char_rect.width;
+            s32 cy1 = char_rect.y + char_rect.height;
+
+            if (cx0 < 0) cx0 = 0;
+            if (cy0 < 0) cy0 = 0;
+            if (cx1 > (s32)ctx->clip_rect.width)  cx1 = (s32)ctx->clip_rect.width;
+            if (cy1 > (s32)ctx->clip_rect.height) cy1 = (s32)ctx->clip_rect.height;
+
+            if (cx1 > cx0 && cy1 > cy0) {
+                rect_t clipped = {cx0, cy0, cx1 - cx0, cy1 - cy0};
+                renderer_fill_rect_sw(ctx->surface, ctx->width,
+                                       ctx->height, &clipped, color);
+            }
         }
         x += char_width;
         text++;

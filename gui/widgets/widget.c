@@ -114,6 +114,8 @@ static void widget_default_on_mouse_up(widget_t *widget, s32 x, s32 y);
 static void widget_default_on_mouse_enter(widget_t *widget);
 static void widget_default_on_mouse_leave(widget_t *widget);
 static void widget_on_window_paint(window_t *window, void *dc);
+void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
+                       s32 origin_x, s32 origin_y);
 static void widget_on_window_mouse_down(window_t *window, s32 x, s32 y, u32 buttons);
 static void widget_on_window_mouse_up(window_t *window, s32 x, s32 y, u32 buttons);
 static void widget_on_window_mouse_move(window_t *window, s32 x, s32 y, u32 buttons);
@@ -593,8 +595,19 @@ int widget_focus(widget_t *widget)
     }
 
     widget->focused = true;
-    window_focus(&widget->window);
-    
+
+    /*
+     * Only forward focus to the window layer for widgets that are backed by a
+     * real, registered window. widget_t embeds a window_t by value and
+     * widget_create() explicitly leaves its window_id at 0, so every widget
+     * focus used to push that unregistered embedded window into the manager -
+     * which is where the impossible "Window 0 focused" in the boot log came
+     * from, and it stole focus from the real top-level window.
+     */
+    if (widget->window.window_id != 0) {
+        window_focus(&widget->window);
+    }
+
     return 0;
 }
 
@@ -851,8 +864,11 @@ static void widget_default_paint(widget_t *widget, graphics_context_t *ctx)
 
     rect_t bounds = widget->window.props.bounds;
 
-    /* Fill background */
-    graphics_fill_rect(ctx, &bounds, widget->background);
+    /* Fill background.
+     *
+     * Uses the clipping variant so a context that represents a single
+     * scanline cannot be indexed past the end of its buffer. */
+    graphics_fill_rect_clipped(ctx, &bounds, widget->background);
 
     /* Draw border */
     if (widget->border_width > 0) {
@@ -864,6 +880,57 @@ static void widget_default_paint(widget_t *widget, graphics_context_t *ctx)
         s32 text_x = bounds.x + widget->padding;
         s32 text_y = bounds.y + widget->padding;
         graphics_draw_text(ctx, text_x, text_y, widget->text);
+    }
+}
+
+/**
+ * widget_paint_tree - Recursively paint a widget and its children
+ * @widget:  Root of the subtree
+ * @ctx:     Graphics context whose surface receives the pixels
+ * @origin_x: Screen x that this widget's local (0,0) maps to
+ * @origin_y: Screen y that this widget's local (0,0) maps to
+ *
+ * The widget framework had no render entry point at all: widgets were created,
+ * laid out, styled and given on_paint callbacks, but nothing ever walked the
+ * tree and invoked them. That is why the login screen and the onboarding wizard
+ * were fully constructed and completely invisible.
+ *
+ * Children carry coordinates relative to their parent, so the origin is
+ * accumulated down the tree and each widget's bounds are translated into screen
+ * space before its paint callback sees them.
+ */
+void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
+                       s32 origin_x, s32 origin_y)
+{
+    if (!widget || !ctx) {
+        return;
+    }
+
+    for (widget_t *w = widget; w; w = w->next_sibling) {
+        if (!w->visible || !w->enabled) {
+            continue;
+        }
+
+        rect_t local = w->window.props.bounds;
+        s32 abs_x = origin_x + local.x;
+        s32 abs_y = origin_y + local.y;
+
+        /* Paint this widget in screen space, then put its own frame back so
+         * the children keep working in local coordinates. */
+        rect_t saved = local;
+        w->window.props.bounds = (rect_t){abs_x, abs_y, local.width, local.height};
+
+        if (w->on_paint) {
+            w->on_paint(w, ctx);
+        } else {
+            widget_default_paint(w, ctx);
+        }
+
+        w->window.props.bounds = saved;
+
+        if (w->children) {
+            widget_paint_tree(w->children, ctx, abs_x, abs_y);
+        }
     }
 }
 

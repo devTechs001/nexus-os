@@ -108,6 +108,12 @@ typedef struct widget {
 /* Base widget operations */
 widget_t *widget_create(const char *type, widget_t *parent);
 void widget_destroy(widget_t *widget);
+/* Render a widget subtree into a graphics context. Nothing in the framework
+ * used to walk the tree and call the paint callbacks, so fully constructed
+ * widget hierarchies never produced a single pixel. */
+void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
+                       s32 origin_x, s32 origin_y);
+
 int widget_set_text(widget_t *widget, const char *text);
 const char *widget_get_text(widget_t *widget);
 int widget_set_position(widget_t *widget, s32 x, s32 y);

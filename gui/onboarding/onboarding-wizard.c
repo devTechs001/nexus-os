@@ -697,6 +697,15 @@ int onboarding_wizard_init(onboarding_wizard_t *wizard)
         onboarding_wizard_add_page(wizard, &pages[i]);
     }
     
+    /*
+     * Hand the widget tree to the window so the window manager paints it.
+     * Without this the wizard's pages, sidebar and buttons were all built and
+     * then never drawn.
+     */
+    if (wizard->main_window && wizard->main_widget) {
+        wizard->main_window->user_data = wizard->main_widget;
+    }
+
     printk("[ONBOARD] Onboarding wizard initialized (%d pages)\n", wizard->total_pages);
     printk("[ONBOARD] ========================================\n");
     
