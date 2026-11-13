@@ -31,7 +31,8 @@ interrupt_common_stub:
     mov rdi, rsp
     call interrupt_handler
 
-    ; Restore all registers
+    ; Restore all registers (MUST mirror the pushes above exactly,
+    ; in reverse order - rdi included)
     pop r15
     pop r14
     pop r13
@@ -40,6 +41,7 @@ interrupt_common_stub:
     pop r10
     pop r9
     pop r8
+    pop rdi
     pop rsi
     pop rbp
     pop rbx

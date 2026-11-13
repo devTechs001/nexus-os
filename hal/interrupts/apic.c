@@ -188,9 +188,20 @@ static inline void apic_write(u32 reg, u32 value)
         /* xAPIC mode - memory mapped */
         apic_manager.local_apic.base[reg >> 4] = value;
 
-        /* Wait for write to complete */
-        while (apic_read(APIC_ICR_LOW) & (1 << 12))
-            ;
+        /*
+         * Wait for the write to complete.
+         *
+         * This MUST be bounded. If the local APIC is not actually present
+         * or not enabled, apic_read() returns 0xFFFFFFFF, bit 12 is set
+         * forever, and an unbounded loop here hangs the kernel during the
+         * interrupt-controller init.
+         */
+        for (u32 i = 0; i < 10000; i++) {
+            if (!(apic_read(APIC_ICR_LOW) & (1 << 12))) {
+                return;
+            }
+            __asm__ __volatile__("pause" ::: "memory");
+        }
     }
 }
 
@@ -432,10 +443,15 @@ void apic_calibrate_timer(void)
     /* Set initial count */
     apic_write(APIC_INIT_COUNT, 0xFFFFFFFF);
 
-    /* Wait for 10ms */
+    /* Wait for 10ms (bounded so a broken/missing TSC cannot hang boot) */
     ms_start = get_time_ms();
+    u32 guard = 0;
     while ((get_time_ms() - ms_start) < 10) {
         __asm__ __volatile__("pause" ::: "memory");
+        if (++guard > 50000000u) {
+            pr_warn("APIC: Timer calibration timeout, using default\n");
+            break;
+        }
     }
 
     /* Read remaining count */

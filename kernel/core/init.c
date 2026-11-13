@@ -469,8 +469,13 @@ void kernel_init_userspace(void)
 
                 /* Limit to ~60 FPS (16ms per frame) */
                 if (delta_ms < 16) {
-                    /* Small delay to prevent busy-waiting */
-                    arch_halt_cpu();
+                    /*
+                     * Small pause to prevent busy-waiting. Do NOT use
+                     * arch_halt_cpu() here: it executes cli; hlt, which
+                     * stops the CPU with interrupts disabled and can never
+                     * return, freezing the GUI on the first frame.
+                     */
+                    __asm__ __volatile__("pause" ::: "memory");
                     continue;
                 }
 

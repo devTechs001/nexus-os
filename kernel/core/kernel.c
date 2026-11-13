@@ -548,6 +548,26 @@ void kernel_main(u64 multiboot_info)
 {
     const char *cmdline = NULL;
 
+    /*
+     * Initialize kernel state before anything reads it.
+     *
+     * BSS is zeroed by the boot stub, so cpu_count was left at 0 and
+     * get_num_cpus() returned 0. scheduler_init() loops over
+     * "cpu < get_num_cpus()", so it created *no* run queues and *no* idle
+     * tasks. scheduler_start() then dereferenced idle_task(0) (NULL) and
+     * wrote through it, faulting in the late stage of boot. Per-CPU data
+     * was likewise never set up.
+     */
+    kernel_state.version = NEXUS_VERSION_STRING;
+    kernel_state.codename = NEXUS_CODENAME;
+    kernel_state.boot_time = 0;
+    kernel_state.state = KERNEL_STATE_BOOTING;
+    kernel_state.mem_total = 0;
+    kernel_state.mem_used = 0;
+    kernel_state.cpu_count = 1;      /* BSP; raised by SMP detection */
+    kernel_state.smp_enabled = false;
+    kernel_state.virt_enabled = false;
+
     /* Early serial debug - confirm we reached kernel_main */
     outb(0x3F8, 'K');
     outb(0x3F8, 'E');
@@ -752,9 +772,23 @@ u64 get_time_ms(void)
  */
 void delay_ms(u64 ms)
 {
-    u64 end = get_time_ms() + ms;
-    while (get_time_ms() < end) {
-        arch_halt_cpu();
+    u64 start = get_time_ms();
+
+    /*
+     * Busy-wait from here on.
+     *
+     * This loop used to call arch_halt_cpu(), which is "cli; hlt". Halting
+     * with interrupts disabled means nothing can ever wake the CPU, so any
+     * delay_ms() call hung the machine permanently - one of the reasons
+     * boot appeared to stall in the late stage. get_time_ms() is derived
+     * from the TSC, so a busy-wait needs no interrupts at all.
+     */
+    while ((get_time_ms() - start) < ms) {
+        /* clock went backwards / TSC unusable - bail out rather than hang */
+        if (get_time_ms() < start) {
+            break;
+        }
+        __asm__ __volatile__("pause" ::: "memory");
     }
 }
 

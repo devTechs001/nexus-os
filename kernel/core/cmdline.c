@@ -120,6 +120,17 @@ void parse_boot_params(const char *cmdline)
             g_boot_params.native_mode = false;
             printk("[BOOT] VMware optimized mode\n");
         }
+        else if (strcmp(token, "virt=auto") == 0) {
+            /*
+             * Default for the Graphical entry: do not assume a specific
+             * hypervisor. detect_virtualization() will identify QEMU,
+             * VMware, VirtualBox or Hyper-V from CPUID at runtime, and
+             * fall back to native when there is no hypervisor.
+             */
+            g_boot_params.vmware_mode = false;
+            g_boot_params.native_mode = false;
+            printk("[BOOT] Virtualization mode: auto-detect\n");
+        }
     }
     
     /* Print boot configuration */

@@ -133,7 +133,12 @@ void rq_unlock_irqrestore(struct rq *rq, u64 flags)
  */
 struct rq *get_cpu_rq(void)
 {
-    return &run_queues[get_cpu_id()];
+    /*
+     * get_cpu_id() may return an APIC ID larger than MAX_CPUS (or a
+     * garbage value before CPU detection completes). Always route through
+     * get_rq(), which clamps the index, instead of indexing directly.
+     */
+    return get_rq(get_cpu_id());
 }
 
 /**
@@ -358,6 +363,21 @@ void scheduler_init(void)
 
     pr_info("Initializing scheduler...\n");
 
+    /*
+     * There is always at least the boot CPU. If the CPU count was never
+     * established (or SMP detection reported nothing), fall back to 1 so
+     * that run queue 0 and its idle task always exist. Without this the
+     * loops below execute zero times and scheduler_start() dereferences a
+     * NULL idle task.
+     */
+    if (num_cpus == 0) {
+        pr_warn("CPU count unknown, assuming 1 boot CPU\n");
+        num_cpus = 1;
+    }
+    if (num_cpus > MAX_CPUS) {
+        num_cpus = MAX_CPUS;
+    }
+
     /* Initialize global scheduler lock */
     spin_lock_init(&scheduler_state.global_lock);
 
@@ -407,9 +427,37 @@ void scheduler_start(void)
     /* Set scheduler as started */
     scheduler_state.started = true;
 
-    /* Initialize first CPU's run queue with idle task */
-    rq = get_cpu_rq();
-    rq->curr = idle_task(get_cpu_id());
+    /*
+     * Initialize this CPU's run queue with its idle task.
+     *
+     * get_cpu_id() returns the APIC ID, which is not guaranteed to be 0 on
+     * the boot CPU and is not guaranteed to be < MAX_CPUS. Clamp it before
+     * indexing run_queues[], and fall back to the boot CPU's idle task if
+     * this CPU never got one, so we never install a NULL current task.
+     */
+    cpu = get_cpu_id();
+    if (cpu >= MAX_CPUS) {
+        cpu = 0;
+    }
+    rq = get_rq(cpu);
+    rq->curr = idle_task(cpu);
+    if (!rq->curr) {
+        rq->curr = idle_task(0);
+    }
+    if (!rq->curr) {
+        pr_err("No idle task available, creating one for CPU %u\n", cpu);
+        if (create_idle_task(cpu) != 0) {
+            /*
+             * Cannot schedule without an idle task. Stay in a safe halted
+             * state rather than faulting on a NULL pointer.
+             */
+            spin_unlock(&scheduler_state.global_lock);
+            kernel_panic("Scheduler: unable to create idle task for CPU %u", cpu);
+        }
+        rq = get_rq(cpu);
+        rq->curr = idle_task(cpu);
+    }
+    rq->idle = rq->curr;
     rq->prev = rq->curr;
 
     /* Enable interrupts */
@@ -974,6 +1022,16 @@ void rebalance_domains(void)
     struct rq *rq;
     unsigned long total_load = 0;
     unsigned long avg_load;
+
+    /*
+     * Load balancing is meaningless with fewer than two CPUs, and a zero
+     * CPU count would divide by zero here. rebalance_domains() is invoked
+     * from scheduler_tick() when tick_count % HZ == 0, i.e. on the very
+     * first timer tick, so this guard matters during late boot.
+     */
+    if (num_cpus < 2) {
+        return;
+    }
 
     /* Calculate total load */
     for (cpu = 0; cpu < num_cpus; cpu++) {
