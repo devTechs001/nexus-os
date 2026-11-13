@@ -454,6 +454,11 @@ int display_get_virtual_rect(rect_t *rect);
 int window_manager_init(void);
 void window_manager_shutdown(void);
 
+/* Draw every visible window into an 0xAARRGGBB framebuffer.
+ * Nothing used to call the windows' on_paint callbacks, so the GUI ran at a
+ * healthy 60 FPS over a completely black screen. */
+int window_manager_render(u32 *fb, u32 pitch, u32 fb_w, u32 fb_h);
+
 /* Window management */
 window_t *window_create(window_props_t *props);
 void window_destroy(window_t *window);
@@ -488,6 +493,8 @@ int graphics_draw_pixel(graphics_context_t *ctx, s32 x, s32 y, color_t color);
 int graphics_draw_line(graphics_context_t *ctx, s32 x1, s32 y1, s32 x2, s32 y2);
 int graphics_draw_rect(graphics_context_t *ctx, rect_t *rect);
 int graphics_fill_rect(graphics_context_t *ctx, rect_t *rect, color_t color);
+/* Fill clipped to ctx->clip_rect; safe for single-scanline surfaces. */
+int graphics_fill_rect_clipped(graphics_context_t *ctx, rect_t *rect, color_t color);
 int graphics_stroke_rect(graphics_context_t *ctx, rect_t *rect, color_t color);
 int graphics_draw_text(graphics_context_t *ctx, s32 x, s32 y, const char *text);
 int graphics_blit(graphics_context_t *ctx, void *src, rect_t *src_rect, s32 dst_x, s32 dst_y);

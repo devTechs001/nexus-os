@@ -145,6 +145,8 @@ extern onboarding_wizard_t *onboarding_wizard_get_instance(void);
 extern int onboarding_wizard_init(onboarding_wizard_t *wizard);
 extern int onboarding_wizard_run(onboarding_wizard_t *wizard);
 extern int onboarding_wizard_update(onboarding_wizard_t *wizard);
+/* gui/compositor/window_manager.c - draws the window list to a framebuffer. */
+extern int window_manager_render(u32 *fb, u32 pitch, u32 fb_w, u32 fb_h);
 
 /* Initcall sections */
 extern initcall_t __initcall_start[], __initcall_end[];
@@ -525,10 +527,31 @@ void kernel_init_userspace(void)
                 login_screen_update(login);
                 onboarding_wizard_update(wizard);
 
-                /* Present frame */
-                extern struct compositor *compositor_get_instance(void);
-                extern int compositor_present(struct compositor *comp);
-                compositor_present(compositor_get_instance());
+                /*
+                 * Draw the windows, then copy the result to the framebuffer.
+                 *
+                 * This used to call compositor_present() alone, which only
+                 * swaps buffers and memcpy's a framebuffer that nothing had
+                 * rendered into - so the GUI reported a steady 60 FPS while
+                 * the screen stayed black. The compositor renders its own
+                 * layer stack, and no window was ever registered there; the
+                 * window manager owns the actual window list, so it produces
+                 * the pixels and we blit them straight to the physical
+                 * framebuffer.
+                 */
+                boot_params_t *gfx = get_boot_params();
+                if (gfx && gfx->gfx_addr && gfx->gfx_width && gfx->gfx_height) {
+                    u32 pitch = gfx->gfx_pitch ? (gfx->gfx_pitch / 4)
+                                               : gfx->gfx_width;
+                    window_manager_render((u32 *)(uintptr_t)gfx->gfx_addr,
+                                          pitch,
+                                          gfx->gfx_width,
+                                          gfx->gfx_height);
+                } else {
+                    extern struct compositor *compositor_get_instance(void);
+                    extern int compositor_present(struct compositor *comp);
+                    compositor_present(compositor_get_instance());
+                }
 
                 /* Frame rate limiting */
                 if (frame_count >= 60) {

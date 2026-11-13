@@ -181,6 +181,16 @@ int login_screen_init(login_screen_t *screen)
         return -1;
     }
     
+    /*
+     * Hand the finished widget tree to the window. The window manager paints
+     * whatever tree it finds in user_data; without this the login screen was
+     * built in full - background, clock, user panel, password field, buttons -
+     * and then drawn as nothing but a flat rectangle.
+     */
+    if (screen->main_window && screen->main_widget) {
+        screen->main_window->user_data = screen->main_widget;
+    }
+
     /* Update initial display */
     update_clock(screen);
     update_user_display(screen);
