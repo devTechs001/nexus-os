@@ -227,6 +227,10 @@ static void vfs_dentry_free(struct vfs_dentry *dentry)
 /*                         DENTRY REFERENCE COUNTING                         */
 /*===========================================================================*/
 
+/* LRU list maintenance (defined below) */
+static void vfs_dentry_add_lru(struct vfs_dentry *dentry);
+static void vfs_dentry_remove_lru(struct vfs_dentry *dentry);
+
 /**
  * vfs_d_get - Get reference to dentry
  * @dentry: Dentry to reference
@@ -241,6 +245,13 @@ void vfs_d_get(struct vfs_dentry *dentry)
 
     atomic_inc(&dentry->d_count);
     dentry->d_last_used = get_time_ms();
+
+    /*
+     * A dentry that is in use must not be on the LRU: vfs_dentry_shrink()
+     * reclaims from that list, and would otherwise scan entries it can never
+     * free while the list grew unbounded.
+     */
+    vfs_dentry_remove_lru(dentry);
 }
 
 /**
@@ -260,10 +271,55 @@ void vfs_d_put(struct vfs_dentry *dentry)
     }
 
     if (!atomic_dec_and_test(&dentry->d_count)) {
+        /* Still in use by someone else. */
+        return;
+    }
+
+    /*
+     * The count is now zero, but the dentry stays alive and goes on the LRU so
+     * a subsequent lookup of the same name can reuse it, and so
+     * vfs_dentry_shrink() has something to reclaim.
+     *
+     * This used to free the dentry here, which made the LRU permanently empty:
+     * vfs_dentry_shrink() scanned a list nothing ever populated, so the "cache"
+     * never held anything between calls and every path walk repeated full
+     * lookups. Reclaim is now entirely the shrinker's job.
+     */
+    dentry->d_last_used = get_time_ms();
+    vfs_dentry_add_lru(dentry);
+
+    /* Give up the inode reference while unreferenced; the dentry itself stays cached. */
+    if (dentry->d_inode) {
+        struct vfs_inode *inode = dentry->d_inode;
+
+        if (dentry->d_op && dentry->d_op->d_iput) {
+            dentry->d_op->d_iput(dentry, inode);
+        }
+        vfs_iput(inode);
+        dentry->d_inode = NULL;
+    }
+
+    return;
+}
+
+/**
+ * vfs_d_release_now - Free a dentry immediately, bypassing the LRU
+ *
+ * Used when a dentry must genuinely disappear - deletion, unmount, or
+ * filesystem shutdown - rather than becoming eligible for reclamation.
+ */
+static void vfs_d_release_now(struct vfs_dentry *dentry)
+{
+    struct vfs_dentry *parent;
+    struct vfs_inode *inode;
+
+    if (!dentry || dentry->magic != VFS_MAGIC) {
         return;
     }
 
     pr_debug("VFS: Releasing dentry '%s'\n", dentry->d_name);
+
+    parent = dentry->d_parent;
 
     /* Remove from parent's children list */
     parent = dentry->d_parent;
@@ -388,6 +444,17 @@ void vfs_d_drop(struct vfs_dentry *dentry)
 
     spin_unlock(&vfs_global.dentry_hash_lock);
 
+    /*
+     * Dropping removes the dentry from the cache deliberately, so it must not
+     * be left on the LRU waiting for the shrinker. If nothing holds a
+     * reference it goes away now.
+     */
+    vfs_dentry_remove_lru(dentry);
+
+    if (atomic_read(&dentry->d_count) == 0) {
+        vfs_d_release_now(dentry);
+    }
+
     pr_debug("VFS: Dropped dentry '%s' from cache\n", dentry->d_name);
 }
 
@@ -478,9 +545,14 @@ struct vfs_dentry *vfs_d_lookup(const char *name, struct vfs_dentry *parent)
         }
 
         if (strcmp(dentry->d_name, name) == 0) {
-            /* Found - increment refcount */
+            /* Found - take a reference and make sure it is off the LRU. */
             atomic_inc(&dentry->d_count);
             dentry->d_last_used = get_time_ms();
+
+            if (!list_empty(&dentry->d_lru)) {
+                list_del(&dentry->d_lru);
+                INIT_LIST_HEAD(&dentry->d_lru);
+            }
 
             spin_unlock(&vfs_global.dentry_hash_lock);
 
