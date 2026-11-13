@@ -20,6 +20,7 @@
  * paint entry exists.
  */
 typedef struct widget widget_t;
+typedef struct desktop desktop_t;
 extern void widget_paint_tree(widget_t *widget, graphics_context_t *ctx,
                               s32 origin_x, s32 origin_y);
 
@@ -1138,6 +1139,24 @@ int window_manager_render(u32 *fb, u32 pitch, u32 fb_w, u32 fb_h)
 
     ctx->width = pitch;
     ctx->height = fb_h;
+
+    /*
+     * Paint the desktop first - wallpaper, icon grid, panels and taskbar.
+     *
+     * desktop_render() had no caller anywhere and built its context with a
+     * NULL surface, so the whole desktop environment was constructed at boot,
+     * logged every icon it created, and then drew into nothing. It goes down
+     * before the window list so normal windows composite on top of it.
+     */
+    {
+        extern desktop_t *desktop_get(void);
+        extern void desktop_render_to(desktop_t *desktop, graphics_context_t *ctx);
+        desktop_t *d = desktop_get();
+        if (d) {
+            ctx->clip_rect = (rect_t){0, 0, (s32)fb_w, (s32)fb_h};
+            desktop_render_to(d, ctx);
+        }
+    }
 
     s32 screen_w = (s32)fb_w;
     s32 screen_h = (s32)fb_h;

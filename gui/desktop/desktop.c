@@ -166,19 +166,13 @@ int desktop_shutdown(desktop_t *desktop)
  * released afterwards; the renderer is not re-entrant, so the frame is drawn
  * in a single pass.
  */
-void desktop_render(desktop_t *desktop)
+void desktop_render_to(desktop_t *desktop, graphics_context_t *ctx)
 {
-    graphics_context_t *ctx;
     rect_t r;
     color_t bg;
     color_t accent;
 
-    if (!desktop) {
-        return;
-    }
-
-    ctx = graphics_create_context(NULL);
-    if (!ctx) {
+    if (!desktop || !ctx || !ctx->surface) {
         return;
     }
 
@@ -312,6 +306,28 @@ void desktop_render(desktop_t *desktop)
         }
     }
 
+}
+
+/**
+ * desktop_render - Render the desktop into its own context
+ *
+ * Kept for callers that want a standalone render; the boot path uses
+ * desktop_render_to() so the desktop lands in the real framebuffer.
+ */
+void desktop_render(desktop_t *desktop)
+{
+    graphics_context_t *ctx;
+
+    if (!desktop) {
+        return;
+    }
+
+    ctx = graphics_create_context(NULL);
+    if (!ctx) {
+        return;
+    }
+
+    desktop_render_to(desktop, ctx);
     graphics_destroy_context(ctx);
 }
 

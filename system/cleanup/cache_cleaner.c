@@ -260,8 +260,10 @@ int cache_clean_all(void)
         }
     }
     
-    printk("[CACHE] Full cleanup complete: freed %d MB\n",
-           (u32)(total_freed / (1024 * 1024)));
+    /* Report the deleted count too - it was accumulated and then discarded,
+     * so the log claimed a cleanup without saying how many files went. */
+    printk("[CACHE] Full cleanup complete: freed %u MB across %u files\n",
+           (u32)(total_freed / (1024 * 1024)), total_deleted);
     
     return 0;
 }

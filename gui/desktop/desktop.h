@@ -227,6 +227,14 @@ int desktop_init(desktop_t *desktop);
 int desktop_shutdown(desktop_t *desktop);
 void desktop_render(desktop_t *desktop);
 
+/* Render the desktop (wallpaper, icons, panels) into an existing context whose
+ * surface is the framebuffer. desktop_render() alone draws into a context with
+ * no surface, so nothing ever reached the screen. */
+void desktop_render_to(desktop_t *desktop, graphics_context_t *ctx);
+
+/* The live desktop instance created by desktop_init_global(). */
+desktop_t *desktop_get(void);
+
 /* Icon management */
 int desktop_icon_add(desktop_t *desktop, desktop_icon_t *icon);
 int desktop_icon_remove(desktop_t *desktop, int index);
