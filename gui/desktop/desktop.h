@@ -18,6 +18,9 @@
 #define DESKTOP_MAX_WINDOWS         64
 #define DESKTOP_MAX_PANELS          8
 #define DESKTOP_MAX_WORKSPACES      10
+#define DESKTOP_MAX_TASKBAR_ITEMS   64
+#define DESKTOP_MAX_TRAY_ITEMS      16
+#define DESKTOP_MAX_START_APPS      128
 #define DESKTOP_TASKBAR_HEIGHT      48
 #define DESKTOP_PANEL_HEIGHT        40
 #define DESKTOP_ICON_SIZE           64
@@ -106,6 +109,7 @@ typedef struct desktop_panel {
     u32 color;
     
     /* Panel items */
+    bool show_taskbar;              /* This panel hosts taskbar buttons */
     taskbar_item_t *taskbar_items;
     int taskbar_count;
     

@@ -1110,3 +1110,229 @@ int desktop_handle_mouse_move(desktop_t *desktop, int x, int y, u32 buttons)
 
     return 0;
 }
+
+/*===========================================================================*/
+/*                    TASKBAR, TRAY AND START MENU                           */
+/*===========================================================================*/
+
+/**
+ * find_taskbar_panel - Locate the panel that owns taskbar items
+ *
+ * Taskbar state is per-panel, so an operation on a window id has to find the
+ * panel holding it first.
+ */
+static desktop_panel_t *find_taskbar_panel(desktop_t *desktop, int *out_index)
+{
+    if (!desktop || !desktop->panels) {
+        return NULL;
+    }
+
+    for (int i = 0; i < desktop->panel_count; i++) {
+        if (desktop->panels[i].show_taskbar) {
+            if (out_index) {
+                *out_index = i;
+            }
+            return &desktop->panels[i];
+        }
+    }
+
+    return NULL;
+}
+
+/**
+ * desktop_taskbar_remove_item - Remove a window's taskbar button
+ */
+int desktop_taskbar_remove_item(desktop_t *desktop, u32 window_id)
+{
+    desktop_panel_t *panel = find_taskbar_panel(desktop, NULL);
+    int found = -1;
+
+    if (!panel) {
+        return -ENOENT;
+    }
+
+    for (int i = 0; i < panel->taskbar_count; i++) {
+        if (panel->taskbar_items[i].window_id == window_id) {
+            found = i;
+            break;
+        }
+    }
+
+    if (found < 0) {
+        return -ENOENT;
+    }
+
+    for (int i = found; i + 1 < panel->taskbar_count; i++) {
+        panel->taskbar_items[i] = panel->taskbar_items[i + 1];
+    }
+    panel->taskbar_count--;
+
+    return 0;
+}
+
+/**
+ * desktop_taskbar_update_item - Update a taskbar button's state
+ *
+ * @window_id: Which button to change
+ * @title:     New title, or NULL to keep the current one
+ */
+int desktop_taskbar_update_item(desktop_t *desktop, u32 window_id,
+                                const char *title, bool active, bool minimized)
+{
+    desktop_panel_t *panel = find_taskbar_panel(desktop, NULL);
+
+    if (!panel) {
+        return -ENOENT;
+    }
+
+    for (int i = 0; i < panel->taskbar_count; i++) {
+        taskbar_item_t *item = &panel->taskbar_items[i];
+
+        if (item->window_id != window_id) {
+            continue;
+        }
+
+        if (title) {
+            strncpy(item->title, title, sizeof(item->title) - 1);
+            item->title[sizeof(item->title) - 1] = '\0';
+        }
+
+        item->active = active;
+        item->minimized = minimized;
+
+        if (active) {
+            item->urgent = false;
+            item->last_active = get_time_ms();
+        }
+
+        return 0;
+    }
+
+    return -ENOENT;
+}
+
+/**
+ * desktop_taskbar_set_active - Make one window the active taskbar entry
+ *
+ * Exactly one button is active at a time, so every other entry is cleared.
+ */
+int desktop_taskbar_set_active(desktop_t *desktop, u32 window_id)
+{
+    desktop_panel_t *panel = find_taskbar_panel(desktop, NULL);
+    int matched = -1;
+
+    if (!panel) {
+        return -ENOENT;
+    }
+
+    for (int i = 0; i < panel->taskbar_count; i++) {
+        if (panel->taskbar_items[i].window_id == window_id) {
+            matched = i;
+        }
+    }
+
+    if (matched < 0) {
+        return -ENOENT;
+    }
+
+    for (int i = 0; i < panel->taskbar_count; i++) {
+        panel->taskbar_items[i].active = (i == matched);
+    }
+
+    panel->taskbar_items[matched].last_active = get_time_ms();
+    panel->taskbar_items[matched].urgent = false;
+
+    return 0;
+}
+
+/**
+ * desktop_tray_get_item - Look up a tray item by name
+ */
+system_tray_item_t *desktop_tray_get_item(desktop_t *desktop, const char *name)
+{
+    if (!desktop || !desktop->panels || !name) {
+        return NULL;
+    }
+
+    for (int i = 0; i < desktop->panel_count; i++) {
+        desktop_panel_t *panel = &desktop->panels[i];
+
+        for (int j = 0; j < panel->tray_count; j++) {
+            if (strcmp(panel->tray_items[j].name, name) == 0) {
+                return &panel->tray_items[j];
+            }
+        }
+    }
+
+    return NULL;
+}
+
+/**
+ * desktop_tray_remove_item - Remove a tray item by name
+ */
+int desktop_tray_remove_item(desktop_t *desktop, const char *name)
+{
+    if (!desktop || !desktop->panels || !name) {
+        return -EINVAL;
+    }
+
+    for (int i = 0; i < desktop->panel_count; i++) {
+        desktop_panel_t *panel = &desktop->panels[i];
+
+        for (int j = 0; j < panel->tray_count; j++) {
+            if (strcmp(panel->tray_items[j].name, name) != 0) {
+                continue;
+            }
+
+            for (int k = j; k + 1 < panel->tray_count; k++) {
+                panel->tray_items[k] = panel->tray_items[k + 1];
+            }
+            panel->tray_count--;
+
+            return 0;
+        }
+    }
+
+    return -ENOENT;
+}
+
+/**
+ * desktop_start_menu_add_app - Register an application in the start menu
+ *
+ * The menu stores an array of void* pointers, so it grows by one slot per
+ * entry. Reallocating is done explicitly because there is no realloc here.
+ */
+int desktop_start_menu_add_app(desktop_t *desktop, void *app)
+{
+    start_menu_t *menu;
+    void **grown;
+
+    if (!desktop || !app) {
+        return -EINVAL;
+    }
+
+    menu = &desktop->start_menu;
+
+    if (menu->app_count >= DESKTOP_MAX_START_APPS) {
+        return -ENOSPC;
+    }
+
+    grown = (void **)kmalloc(sizeof(void *) * (menu->app_count + 1));
+    if (!grown) {
+        return -ENOMEM;
+    }
+
+    for (int i = 0; i < menu->app_count; i++) {
+        grown[i] = menu->apps[i];
+    }
+    grown[menu->app_count] = app;
+
+    if (menu->apps) {
+        kfree(menu->apps);
+    }
+
+    menu->apps = grown;
+    menu->app_count++;
+
+    return 0;
+}

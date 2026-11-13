@@ -408,9 +408,20 @@ int sudo_check_command(sudo_session_t *session, const char *command)
                 return -EACCES;
             }
             
-            /* Add to history */
+            /*
+             * Add to history.
+             *
+             * This used to store the caller's pointer directly, which only
+             * type-checked because of a const cast and went stale the moment
+             * the caller's buffer was reused. Own a copy instead.
+             */
             if (session->history_count < SUDO_HISTORY_MAX) {
-                session->command_history[session->history_count++] = command;
+                char *copy = (char *)kmalloc(strlen(command) + 1);
+
+                if (copy) {
+                    strcpy(copy, command);
+                    session->command_history[session->history_count++] = copy;
+                }
             }
             
             printk("[TERMINAL-SUDO] Command '%s' authorized\n", command);

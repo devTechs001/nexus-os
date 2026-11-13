@@ -246,9 +246,6 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/nvme.o \
             $(BUILD_DIR)/sd.o \
             $(BUILD_DIR)/emmc.o \
-            $(BUILD_DIR)/inode.o \
-            $(BUILD_DIR)/dentry.o \
-            $(BUILD_DIR)/mount.o \
             $(BUILD_DIR)/pmm.o \
             $(BUILD_DIR)/page_alloc.o \
             $(BUILD_DIR)/heap.o \
@@ -288,7 +285,6 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/vm_manager_enhanced.o \
             $(BUILD_DIR)/login-screen.o \
             $(BUILD_DIR)/onboarding-wizard.o \
-            $(BUILD_DIR)/widget.o \
             $(BUILD_DIR)/registry.o \
             $(BUILD_DIR)/booster.o \
             $(BUILD_DIR)/cpu_cooler.o \
@@ -305,6 +301,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/shell.o \
             $(BUILD_DIR)/lang_runtime.o \
             $(BUILD_DIR)/terminal.o \
+            $(BUILD_DIR)/terminal_enhanced.o \
             $(BUILD_DIR)/terminal_features.o \
             $(BUILD_DIR)/terminal_animations.o \
             $(BUILD_DIR)/display.o \
@@ -339,23 +336,13 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/storage.o \
             $(BUILD_DIR)/drivers.o \
             $(BUILD_DIR)/network.o \
-            $(BUILD_DIR)/socket.o \
             $(BUILD_DIR)/net_device.o \
-            $(BUILD_DIR)/ip.o \
-            $(BUILD_DIR)/icmp.o \
-            $(BUILD_DIR)/udp.o \
-            $(BUILD_DIR)/tcp.o \
             $(BUILD_DIR)/security.o \
-            $(BUILD_DIR)/security_manager.o \
             $(BUILD_DIR)/pci.o \
             $(BUILD_DIR)/sensor_hub.o \
             $(BUILD_DIR)/vga.o \
             $(BUILD_DIR)/interface.o \
             $(BUILD_DIR)/dsi.o \
-            $(BUILD_DIR)/ahci.o \
-            $(BUILD_DIR)/nvme.o \
-            $(BUILD_DIR)/sd.o \
-            $(BUILD_DIR)/emmc.o \
             $(BUILD_DIR)/disk_encryption.o \
             $(BUILD_DIR)/inference_engine.o \
             $(BUILD_DIR)/power_management.o \
@@ -523,322 +510,322 @@ $(BUILD_DIR)/interrupts.o: $(KERNEL_DIR)/arch/x86_64/interrupts/interrupts.asm |
 # Compile C files
 $(BUILD_DIR)/kernel.o: $(KERNEL_DIR)/core/kernel.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/gdt.o: $(KERNEL_DIR)/arch/x86_64/cpu/gdt.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/idt.o: $(KERNEL_DIR)/arch/x86_64/interrupts/idt.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/pic.o: $(KERNEL_DIR)/arch/x86_64/interrupts/pic.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/paging.o: $(KERNEL_DIR)/arch/x86_64/mm/paging.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/timer.o: $(KERNEL_DIR)/arch/x86_64/cpu/timer.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/acpi.o: $(KERNEL_DIR)/arch/x86_64/cpu/acpi.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/arch_smp.o: $(KERNEL_DIR)/arch/x86_64/cpu/smp.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/arch_cpu.o: $(KERNEL_DIR)/arch/x86_64/cpu/cpu.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/printk.o: $(KERNEL_DIR)/core/printk.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/string.o: $(KERNEL_DIR)/core/string.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/cmdline.o: $(KERNEL_DIR)/core/cmdline.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/panic.o: $(KERNEL_DIR)/core/panic.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/init.o: $(KERNEL_DIR)/core/init.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/smp.o: $(KERNEL_DIR)/core/smp.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/platform.o: $(PLATFORM_DIR)/platform.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/ipv6.o: $(NET_DIR)/ipv6/ipv6.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/net_core.o: $(NET_DIR)/core/net_core.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/skbuff.o: $(NET_DIR)/core/skbuff.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(NET_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(NET_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/net_device.o: $(NET_DIR)/core/net_device.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(NET_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(NET_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/firewall.o: $(NET_DIR)/firewall/firewall.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/desktop.o: $(GUI_DIR)/desktop/desktop.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/gui_core.o: $(GUI_DIR)/gui_core.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/app-store.o: $(GUI_DIR)/app-store/app-store.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/login-screen.o: $(GUI_DIR)/login/login-screen.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/onboarding-wizard.o: $(GUI_DIR)/onboarding/onboarding-wizard.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/virt_manager_gui.o: $(GUI_DIR)/virtualization/virt_manager_gui.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/vm_manager_enhanced.o: $(GUI_DIR)/virtualization/vm_manager_enhanced.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/virt_render.o: $(GUI_DIR)/virtualization/virt_render.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/apps_nexus.o: $(GUI_DIR)/apps_nexus.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/registry.o: $(SYSTEM_DIR)/registry/registry.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/booster.o: $(SYSTEM_DIR)/optimizer/booster.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/cpu_cooler.o: $(SYSTEM_DIR)/thermal/cpu_cooler.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/cache_cleaner.o: $(SYSTEM_DIR)/cleanup/cache_cleaner.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/storage_sense.o: $(SYSTEM_DIR)/storage/storage_sense.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/restore_points.o: $(SYSTEM_DIR)/restore/restore_points.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/startup_health.o: $(SYSTEM_DIR)/startup/startup_health.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/update_manager.o: $(SYSTEM_DIR)/update/update_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/reset_manager.o: $(SYSTEM_DIR)/reset/reset_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/equalizer.o: $(SYSTEM_DIR)/audio/equalizer.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/log_manager.o: $(SYSTEM_DIR)/logging/log_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/feedback_manager.o: $(SYSTEM_DIR)/feedback/feedback_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/resource-sharing.o: $(SYSTEM_DIR)/resource-sharing/resource-sharing.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Driver object files
 $(BUILD_DIR)/display.o: $(DRIVERS_DIR)/display/display.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/input.o: $(DRIVERS_DIR)/input/input.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/audio.o: $(DRIVERS_DIR)/audio/audio.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/gpu.o: $(DRIVERS_DIR)/gpu/gpu.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/elf_loader.o: $(KERNEL_DIR)/core/elf_loader.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/module_loader.o: $(KERNEL_DIR)/core/module_loader.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Kernel sync primitives
 $(BUILD_DIR)/spinlock.o: $(KERNEL_DIR)/sync/spinlock.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/rwlock.o: $(KERNEL_DIR)/sync/rwlock.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/atomic.o: $(KERNEL_DIR)/sync/atomic.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/waitqueue.o: $(KERNEL_DIR)/sync/waitqueue.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Kernel IPC
 $(BUILD_DIR)/pipe.o: $(KERNEL_DIR)/ipc/pipe.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/mutex.o: $(KERNEL_DIR)/ipc/mutex.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/semaphore.o: $(KERNEL_DIR)/ipc/semaphore.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/message_queue.o: $(KERNEL_DIR)/ipc/message_queue.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/shm.o: $(KERNEL_DIR)/ipc/shm.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/ipc.o: $(KERNEL_DIR)/ipc/ipc.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Kernel synchronization
 $(BUILD_DIR)/sync.o: $(KERNEL_DIR)/sync/sync.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Kernel memory management
 $(BUILD_DIR)/pmm.o: $(KERNEL_DIR)/mm/pmm.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/page_alloc.o: $(KERNEL_DIR)/mm/page_alloc.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/heap.o: $(KERNEL_DIR)/mm/heap.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/vmm.o: $(KERNEL_DIR)/mm/vmm.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/slab.o: $(KERNEL_DIR)/mm/slab.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Kernel scheduler
 $(BUILD_DIR)/scheduler.o: $(KERNEL_DIR)/sched/scheduler.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/process.o: $(KERNEL_DIR)/sched/process.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/thread.o: $(KERNEL_DIR)/sched/thread.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/cfs.o: $(KERNEL_DIR)/sched/cfs.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/realtime.o: $(KERNEL_DIR)/sched/realtime.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # Kernel syscalls
 $(BUILD_DIR)/syscall.o: $(KERNEL_DIR)/syscall/syscall.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/syscall_table.o: $(KERNEL_DIR)/syscall/syscall_table.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/syscall_handlers.o: $(KERNEL_DIR)/syscall/syscall_handlers.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/network_manager.o: $(NET_DIR)/network_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/desktop_grid.o: $(GUI_DIR)/desktop/desktop_grid.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/app-launcher.o: $(GUI_DIR)/app-launcher/app-launcher.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/task-manager.o: $(GUI_DIR)/task-manager/task-manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/control-panel.o: $(GUI_DIR)/control-panel/control-panel.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # gui/window-manager/window-manager.c and gui/compositor/window_manager.c
 # both want the object name "window_manager.o", so the former builds to
@@ -846,330 +833,358 @@ $(BUILD_DIR)/control-panel.o: $(GUI_DIR)/control-panel/control-panel.c | $(BUILD
 # compositor's window registry vs. the WM window object API used by apps.
 $(BUILD_DIR)/wm_window.o: $(GUI_DIR)/window-manager/window-manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/window_manager.o: $(GUI_DIR)/compositor/window_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/compositor.o: $(GUI_DIR)/compositor/compositor.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/compositing_manager.o: $(GUI_DIR)/compositor/compositing_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -mno-sse2 -msoft-float -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -mno-sse2 -msoft-float -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/display_manager.o: $(DRIVERS_DIR)/display/display_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/console.o: $(DRIVERS_DIR)/video/console.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/splash.o: $(DRIVERS_DIR)/video/splash.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/font8x16.o: $(DRIVERS_DIR)/video/font8x16.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/icon_library.o: $(GUI_DIR)/icons/icon_library.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/icon_library_extra.o: $(GUI_DIR)/icons/icon_library_extra.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/display_settings.o: $(GUI_DIR)/display/display_settings.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/lang_runtime.o: $(APPS_DIR)/terminal/lang_runtime.c $(APPS_DIR)/terminal/lang_runtime.h | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(APPS_DIR) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(APPS_DIR) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/shell.o: $(APPS_DIR)/terminal/shell.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/terminal.o: $(APPS_DIR)/terminal/terminal.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/terminal_enhanced.o: $(APPS_DIR)/terminal/terminal_enhanced.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/terminal_features.o: $(APPS_DIR)/terminal/terminal_features.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/terminal_animations.o: $(APPS_DIR)/terminal/terminal_animations.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(APPS_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/mixer.o: $(DRIVERS_DIR)/audio/mixer.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/bluetooth_audio.o: $(DRIVERS_DIR)/audio/bluetooth_audio.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/gpu_scheduler.o: $(DRIVERS_DIR)/gpu/gpu_scheduler.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/usb_manager.o: $(DRIVERS_DIR)/usb/usb_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/disk_encryption.o: $(SECURITY_DIR)/encryption/disk_encryption.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/inference_engine.o: $(AI_ML_DIR)/inference/inference_engine.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/power_management.o: $(HAL_DIR)/power/power_management.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/power_manager.o: $(HAL_DIR)/power/power_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/iot_protocols.o: $(IOT_DIR)/protocols/iot_protocols.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/container_runtime.o: $(VIRT_DIR)/containers/container_runtime.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/container_orchestration.o: $(VIRT_DIR)/containers/container_orchestration.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/nexus_hypervisor_core.o: $(VIRT_DIR)/hypervisor/nexus_hypervisor_core.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/vm_manager.o: $(VIRT_DIR)/vm/vm_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/nested_virt.o: $(VIRT_DIR)/emulation/nested_virt.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/nexfs_core.o: $(FS_DIR)/nexfs/nexfs_core.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/nexfs_inode.o: $(FS_DIR)/nexfs/nexfs_inode.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/nexfs_journal.o: $(FS_DIR)/nexfs/nexfs_journal.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/vfs_core.o: $(FS_DIR)/vfs/vfs_core.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/procfs.o: $(FS_DIR)/procfs/procfs.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/telephony_manager.o: $(MOBILE_DIR)/telephony/telephony_manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/network_protocols.o: $(NET_DIR)/protocols/network_protocols.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/control-center.o: $(GUI_DIR)/control-center/control-center.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/file-manager.o: $(GUI_DIR)/file-manager/file-manager.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/system-settings.o: $(GUI_DIR)/system-settings/system-settings.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -I$(GUI_DIR) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/ps2.o: $(DRIVERS_DIR)/input/keyboard/ps2.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/touchscreen.o: $(DRIVERS_DIR)/input/touchscreen/touchscreen.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/opengl.o: $(DRIVERS_DIR)/gpu/opengl.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/%.o: $(FS_DIR)/vfs/%.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/%.o: $(NET_DIR)/core/%.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/%.o: $(NET_DIR)/ipv4/%.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/%.o: $(GUI_DIR)/widgets/%.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/%.o: $(SECURITY_DIR)/%.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/%.o: $(DRIVERS_DIR)/storage/%.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/vga.o: $(DRIVERS_DIR)/video/vga.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/dsi.o: $(DRIVERS_DIR)/video/dsi.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/interface.o: $(DRIVERS_DIR)/video/interface.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/ethernet.o: $(DRIVERS_DIR)/network/ethernet.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/wifi.o: $(DRIVERS_DIR)/network/wifi.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/bluetooth.o: $(DRIVERS_DIR)/bluetooth/bluetooth.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/biometrics.o: $(DRIVERS_DIR)/biometrics/biometrics.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/camera.o: $(DRIVERS_DIR)/media/camera.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/serial.o: $(DRIVERS_DIR)/serial/serial.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/watchdog.o: $(DRIVERS_DIR)/watchdog/watchdog.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/rtc.o: $(DRIVERS_DIR)/rtc/rtc.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/storage.o: $(DRIVERS_DIR)/storage/storage.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/drivers.o: $(DRIVERS_DIR)/drivers.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/network.o: $(NET_DIR)/network.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/security.o: $(SECURITY_DIR)/security.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/pci.o: $(DRIVERS_DIR)/pci/pci.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/sensor_hub.o: $(DRIVERS_DIR)/sensors/sensor_hub.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/virtio_gpu.o: $(DRIVERS_DIR)/gpu/virtio_gpu.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/fb.o: $(DRIVERS_DIR)/graphics/framebuffer/fb.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/irq.o: $(HAL_DIR)/interrupts/irq.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/renderer.o: $(GUI_DIR)/renderer/renderer.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/auth.o: $(SECURITY_DIR)/auth/auth.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/authorization.o: $(SECURITY_DIR)/auth/authorization.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/pam.o: $(SECURITY_DIR)/auth/pam.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/math.o: $(KERNEL_DIR)/core/math.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/acpi_hal.o: $(HAL_DIR)/power/acpi.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/cpu_core.o: $(HAL_DIR)/cpu/cpu_core.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/apic.o: $(HAL_DIR)/interrupts/apic.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/ecc.o: $(SECURITY_DIR)/crypto/ecc.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/sha.o: $(SECURITY_DIR)/crypto/sha.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 $(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
-	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Build guard
+#
+# Every compile recipe ends in "2>&1", which routes diagnostics into the log
+# without touching the exit status. That let `make` report success while a
+# source failed to compile, and a repeated entry in C_OBJECTS put the same
+# object on the link line twice ("multiple definition of ..."). Both are
+# checked here so the build fails loudly at the point of the mistake.
+# ---------------------------------------------------------------------------
+.PHONY: check-build
+check-build:
+	@dupes=$$(printf '%s\n' $(C_OBJECTS) | sort | uniq -d); \
+	if [ -n "$$dupes" ]; then \
+	  echo "  [ERR]   duplicate objects in C_OBJECTS:"; \
+	  printf '            %s\n' $$dupes; \
+	  exit 1; \
+	fi
+	@absent=""; \
+	for o in $(C_OBJECTS); do \
+	  [ -f "$$o" ] || absent="$$absent $$o"; \
+	done; \
+	if [ -n "$$absent" ]; then \
+	  echo "  [ERR]   objects never built (compile failed, see log above):"; \
+	  printf '            %s\n' $$absent; \
+	  exit 1; \
+	fi
+	@echo "  [CHECK] link inputs OK - $(words $(C_OBJECTS)) C objects"
 
 # Link kernel
-$(KERNEL_BIN): $(OBJECTS)
+$(KERNEL_BIN): check-build $(OBJECTS)
 	@echo "  [LD]    $@"
 	@$(LD) $(LDFLAGS) -o $@ $(OBJECTS) 2>&1
 	@echo "  [INFO]  Kernel size: $$(stat -c %s $@ 2>/dev/null || stat -f %z $@ 2>/dev/null || echo 0) bytes"

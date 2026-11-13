@@ -1881,3 +1881,473 @@ terminal_app_t *terminal_app_get_instance(void)
 {
     return &g_terminal_app;
 }
+
+/*===========================================================================*/
+/*              SPLIT PANES AND BOOKMARKS (DECLARED, NEVER DEFINED)          */
+/*===========================================================================*/
+/*
+ * terminal.h declared eight pane and bookmark functions that had no bodies.
+ * The pane tree structure (split_pane_t) was already defined, and windows
+ * already carried root_pane/active_pane/next_pane_id, but nothing ever built,
+ * walked or dismantled a tree - so a window could never be split.
+ */
+
+/**
+ * terminal_split_pane - Split the active pane in two
+ *
+ * @horizontal: true for a side-by-side split, false for top-and-bottom.
+ *
+ * The active pane becomes an internal node and receives two children sized
+ * from its bounds and the split ratio. The new right/bottom pane is created
+ * with its own tab sharing the window's terminal.
+ */
+int terminal_split_pane(terminal_window_t *win, bool horizontal)
+{
+    split_pane_t *pane;
+    split_pane_t *a;
+    split_pane_t *b;
+    terminal_tab_t *tab;
+    u32 w, h;
+
+    if (!win || !win->active_pane) {
+        return -EINVAL;
+    }
+
+    pane = win->active_pane;
+
+    /* A leaf becomes an internal node; refuse to split one that already is. */
+    if (pane->first_child) {
+        return -EBUSY;
+    }
+
+    a = (split_pane_t *)kzalloc(sizeof(split_pane_t));
+    b = (split_pane_t *)kzalloc(sizeof(split_pane_t));
+    if (!a || !b) {
+        if (a) kfree(a);
+        if (b) kfree(b);
+        return -ENOMEM;
+    }
+
+    w = (u32)(pane->bounds.width > 0 ? pane->bounds.width
+                                     : (win->wm_window ? win->wm_window->geometry.width : 640));
+    h = (u32)(pane->bounds.height > 0 ? pane->bounds.height
+                                      : (win->wm_window ? win->wm_window->geometry.height : 480));
+
+    /* First child inherits the existing tab. */
+    a->pane_id = win->next_pane_id++;
+    a->tab = pane->tab;
+    a->parent = pane;
+    a->split_ratio = 50;
+    a->bounds.x = pane->bounds.x;
+    a->bounds.y = pane->bounds.y;
+
+    /* Second child gets a fresh tab on the same shell profile. */
+    tab = (terminal_tab_t *)kzalloc(sizeof(terminal_tab_t));
+    if (!tab) {
+        kfree(a);
+        kfree(b);
+        return -ENOMEM;
+    }
+    tab->tab_id = win->next_pane_id++;
+    tab->is_active = true;
+    if (pane->tab && pane->tab->shell_path[0]) {
+        strncpy(tab->shell_path, pane->tab->shell_path,
+                sizeof(tab->shell_path) - 1);
+    } else {
+        strncpy(tab->shell_path, "/bin/nexsh", sizeof(tab->shell_path) - 1);
+    }
+    strncpy(tab->title, "nexsh", sizeof(tab->title) - 1);
+
+    b->pane_id = win->next_pane_id++;
+    b->tab = tab;
+    b->parent = pane;
+    b->split_ratio = 50;
+    b->bounds.x = pane->bounds.x;
+    b->bounds.y = pane->bounds.y;
+
+    if (horizontal) {
+        /* Side by side: split the width. */
+        a->bounds.width = (s32)(w / 2);
+        a->bounds.height = (s32)h;
+        b->bounds.x = pane->bounds.x + (s32)(w / 2);
+        b->bounds.width = (s32)(w - w / 2);
+        b->bounds.height = (s32)h;
+    } else {
+        /* Stacked: split the height. */
+        a->bounds.width = (s32)w;
+        a->bounds.height = (s32)(h / 2);
+        b->bounds.y = pane->bounds.y + (s32)(h / 2);
+        b->bounds.width = (s32)w;
+        b->bounds.height = (s32)(h - h / 2);
+    }
+
+    pane->is_horizontal = horizontal;
+    pane->first_child = a;
+    pane->second_child = b;
+
+    win->is_split = true;
+    win->active_pane = b;
+
+    /* Move the active-tab marker to the new pane. */
+    if (pane->tab) {
+        pane->tab->is_active = false;
+    }
+
+    return 0;
+}
+
+/**
+ * free_pane_tree - Recursively release a pane subtree
+ */
+static void free_pane_tree(split_pane_t *pane)
+{
+    if (!pane) {
+        return;
+    }
+
+    free_pane_tree(pane->first_child);
+    free_pane_tree(pane->second_child);
+
+    /* Only leaves own their tab. */
+    if (!pane->first_child && !pane->second_child && pane->tab) {
+        kfree(pane->tab);
+    }
+
+    kfree(pane);
+}
+
+/**
+ * terminal_close_pane - Close a pane, collapsing its parent
+ *
+ * The sibling takes the parent's place, so closing one half of a split
+ * returns the survivor to full size rather than leaving a gap.
+ */
+int terminal_close_pane(terminal_window_t *win, split_pane_t *pane)
+{
+    split_pane_t *parent;
+    split_pane_t *sibling;
+
+    if (!win || !pane) {
+        return -EINVAL;
+    }
+
+    parent = pane->parent;
+
+    /* Closing the root tears down the whole window's panes. */
+    if (!parent) {
+        if (win->root_pane) {
+            free_pane_tree(win->root_pane);
+        }
+        win->root_pane = NULL;
+        win->active_pane = NULL;
+        win->is_split = false;
+        return 0;
+    }
+
+    sibling = (parent->first_child == pane) ? parent->second_child
+                                            : parent->first_child;
+    if (!sibling) {
+        return -EINVAL;
+    }
+
+    /* The survivor inherits the parent's geometry and position in the tree. */
+    sibling->parent = parent->parent;
+    sibling->bounds = parent->bounds;
+
+    if (parent->parent) {
+        if (parent->parent->first_child == parent) {
+            parent->parent->first_child = sibling;
+        } else {
+            parent->parent->second_child = sibling;
+        }
+    } else {
+        win->root_pane = sibling;
+    }
+
+    /* Only leaves own their tab. */
+    if (!pane->first_child && !pane->second_child && pane->tab) {
+        kfree(pane->tab);
+    }
+
+    /* Detach the sibling we are keeping before freeing the parent. */
+    parent->first_child = NULL;
+    parent->second_child = NULL;
+    kfree(parent);
+    kfree(pane);
+
+    win->is_split = (win->root_pane && win->root_pane->first_child);
+
+    if (win->active_pane == pane) {
+        win->active_pane = sibling;
+        if (sibling->tab) {
+            sibling->tab->is_active = true;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * terminal_switch_pane - Focus a pane
+ */
+int terminal_switch_pane(terminal_window_t *win, split_pane_t *pane)
+{
+    if (!win || !pane) {
+        return -EINVAL;
+    }
+
+    /* Only leaves can take focus: an internal node has no terminal. */
+    if (pane->first_child) {
+        return -EINVAL;
+    }
+
+    if (win->active_pane && win->active_pane->tab) {
+        win->active_pane->tab->is_active = false;
+    }
+
+    win->active_pane = pane;
+
+    if (pane->tab) {
+        pane->tab->is_active = true;
+        pane->tab->has_activity = false;
+    }
+
+    return 0;
+}
+
+/**
+ * terminal_resize_pane - Change a split's ratio
+ *
+ * @size: New ratio as a percentage, 0-100. The children's bounds are
+ *        recomputed so the ratio is actually reflected on screen.
+ */
+int terminal_resize_pane(terminal_window_t *win, split_pane_t *pane, u32 size)
+{
+    split_pane_t *a;
+    split_pane_t *b;
+    u32 total;
+    u32 first;
+
+    if (!win || !pane) {
+        return -EINVAL;
+    }
+
+    if (!pane->first_child || !pane->second_child) {
+        return -EINVAL;         /* Not a split. */
+    }
+
+    if (size < 1 || size > 99) {
+        return -ERANGE;
+    }
+
+    a = pane->first_child;
+    b = pane->second_child;
+
+    total = (u32)(pane->is_horizontal ? pane->bounds.width
+                                      : pane->bounds.height);
+    if (total == 0) {
+        return -EINVAL;
+    }
+
+    first = (total * size) / 100;
+    if (first == 0) {
+        first = 1;
+    }
+
+    if (pane->is_horizontal) {
+        a->bounds.x = pane->bounds.x;
+        a->bounds.y = pane->bounds.y;
+        a->bounds.width = (s32)first;
+        a->bounds.height = pane->bounds.height;
+
+        b->bounds.x = pane->bounds.x + (s32)first;
+        b->bounds.y = pane->bounds.y;
+        b->bounds.width = (s32)(total - first);
+        b->bounds.height = pane->bounds.height;
+    } else {
+        a->bounds.x = pane->bounds.x;
+        a->bounds.y = pane->bounds.y;
+        a->bounds.width = pane->bounds.width;
+        a->bounds.height = (s32)first;
+
+        b->bounds.x = pane->bounds.x;
+        b->bounds.y = pane->bounds.y + (s32)first;
+        b->bounds.width = pane->bounds.width;
+        b->bounds.height = (s32)(total - first);
+    }
+
+    pane->split_ratio = size;
+
+    return 0;
+}
+
+/**
+ * terminal_unsplit_panes - Collapse every split back to one pane
+ *
+ * Keeps the active pane's terminal and discards the rest.
+ */
+int terminal_unsplit_panes(terminal_window_t *win)
+{
+    split_pane_t *keep;
+    split_pane_t *old_root;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (!win->root_pane) {
+        return 0;
+    }
+
+    /* Detach the active pane from the tree before freeing everything else. */
+    keep = win->active_pane;
+    if (!keep || keep->first_child) {
+        /* Pick the leftmost leaf if the active pane is an internal node. */
+        keep = win->root_pane;
+        while (keep->first_child) {
+            keep = keep->first_child;
+        }
+    }
+
+    old_root = win->root_pane;
+
+    /* Preserve the tab, then free the tree without freeing that tab. */
+    terminal_tab_t *saved = keep->tab;
+    keep->tab = NULL;
+
+    free_pane_tree(old_root);
+
+    /* Reuse the active pane node as the new single root. */
+    memset(keep, 0, sizeof(split_pane_t));
+    keep->pane_id = win->next_pane_id++;
+    keep->tab = saved;
+    keep->split_ratio = 100;
+    keep->bounds.width = (s32)(win->wm_window ? win->wm_window->geometry.width : 640);
+    keep->bounds.height = (s32)(win->wm_window ? win->wm_window->geometry.height : 480);
+
+    if (saved) {
+        saved->is_active = true;
+    }
+
+    win->root_pane = keep;
+    win->active_pane = keep;
+    win->is_split = false;
+
+    return 0;
+}
+
+/*===========================================================================*/
+/*                              BOOKMARKS                                    */
+/*===========================================================================*/
+
+/**
+ * terminal_add_bookmark - Store a bookmark
+ */
+int terminal_add_bookmark(terminal_window_t *win, terminal_bookmark_t *bookmark)
+{
+    if (!win || !bookmark) {
+        return -EINVAL;
+    }
+
+    if (win->bookmark_count >= TERMINAL_MAX_BOOKMARKS) {
+        return -ENOSPC;
+    }
+
+    win->bookmarks[win->bookmark_count++] = *bookmark;
+
+    return 0;
+}
+
+/**
+ * terminal_remove_bookmark - Delete a bookmark by index
+ */
+int terminal_remove_bookmark(terminal_window_t *win, u32 index)
+{
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (index >= win->bookmark_count) {
+        return -EINVAL;
+    }
+
+    for (u32 i = index; i + 1 < win->bookmark_count; i++) {
+        win->bookmarks[i] = win->bookmarks[i + 1];
+    }
+    win->bookmark_count--;
+
+    return 0;
+}
+
+/**
+ * terminal_open_bookmark - Open a new tab at a bookmark's location
+ *
+ * The bookmark's shell is launched as the tab's shell and its path becomes the
+ * tab's working directory, so the tab starts where the user left off.
+ */
+int terminal_open_bookmark(terminal_window_t *win, u32 index)
+{
+    terminal_bookmark_t *bm;
+    terminal_tab_t *tab;
+
+    if (!win) {
+        return -EINVAL;
+    }
+
+    if (index >= win->bookmark_count) {
+        return -EINVAL;
+    }
+
+    bm = &win->bookmarks[index];
+
+    if (win->tab_count >= TERMINAL_MAX_TABS) {
+        return -ENOSPC;
+    }
+
+    tab = (terminal_tab_t *)kzalloc(sizeof(terminal_tab_t));
+    if (!tab) {
+        return -ENOMEM;
+    }
+
+    tab->tab_id = win->next_tab_id++;
+    tab->is_active = true;
+
+    strncpy(tab->shell_path,
+            bm->shell[0] ? bm->shell : "/bin/nexsh",
+            sizeof(tab->shell_path) - 1);
+    strncpy(tab->title,
+            bm->name[0] ? bm->name : "nexsh",
+            sizeof(tab->title) - 1);
+
+    /* Deactivate whatever tab was current. */
+    for (terminal_tab_t *t = win->tabs; t; t = t->next) {
+        t->is_active = false;
+    }
+
+    /* Append to the tab list. */
+    tab->next = NULL;
+    if (!win->tabs) {
+        win->tabs = tab;
+    } else {
+        terminal_tab_t *last = win->tabs;
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = tab;
+    }
+
+    win->active_tab = tab;
+    win->tab_count++;
+
+    /*
+     * Change into the bookmark's directory. A bookmark to a directory that
+     * has since gone is not fatal: the tab still opens, just at the default.
+     */
+    if (bm->path[0]) {
+        if (vfs_chdir(bm->path) != 0) {
+            pr_warn("[TERMINAL] Bookmark '%s': %s is gone\n", bm->name, bm->path);
+        }
+    }
+
+    return 0;
+}

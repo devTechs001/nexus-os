@@ -26,6 +26,24 @@
 #define TERMINAL_MAX_FONTS          16
 #define TERMINAL_MAX_PROFILES       32
 #define TERMINAL_MAX_SHORTCUTS      64
+/*
+ * Arrow-key keycodes.
+ *
+ * terminal_enhanced.c handled arrow keys against TERM_KEY_UP/TERM_KEY_DOWN,
+ * neither of which was defined anywhere in the tree, so the file could not
+ * compile and was never in the build. These are the PS/2 extended scancodes
+ * the keyboard driver reports for the arrow cluster (after the 0xE0 prefix).
+ */
+#define TERM_KEY_UP                 0x48
+#define TERM_KEY_DOWN               0x50
+#define TERM_KEY_LEFT               0x4B
+#define TERM_KEY_RIGHT              0x4D
+#define TERM_KEY_HOME               0x47
+#define TERM_KEY_END                0x4F
+#define TERM_KEY_PAGE_UP            0x49
+#define TERM_KEY_PAGE_DOWN          0x51
+#define TERM_KEY_DELETE             0x53
+
 #define TERMINAL_MAX_BOOKMARKS      64
 
 /*
@@ -373,8 +391,13 @@ int terminal_set_profile(terminal_window_t *win, terminal_profile_t *profile);
 int terminal_delete_profile(terminal_app_t *app, const char *name);
 
 /* Bookmarks */
-int terminal_add_bookmark(terminal_app_t *app, terminal_bookmark_t *bookmark);
-int terminal_remove_bookmark(terminal_app_t *app, u32 index);
+/*
+ * Bookmarks live on terminal_window_t (see the Bookmarks block above), not on
+ * the app, so these take the window. The declarations previously said
+ * terminal_app_t, which could not have been implemented against the struct.
+ */
+int terminal_add_bookmark(terminal_window_t *win, terminal_bookmark_t *bookmark);
+int terminal_remove_bookmark(terminal_window_t *win, u32 index);
 int terminal_open_bookmark(terminal_window_t *win, u32 index);
 
 /* Shortcuts */
