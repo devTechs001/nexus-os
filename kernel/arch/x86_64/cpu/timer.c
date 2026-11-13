@@ -4,6 +4,7 @@
  */
 
 #include "../../../include/kernel.h"
+#include "../../../../drivers/video/splash.h"
 
 /* PIT Ports */
 #define PIT_CHANNEL_0   0x40
@@ -48,6 +49,19 @@ void arch_init_timer(u64 freq)
 void timer_tick(void)
 {
     ticks++;
+
+    /*
+     * Drive the boot splash animation from the PIT.
+     *
+     * splash_animate() self-throttles (it only repaints every 16th call)
+     * and returns immediately once the splash is torn down, so this is a
+     * couple of instructions per tick after boot. Without it the splash
+     * would be a single static frame: there is no other periodic work in
+     * the tree that could animate it while init is running.
+     */
+    if (splash_is_active()) {
+        splash_animate();
+    }
 }
 
 /**

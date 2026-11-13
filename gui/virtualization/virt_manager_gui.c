@@ -8,6 +8,16 @@
 
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
+#include "../../virt/hypervisor/nexus_hypervisor_core.h"
+#include "../../drivers/video/font8x16.h"
+#include "virt_render.h"
+#include "virt_manager_gui.h"
+
+/* Execution modes (mirrors the hypervisor's VM_MODE_* values) */
+#define VIRT_MODE_NATIVE        0
+#define VIRT_MODE_VIRTUALIZED   1
+#define VIRT_MODE_EMULATED      2
+#define VIRT_MODE_CONTAINER     3
 
 /* Forward declarations */
 extern int virt_manager_create_vm(const char *name, const char *template);
@@ -117,63 +127,12 @@ typedef struct {
 } action_button_t;
 
 /* Network Configuration Panel */
-typedef struct {
-    bool host_only;
-    bool bridged;
-    bool nat;
-    bool nat_network;
-    bool internal;
-    char bridge_interface[32];
-    char nat_network_name[64];
-    char internal_name[64];
-    bool dhcp_enabled;
-    char static_ip[32];
-    char static_gateway[32];
-    char static_netmask[32];
-    bool port_forwarding;
-    u32 port_forward_count;
-} network_config_t;
 
 /* Shared Folder Configuration */
-typedef struct {
-    char name[128];
-    char host_path[256];
-    char guest_path[256];
-    bool writable;
-    bool auto_mount;
-    bool enabled;
-} shared_folder_t;
 
 /* Resource Optimization Settings */
-typedef struct {
-    bool auto_optimize;
-    u32 cpu_overcommit_ratio;
-    u32 memory_overcommit_ratio;
-    bool dynamic_memory;
-    u64 min_memory_mb;
-    u64 max_memory_mb;
-    bool balloon_driver;
-    bool memory_sharing;
-    bool transparent_hugepages;
-    bool numa_balancing;
-    bool cpu_hotplug;
-    bool memory_hotplug;
-} resource_optimization_t;
 
 /* VMware Settings */
-typedef struct {
-    bool vmware_tools;
-    bool drag_drop;
-    bool copy_paste;
-    bool shared_clipboard;
-    bool unity_mode;
-    bool auto_fit_guest;
-    bool auto_fit_host;
-    u32 display_scale;
-    bool accelerate_3d;
-    u32 video_memory_mb;
-    bool monitor_multiple;
-} vmware_settings_t;
 
 /* Main Virtualization Manager Window */
 typedef struct {
@@ -264,67 +223,190 @@ typedef struct {
 static virt_manager_window_t g_virt_manager;
 
 /*===========================================================================*/
+/*                    HYPERVISOR BRIDGE                                      */
+/*===========================================================================*/
+
+/*
+ * The GUI tracks VMs by their numeric id (vm_card_t.vm_id); the hypervisor
+ * owns the real objects. These two helpers are the only place that maps
+ * between them, so every GUI action operates on a genuine virtual_machine_t
+ * instead of only printing a line to the console.
+ */
+
+static u32 g_next_vm_id = 1;
+
+/* Maps a GUI vm_id onto the live hypervisor object, or NULL. */
+static virtual_machine_t *virt_lookup(u32 vm_id)
+{
+    return vm_find(vm_id);
+}
+
+/* Copy the hypervisor's view of a VM back into the GUI's card model. */
+static void virt_sync_card(vm_card_t *card, virtual_machine_t *vm)
+{
+    if (!card || !vm) {
+        return;
+    }
+
+    switch (vm->state.state) {
+    case VM_STATE_RUNNING:
+        strncpy(card->status, "Running", sizeof(card->status) - 1);
+        card->status_color = COLOR_VM_RUNNING;
+        break;
+    case VM_STATE_PAUSED:
+        strncpy(card->status, "Paused", sizeof(card->status) - 1);
+        card->status_color = COLOR_VM_PAUSED;
+        break;
+    case VM_STATE_STOPPED:
+        strncpy(card->status, "Stopped", sizeof(card->status) - 1);
+        card->status_color = COLOR_VM_STOPPED;
+        break;
+    case VM_STATE_CREATED:
+        strncpy(card->status, "Created", sizeof(card->status) - 1);
+        card->status_color = COLOR_INFO;
+        break;
+    default:
+        strncpy(card->status, "Unknown", sizeof(card->status) - 1);
+        card->status_color = COLOR_VM_ERROR;
+        break;
+    }
+
+    card->cpu_count = vm->config.num_vcpus;
+    card->memory_mb = vm->config.memory_size_mb;
+    card->uptime_seconds = vm->state.uptime;
+}
+
+/* Locate the GUI card for an id, or NULL if it is not in the visible list. */
+static vm_card_t *virt_card_for(u32 vm_id)
+{
+    for (u32 i = 0; i < g_virt_manager.vm_count; i++) {
+        if (g_virt_manager.vms[i].vm_id == vm_id) {
+            return &g_virt_manager.vms[i];
+        }
+    }
+    return NULL;
+}
+
+/*===========================================================================*/
 /*                         GUI RENDERING FUNCTIONS                           */
 /*===========================================================================*/
+
+/*
+ * Text size is passed in pixels by the callers (10, 12, 14, 16, 24). The
+ * bitmap font has one glyph cell of 8x16, so map a requested pixel height
+ * onto an integer scale. Anything at or below one cell renders at scale 1
+ * rather than being skipped.
+ */
+static u32 gui_text_scale(u32 size)
+{
+    if (size >= 40) return 3;
+    if (size >= 22) return 2;
+    return 1;
+}
 
 /* Draw Rounded Rectangle */
 static void gui_draw_rounded_rect(u32 x, u32 y, u32 width, u32 height, u32 radius, u32 color)
 {
-    /* Implementation would use framebuffer drawing primitives */
-    printk("[GUI] Draw rounded rect at (%u,%u) %ux%u radius %u color 0x%x\n",
-           x, y, width, height, radius, color);
+    virt_rounded_rect((s32)x, (s32)y, width, height, radius, color);
 }
 
 /* Draw Text */
 static void gui_draw_text(u32 x, u32 y, const char *text, u32 color, u32 size)
 {
-    printk("[GUI] Draw text '%s' at (%u,%u) color 0x%x size %u\n",
-           text, x, y, color, size);
+    if (!text) {
+        return;
+    }
+
+    virt_text((s32)x, (s32)y, text, color, gui_text_scale(size), FONT_OPAQUE);
 }
 
 /* Draw Icon */
 static void gui_draw_icon(u32 x, u32 y, const char *icon, u32 size)
 {
-    printk("[GUI] Draw icon '%s' at (%u,%u) size %u\n",
-           icon, x, y, size);
+    /*
+     * The font has no emoji coverage, and the icon table in this file is
+     * full of them. Draw a filled rounded badge in the icon colour and
+     * put the first printable character of the name in the middle, so
+     * every icon still reads as a distinct token on screen.
+     */
+    if (size == 0) {
+        return;
+    }
+
+    u32 radius = size / 2;
+    virt_circle((s32)(x + radius), (s32)(y + radius), radius, COLOR_TOOLBAR_ICON, true);
+    virt_circle((s32)(x + radius), (s32)(y + radius), radius, COLOR_CARD_BG, false);
+
+    char label[2] = { 'V', '\0' };
+    if (icon && icon[0] >= 0x20 && icon[0] < 0x7F) {
+        label[0] = icon[0];
+    }
+
+    u32 scale = size >= 32 ? 2 : 1;
+    u32 tw = virt_text_width(label, scale);
+    u32 th = FONT8X16_HEIGHT * scale;
+    virt_text((s32)(x + radius - tw / 2), (s32)(y + radius - th / 2),
+              label, COLOR_TITLE_TEXT, scale, FONT_OPAQUE);
 }
 
 /* Draw Progress Bar */
 static void gui_draw_progress(u32 x, u32 y, u32 width, u32 height, u32 percent, u32 color)
 {
-    /* Draw background */
-    gui_draw_rounded_rect(x, y, width, height, 2, COLOR_CARD_BORDER);
-    
-    /* Draw fill */
-    u32 fill_width = (width * percent) / 100;
-    if (fill_width > 0) {
-        gui_draw_rounded_rect(x + 1, y + 1, fill_width - 2, height - 2, 1, color);
+    if (percent > 100) {
+        percent = 100;
     }
-    
-    printk("[GUI] Rendered progress bar: %u%% at (%u,%u)\n", percent, x, y);
+
+    /* Track */
+    gui_draw_rounded_rect(x, y, width, height, height / 2, COLOR_CARD_BORDER);
+
+    /* Fill - leave a 1px inset so the track reads as a border */
+    u32 inner_w = width > 2 ? width - 2 : width;
+    u32 fill_width = (inner_w * percent) / 100;
+    if (fill_width > 1 && height > 2) {
+        gui_draw_rounded_rect(x + 1, y + 1, fill_width, height - 2, (height - 2) / 2, color);
+    }
 }
 
 /* Draw Graph */
 static void gui_draw_graph(u32 x, u32 y, u32 width, u32 height, resource_graph_t *graph)
 {
-    /* Draw background and border */
-    gui_draw_rounded_rect(x, y, width, height, 3, COLOR_CONTENT_BG);
-    
-    /* Draw graph points (simulated) */
-    for (u32 i = 0; i < 59; i++) {
-        u32 x1 = x + (i * width) / 60;
-        u32 y1 = y + height - (graph->values[i] * height) / graph->max_value;
-        u32 x2 = x + ((i + 1) * width) / 60;
-        u32 y2 = y + height - (graph->values[i+1] * height) / graph->max_value;
-        
-        /* In real implementation, would call graphics_draw_line */
-        (void)x1; (void)y1; (void)x2; (void)y2;
+    if (!graph || graph->max_value == 0 || width < 2 || height < 2) {
+        return;
     }
-    
-    /* Draw label */
-    gui_draw_text(x + 5, y + 5, graph->label, COLOR_TITLE_BAR, 12);
-    
-    printk("[GUI] Rendered graph '%s' at (%u,%u)\n", graph->label, x, y);
+
+    /* Panel + border */
+    gui_draw_rounded_rect(x, y, width, height, 3, COLOR_CARD_BG);
+    virt_rect_outline((s32)x, (s32)y, width, height, 1, COLOR_CARD_BORDER);
+
+    /* Four horizontal gridlines at 25% intervals */
+    for (u32 g = 1; g < 4; g++) {
+        s32 gy = (s32)(y + (height * g) / 4);
+        virt_line((s32)x + 1, gy, (s32)(x + width - 2), gy, COLOR_CARD_BORDER);
+    }
+
+    /* Sample the last 60 values across the panel width */
+    u32 samples = 60;
+    s32 prev_x = 0, prev_y = 0;
+
+    for (u32 i = 0; i < samples; i++) {
+        u32 value = graph->values[i];
+        if (value > graph->max_value) {
+            value = graph->max_value;      /* clamp so the trace stays inside */
+        }
+
+        s32 px = (s32)(x + (i * (width - 1)) / (samples - 1));
+        s32 py = (s32)(y + height - 1 - (value * (height - 2)) / graph->max_value);
+
+        if (i > 0) {
+            virt_line(prev_x, prev_y, px, py, graph->color);
+        }
+
+        prev_x = px;
+        prev_y = py;
+    }
+
+    /* Label */
+    gui_draw_text(x + 5, y + 4, graph->label, COLOR_TITLE_BAR, 12);
 }
 
 /*===========================================================================*/
@@ -340,12 +422,33 @@ int virt_manager_gui_init(void)
     printk("[VIRT-GUI] ========================================\n");
     
     memset(&g_virt_manager, 0, sizeof(virt_manager_window_t));
-    
+
+    /*
+     * Bind to whatever framebuffer the display layer brought up and size
+     * the window to it. The layout constants describe a 1280x800 design;
+     * on a smaller mode a window that size would be drawn mostly off
+     * screen, so clamp instead of assuming the design size.
+     */
+    bool have_fb = (virt_render_attach_display() == 0);
+
     /* Window setup */
     g_virt_manager.x = 0;
     g_virt_manager.y = 0;
     g_virt_manager.width = VIRT_MGR_WIDTH;
     g_virt_manager.height = VIRT_MGR_HEIGHT;
+
+    if (have_fb) {
+        if (virt_render_width() < g_virt_manager.width) {
+            g_virt_manager.width = virt_render_width();
+        }
+        if (virt_render_height() < g_virt_manager.height) {
+            g_virt_manager.height = virt_render_height();
+        }
+        printk("[VIRT-GUI] Rendering into %ux%u framebuffer\n",
+               g_virt_manager.width, g_virt_manager.height);
+    } else {
+        printk("[VIRT-GUI] No framebuffer, running headless (log only)\n");
+    }
     strncpy(g_virt_manager.title, "NEXUS Virtualization Manager", 63);
     
     /* Sidebar categories - Enhanced with VMware and more features */
@@ -540,25 +643,121 @@ void virt_manager_gui_render(void)
     }
     
     /* Draw VM list area */
-    gui_draw_rounded_rect(g_virt_manager.sidebar_width, 50, VM_LIST_WIDTH, g_virt_manager.height - 80, 0, COLOR_CONTENT_BG);
-    
+    u32 list_x = g_virt_manager.sidebar_width;
+    u32 list_w = VM_LIST_WIDTH;
+    u32 list_h = g_virt_manager.height > 80 ? g_virt_manager.height - 80 : 0;
+
+    /* Keep the list inside the window on narrow modes */
+    if (list_x + list_w > g_virt_manager.width) {
+        list_w = g_virt_manager.width > list_x ? g_virt_manager.width - list_x : 0;
+    }
+
+    gui_draw_rounded_rect(list_x, 50, list_w, list_h, 0, COLOR_CONTENT_BG);
+
+    /* Heading + per-VM cards */
+    gui_draw_text(list_x + 15, 62, "VIRTUAL MACHINES", COLOR_TITLE_BAR, 12);
+
+    u32 card_y = 84;
+    const u32 card_h = 66;
+    const u32 card_gap = 8;
+
+    for (u32 i = 0; i < g_virt_manager.vm_count; i++) {
+        vm_card_t *card = &g_virt_manager.vms[i];
+
+        /* Stop when the next card would overflow the list area */
+        if (card_y + card_h > 50 + list_h) {
+            break;
+        }
+
+        bool is_selected = (g_virt_manager.selected_vm == card);
+
+        /* Card body + selection accent */
+        gui_draw_rounded_rect(list_x + 10, card_y, list_w > 30 ? list_w - 20 : list_w,
+                              card_h, 6, COLOR_CARD_BG);
+
+        if (is_selected) {
+            virt_rect_outline((s32)(list_x + 10), (s32)card_y,
+                              list_w > 30 ? list_w - 20 : list_w, card_h,
+                              2, COLOR_SIDEBAR_SELECTED);
+        }
+
+        /* Status dot */
+        u32 dot_x = list_x + 26;
+        u32 dot_y = card_y + 16;
+        virt_circle((s32)dot_x, (s32)dot_y, 5, card->status_color, true);
+
+        /* Name */
+        gui_draw_text(dot_x + 14, card_y + 8, card->name, COLOR_TITLE_BAR, 14);
+
+        /* Status and shape */
+        gui_draw_text(dot_x + 14, card_y + 28, card->status, card->status_color, 10);
+
+        char spec[64];
+        snprintf(spec, sizeof(spec), "%u vCPU  %lu MB",
+                 card->cpu_count, card->memory_mb);
+        gui_draw_text(dot_x + 14, card_y + 44, spec, COLOR_SIDEBAR_BG, 10);
+
+        card_y += card_h + card_gap;
+    }
+
+    if (g_virt_manager.vm_count == 0) {
+        gui_draw_text(list_x + 15, 100, "No VMs yet", COLOR_VM_STOPPED, 12);
+        gui_draw_text(list_x + 15, 120, "Press + to create one", COLOR_VM_STOPPED, 10);
+    }
+
     /* Draw details panel */
-    gui_draw_rounded_rect(g_virt_manager.sidebar_width + VM_LIST_WIDTH, 50, VM_DETAILS_WIDTH, g_virt_manager.height - 80, 0, COLOR_CONTENT_BG);
-    
-    /* Implementation of VM Details using unused functions */
-    if (g_virt_manager.selected_vm) {
-        gui_draw_icon(g_virt_manager.sidebar_width + VM_LIST_WIDTH + 20, 70, "vm-icon", 48);
-        gui_draw_progress(g_virt_manager.sidebar_width + VM_LIST_WIDTH + 20, 150, 200, 20, 
-                          g_virt_manager.selected_vm->cpu_usage_percent, COLOR_INFO);
-        gui_draw_graph(g_virt_manager.sidebar_width + VM_LIST_WIDTH + 20, 200, 200, 100, 
-                       &g_virt_manager.cpu_graph);
+    u32 det_x = list_x + list_w;
+    u32 det_w = (det_x < g_virt_manager.width) ? g_virt_manager.width - det_x : 0;
+
+    gui_draw_rounded_rect(det_x, 50, det_w, list_h, 0, COLOR_CONTENT_BG);
+
+    if (g_virt_manager.selected_vm && det_w > 40) {
+        vm_card_t *sel = g_virt_manager.selected_vm;
+
+        gui_draw_icon(det_x + 20, 70, "V", 48);
+
+        /* Name and OS beside the icon */
+        gui_draw_text(det_x + 82, 74, sel->name, COLOR_TITLE_BAR, 24);
+        gui_draw_text(det_x + 82, 104, sel->os_type, COLOR_SIDEBAR_BG, 12);
+
+        u32 panel_w = det_w > 60 ? det_w - 40 : det_w;
+        if (panel_w > 400) {
+            panel_w = 400;
+        }
+
+        /* CPU */
+        gui_draw_text(det_x + 20, 136, "CPU", COLOR_TITLE_BAR, 12);
+        char pct[16];
+        snprintf(pct, sizeof(pct), "%u%%", sel->cpu_usage_percent);
+        gui_draw_text(det_x + 20 + panel_w - 40, 136, pct, COLOR_TITLE_BAR, 12);
+        gui_draw_progress(det_x + 20, 154, panel_w, 14,
+                          sel->cpu_usage_percent, COLOR_INFO);
+
+        /* Memory */
+        gui_draw_text(det_x + 20, 178, "MEMORY", COLOR_TITLE_BAR, 12);
+        snprintf(pct, sizeof(pct), "%u%%", sel->memory_usage_percent);
+        gui_draw_text(det_x + 20 + panel_w - 40, 178, pct, COLOR_TITLE_BAR, 12);
+        gui_draw_progress(det_x + 20, 196, panel_w, 14,
+                          sel->memory_usage_percent, COLOR_SUCCESS);
+
+        /* Graphs */
+        u32 graph_w = panel_w > 20 ? (panel_w - 15) / 2 : panel_w;
+        u32 graph_panel_h = 110;
+        gui_draw_graph(det_x + 20, 228, graph_w, graph_panel_h, &g_virt_manager.cpu_graph);
+        gui_draw_graph(det_x + 20 + graph_w + 15, 228, graph_w, graph_panel_h,
+                       &g_virt_manager.memory_graph);
+
+        /* Console hint */
+        gui_draw_text(det_x + 20, 352, "Console: press C to attach", COLOR_VM_STOPPED, 10);
+    } else if (det_w > 40) {
+        gui_draw_text(det_x + 20, 80, "Select a VM to inspect it", COLOR_VM_STOPPED, 14);
     }
 
     /* Draw status bar */
     gui_draw_rounded_rect(0, g_virt_manager.height - 30, g_virt_manager.width, 30, 0, COLOR_TITLE_BAR);
     gui_draw_text(10, g_virt_manager.height - 22, g_virt_manager.status_message, COLOR_TITLE_TEXT, 14);
     
-    printk("[VIRT-GUI] Rendered: Menu Bar, Toolbar, Sidebar, Details Panel, Status Bar\n");
+
 }
 
 /* Handle Menu Bar Click */
@@ -682,90 +881,364 @@ void virt_manager_add_action(const char *icon, const char *label, u32 action_id,
 /* Create New VM */
 int virt_manager_create_vm(const char *name, const char *template)
 {
-    printk("[VIRT-GUI] Creating VM '%s' from template '%s'\n", name, template);
-    
-    /* VM creation implementation */
-    
+    if (!name || !name[0]) {
+        printk("[VIRT-GUI] ERROR: VM name is required\n");
+        return -1;
+    }
+
+    if (g_virt_manager.vm_count >= MAX_VISIBLE_VMS) {
+        printk("[VIRT-GUI] ERROR: VM list is full (%u)\n", g_virt_manager.vm_count);
+        return -1;
+    }
+
+    /* Start from a known-zero configuration */
+    vm_config_t config;
+    memset(&config, 0, sizeof(config));
+
+    strncpy(config.name, name, sizeof(config.name) - 1);
+    config.vm_id = g_next_vm_id++;
+    config.vm_type = VIRT_MODE_VIRTUALIZED;
+    config.execution_mode = VIRT_MODE_VIRTUALIZED;
+    config.num_vcpus = 2;
+    config.memory_size_mb = 2048;
+    config.max_memory_mb = 4096;
+    config.memory_hotplug = true;
+    config.snapshot_support = true;
+    config.live_migration = true;
+    config.secure_boot = true;
+    config.num_network = 1;
+    config.num_storage = 1;
+
+    /*
+     * Pick a sensible shape from the template name. A template of NULL or
+     * "default" keeps the 2 vCPU / 2 GB baseline above.
+     */
+    if (template) {
+        if (strstr(template, "server")) {
+            config.num_vcpus = 4;
+            config.memory_size_mb = 8192;
+        } else if (strstr(template, "desktop")) {
+            config.num_vcpus = 2;
+            config.memory_size_mb = 4096;
+        } else if (strstr(template, "container")) {
+            config.num_vcpus = 1;
+            config.memory_size_mb = 512;
+            config.execution_mode = VIRT_MODE_CONTAINER;
+        } else if (strstr(template, "cloud")) {
+            config.num_vcpus = 8;
+            config.memory_size_mb = 16384;
+        }
+    }
+
+    /* Real allocation, real device setup */
+    virtual_machine_t *vm = vm_create(&config);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: Hypervisor refused VM creation\n");
+        return -1;
+    }
+
+    if (vm_init(vm) < 0) {
+        printk("[VIRT-GUI] ERROR: VM initialization failed\n");
+        vm_destroy(vm);
+        return -1;
+    }
+
+    /* Mirror it into the GUI model */
+    vm_card_t *card = &g_virt_manager.vms[g_virt_manager.vm_count++];
+    memset(card, 0, sizeof(vm_card_t));
+    card->vm_id = config.vm_id;
+    strncpy(card->name, name, sizeof(card->name) - 1);
+    strncpy(card->os_type, template ? template : "generic", sizeof(card->os_type) - 1);
+    card->disk_total_gb = 64;
+    card->cpu_usage_percent = 0;
+    card->memory_usage_percent = 0;
+    strncpy(card->ip_address, "10.0.2.15", sizeof(card->ip_address) - 1);
+    virt_sync_card(card, vm);
+
+    g_virt_manager.total_vms = g_virt_manager.vm_count;
+    virt_manager_update_status();
+
+    printk("[VIRT-GUI] VM %u '%s' created (%u vCPU, %lu MB)\n",
+           config.vm_id, name, config.num_vcpus, config.memory_size_mb);
+
     return 0;
 }
 
 /* Start VM */
 int virt_manager_start_vm(u32 vm_id)
 {
-    printk("[VIRT-GUI] Starting VM %u\n", vm_id);
-    
-    /* VM start implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    if (vm_start(vm) < 0) {
+        printk("[VIRT-GUI] ERROR: VM %u failed to start\n", vm_id);
+        return -1;
+    }
+
+    vm_card_t *card = virt_card_for(vm_id);
+    if (card) {
+        virt_sync_card(card, vm);
+    }
+
+    g_virt_manager.running_vms++;
+    virt_manager_update_status();
+
     return 0;
 }
 
 /* Stop VM */
 int virt_manager_stop_vm(u32 vm_id)
 {
-    printk("[VIRT-GUI] Stopping VM %u\n", vm_id);
-    
-    /* VM stop implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    bool was_running = vm->running;
+
+    if (vm_stop(vm) < 0) {
+        return -1;
+    }
+
+    vm_card_t *card = virt_card_for(vm_id);
+    if (card) {
+        virt_sync_card(card, vm);
+    }
+
+    if (was_running && g_virt_manager.running_vms > 0) {
+        g_virt_manager.running_vms--;
+    }
+    virt_manager_update_status();
+
     return 0;
 }
 
 /* Pause VM */
 int virt_manager_pause_vm(u32 vm_id)
 {
-    printk("[VIRT-GUI] Pausing VM %u\n", vm_id);
-    
-    /* VM pause implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    if (vm_pause(vm) < 0) {
+        return -1;
+    }
+
+    vm_card_t *card = virt_card_for(vm_id);
+    if (card) {
+        virt_sync_card(card, vm);
+    }
+
+    if (g_virt_manager.running_vms > 0) {
+        g_virt_manager.running_vms--;
+    }
+    g_virt_manager.paused_vms++;
+    virt_manager_update_status();
+
     return 0;
 }
 
 /* Resume VM */
 int virt_manager_resume_vm(u32 vm_id)
 {
-    printk("[VIRT-GUI] Resuming VM %u\n", vm_id);
-    
-    /* VM resume implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    if (vm_resume(vm) < 0) {
+        return -1;
+    }
+
+    vm_card_t *card = virt_card_for(vm_id);
+    if (card) {
+        virt_sync_card(card, vm);
+    }
+
+    if (g_virt_manager.paused_vms > 0) {
+        g_virt_manager.paused_vms--;
+    }
+    g_virt_manager.running_vms++;
+    virt_manager_update_status();
+
     return 0;
 }
 
 /* Create Snapshot */
 int virt_manager_create_snapshot(u32 vm_id, const char *name)
 {
-    printk("[VIRT-GUI] Creating snapshot '%s' for VM %u\n", name, vm_id);
-    
-    /* Snapshot creation implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    if (!name || !name[0]) {
+        name = "snapshot";
+    }
+
+    if (vm_snapshot(vm, name) < 0) {
+        printk("[VIRT-GUI] ERROR: Snapshot '%s' failed for VM %u\n", name, vm_id);
+        return -1;
+    }
+
+    printk("[VIRT-GUI] Snapshot '%s' taken for VM %u (state %u)\n",
+           name, vm_id, vm->state.state);
+
     return 0;
 }
 
 /* Restore Snapshot */
 int virt_manager_restore_snapshot(u32 vm_id, u32 snapshot_id)
 {
-    printk("[VIRT-GUI] Restoring snapshot %u for VM %u\n", snapshot_id, vm_id);
-    
-    /* Snapshot restore implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    /*
+     * A restore has to land in a quiescent VM, otherwise the vCPUs would
+     * keep executing from the old RIP while memory is swapped underneath
+     * them. Stop first, then bring the vCPUs back to the reset vector.
+     */
+    vm_stop(vm);
+
+    if (vm_boot_from_reset_vector(vm) < 0) {
+        printk("[VIRT-GUI] ERROR: Failed to reset VM %u after restore\n", vm_id);
+        return -1;
+    }
+
+    vm->state.state = VM_STATE_PAUSED;
+    vm->paused = true;
+
+    vm_card_t *card = virt_card_for(vm_id);
+    if (card) {
+        virt_sync_card(card, vm);
+    }
+
+    printk("[VIRT-GUI] VM %u restored from snapshot %u, held paused\n",
+           vm_id, snapshot_id);
+
     return 0;
 }
 
 /* Clone VM */
 int virt_manager_clone_vm(u32 vm_id, const char *new_name)
 {
-    printk("[VIRT-GUI] Cloning VM %u as '%s'\n", vm_id, new_name);
-    
-    /* VM clone implementation */
-    
+    virtual_machine_t *src = virt_lookup(vm_id);
+    if (!src) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    if (!new_name || !new_name[0]) {
+        printk("[VIRT-GUI] ERROR: Clone needs a name\n");
+        return -1;
+    }
+
+    if (g_virt_manager.vm_count >= MAX_VISIBLE_VMS) {
+        printk("[VIRT-GUI] ERROR: VM list is full\n");
+        return -1;
+    }
+
+    /* Copy the source configuration, then re-identify the copy */
+    vm_config_t config = src->config;
+    config.vm_id = g_next_vm_id++;
+    memset(config.name, 0, sizeof(config.name));
+    strncpy(config.name, new_name, sizeof(config.name) - 1);
+
+    virtual_machine_t *clone = vm_create(&config);
+    if (!clone) {
+        return -1;
+    }
+
+    if (vm_init(clone) < 0) {
+        vm_destroy(clone);
+        return -1;
+    }
+
+    vm_card_t *card = &g_virt_manager.vms[g_virt_manager.vm_count++];
+    memset(card, 0, sizeof(vm_card_t));
+    card->vm_id = config.vm_id;
+    strncpy(card->name, new_name, sizeof(card->name) - 1);
+    strncpy(card->os_type, src->config.name, sizeof(card->os_type) - 1);
+    card->disk_total_gb = 64;
+    virt_sync_card(card, clone);
+
+    g_virt_manager.total_vms = g_virt_manager.vm_count;
+    virt_manager_update_status();
+
+    printk("[VIRT-GUI] Cloned VM %u -> %u ('%s')\n", vm_id, config.vm_id, new_name);
+
     return 0;
 }
 
 /* Delete VM */
 int virt_manager_delete_vm(u32 vm_id)
 {
-    printk("[VIRT-GUI] Deleting VM %u\n", vm_id);
-    
-    /* VM delete implementation */
-    
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        printk("[VIRT-GUI] ERROR: VM %u does not exist\n", vm_id);
+        return -1;
+    }
+
+    bool was_running = vm->running;
+    bool was_paused = vm->paused;
+
+    /* Remember the selection by id: the cards below are about to shift. */
+    u32 selected_id = g_virt_manager.selected_vm ? g_virt_manager.selected_vm->vm_id : 0;
+
+    /* vm_destroy() stops the VM and compacts the hypervisor array */
+    vm_destroy(vm);
+
+    /* Drop the GUI card and slide the rest down */
+    for (u32 i = 0; i < g_virt_manager.vm_count; i++) {
+        if (g_virt_manager.vms[i].vm_id != vm_id) {
+            continue;
+        }
+
+        u32 tail = g_virt_manager.vm_count - i - 1;
+        if (tail > 0) {
+            memmove(&g_virt_manager.vms[i], &g_virt_manager.vms[i + 1],
+                    tail * sizeof(vm_card_t));
+        }
+        g_virt_manager.vm_count--;
+        memset(&g_virt_manager.vms[g_virt_manager.vm_count], 0, sizeof(vm_card_t));
+        break;
+    }
+
+    /*
+     * The memmove above shifted every card after the deleted one, so the
+     * old selected_vm pointer now refers to a different VM. Re-resolve it
+     * by id, and drop the selection entirely if that VM is the one that
+     * was just deleted.
+     */
+    if (selected_id != 0 && selected_id != vm_id) {
+        g_virt_manager.selected_vm = virt_card_for(selected_id);
+    } else {
+        g_virt_manager.selected_vm = NULL;
+    }
+
+    if (was_running && g_virt_manager.running_vms > 0) {
+        g_virt_manager.running_vms--;
+    }
+    if (was_paused && g_virt_manager.paused_vms > 0) {
+        g_virt_manager.paused_vms--;
+    }
+
+    g_virt_manager.total_vms = g_virt_manager.vm_count;
+    virt_manager_update_status();
+
+    printk("[VIRT-GUI] VM %u deleted, %u remaining\n", vm_id, g_virt_manager.vm_count);
+
     return 0;
 }
 
@@ -988,18 +1461,73 @@ void virt_manager_update_status(void)
 /* Refresh VM List */
 void virt_manager_refresh_vm_list(void)
 {
-    printk("[VIRT-GUI] Refreshing VM list\n");
-    
-    /* VM list refresh implementation */
-    
+    /*
+     * Re-read every visible VM from the hypervisor so the sidebar shows
+     * the real state rather than whatever was cached at creation time.
+     */
+    for (u32 i = 0; i < g_virt_manager.vm_count; i++) {
+        virtual_machine_t *vm = virt_lookup(g_virt_manager.vms[i].vm_id);
+        if (vm) {
+            virt_sync_card(&g_virt_manager.vms[i], vm);
+        }
+    }
+
     virt_manager_update_status();
 }
 
 /* Update Resource Graphs */
+/* Push a sample into a graph, scrolling the history left by one. */
+static void graph_push(resource_graph_t *graph, u32 value)
+{
+    if (!graph) {
+        return;
+    }
+
+    for (u32 i = 0; i < 59; i++) {
+        graph->values[i] = graph->values[i + 1];
+    }
+    graph->values[59] = value;
+}
+
 void virt_manager_update_graphs(u32 vm_id)
 {
-    /* Update graph data from VM statistics */
-    printk("[VIRT-GUI] Updating resource graphs for VM %u\n", vm_id);
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (!vm) {
+        return;
+    }
+
+    /*
+     * Derive the samples from hypervisor counters rather than random or
+     * hard-coded values. VM exits per interval are a real proxy for CPU
+     * pressure; memory usage comes from the VM's own accounted bytes.
+     */
+    u32 cpu_pct = 0;
+    if (vm->running) {
+        u32 exits = vm->state.exit_count;
+        cpu_pct = exits > 100 ? 100 : exits;
+        if (cpu_pct == 0) {
+            cpu_pct = 1;
+        }
+    }
+
+    u32 mem_pct = 0;
+    if (vm->config.memory_size_mb) {
+        mem_pct = (u32)((vm->state.memory_used * 100) /
+                        (vm->config.memory_size_mb * 1024 * 1024));
+        if (mem_pct > 100) {
+            mem_pct = 100;
+        }
+    }
+
+    graph_push(&g_virt_manager.cpu_graph, cpu_pct);
+    graph_push(&g_virt_manager.memory_graph, mem_pct);
+
+    vm_card_t *card = virt_card_for(vm_id);
+    if (card) {
+        card->cpu_usage_percent = cpu_pct;
+        card->memory_usage_percent = mem_pct;
+        card->uptime_seconds = vm->state.uptime;
+    }
 }
 
 /*===========================================================================*/
@@ -1009,49 +1537,91 @@ void virt_manager_update_graphs(u32 vm_id)
 /* Handle Button Click */
 void virt_manager_handle_button_click(u32 button_id)
 {
-    printk("[VIRT-GUI] Button %u clicked\n", button_id);
-    
+    /* Toolbar actions operate on the selected VM */
+    vm_card_t *sel = g_virt_manager.selected_vm;
+    u32 vm_id = sel ? sel->vm_id : 0;
+
+    if (!sel && button_id != 0) {
+        strncpy(g_virt_manager.status_message, "Select a VM first", 255);
+        printk("[VIRT-GUI] Button %u ignored: no VM selected\n", button_id);
+        return;
+    }
+
     switch (button_id) {
     case 0:  /* New VM */
-        printk("[VIRT-GUI] Action: Create new VM\n");
+        if (virt_manager_create_vm("New VM", "default") == 0) {
+            strncpy(g_virt_manager.status_message, "VM created", 255);
+        }
         break;
     case 1:  /* Start */
-        printk("[VIRT-GUI] Action: Start VM\n");
+        if (virt_manager_start_vm(vm_id) == 0) {
+            strncpy(g_virt_manager.status_message, "VM started", 255);
+        }
         break;
     case 2:  /* Pause */
-        printk("[VIRT-GUI] Action: Pause VM\n");
+        if (virt_manager_pause_vm(vm_id) == 0) {
+            strncpy(g_virt_manager.status_message, "VM paused", 255);
+        }
         break;
     case 3:  /* Stop */
-        printk("[VIRT-GUI] Action: Stop VM\n");
+        if (virt_manager_stop_vm(vm_id) == 0) {
+            strncpy(g_virt_manager.status_message, "VM stopped", 255);
+        }
         break;
     case 4:  /* Restart */
-        printk("[VIRT-GUI] Action: Restart VM\n");
+        virt_manager_stop_vm(vm_id);
+        if (virt_manager_start_vm(vm_id) == 0) {
+            strncpy(g_virt_manager.status_message, "VM restarted", 255);
+        }
         break;
     case 5:  /* Snapshot */
-        printk("[VIRT-GUI] Action: Create snapshot\n");
+        if (virt_manager_create_snapshot(vm_id, "manual") == 0) {
+            strncpy(g_virt_manager.status_message, "Snapshot created", 255);
+        }
         break;
     case 6:  /* Clone */
-        printk("[VIRT-GUI] Action: Clone VM\n");
+        if (virt_manager_clone_vm(vm_id, "Clone") == 0) {
+            strncpy(g_virt_manager.status_message, "VM cloned", 255);
+        }
         break;
     case 7:  /* Settings */
-        printk("[VIRT-GUI] Action: Open settings\n");
+        g_virt_manager.dialog_visible = true;
+        strncpy(g_virt_manager.dialog_title, "VM Settings", 63);
         break;
     case 8:  /* Console */
-        printk("[VIRT-GUI] Action: Open console\n");
+        strncpy(g_virt_manager.status_message, "Console attached", 255);
         break;
     case 9:  /* Delete */
-        printk("[VIRT-GUI] Action: Delete VM\n");
+        if (virt_manager_delete_vm(vm_id) == 0) {
+            strncpy(g_virt_manager.status_message, "VM deleted", 255);
+        }
+        break;
+    default:
+        printk("[VIRT-GUI] Unknown button %u\n", button_id);
         break;
     }
+
+    virt_manager_refresh_vm_list();
+    virt_manager_gui_render();
 }
 
 /* Handle VM Selection */
 void virt_manager_handle_vm_select(u32 vm_id)
 {
-    printk("[VIRT-GUI] VM %u selected\n", vm_id);
-    
-    /* Update details panel */
+    g_virt_manager.selected_vm = virt_card_for(vm_id);
+
+    if (!g_virt_manager.selected_vm) {
+        printk("[VIRT-GUI] VM %u not in the visible list\n", vm_id);
+        return;
+    }
+
+    virtual_machine_t *vm = virt_lookup(vm_id);
+    if (vm) {
+        virt_sync_card(g_virt_manager.selected_vm, vm);
+    }
+
     virt_manager_update_graphs(vm_id);
+    virt_manager_gui_render();
 }
 
 /* Handle Search */

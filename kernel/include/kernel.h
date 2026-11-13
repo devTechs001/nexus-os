@@ -341,6 +341,7 @@ typedef struct {
     bool nosmp;
     bool noapic;
     bool nolapic;
+    bool vm_manager;    /* launch the Virtualization Manager after boot */
 } boot_params_t;
 
 void parse_boot_params(const char *cmdline);

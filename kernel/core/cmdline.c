@@ -103,6 +103,15 @@ void parse_boot_params(const char *cmdline)
             g_boot_params.graphics_mode = true;
             printk("[BOOT] Splash screen enabled\n");
         }
+        else if (strcmp(token, "vmmanager") == 0) {
+            /*
+             * Opt in to starting the Virtualization Manager once the
+             * desktop is up. Off by default so the standard boot path is
+             * unchanged.
+             */
+            g_boot_params.vm_manager = true;
+            printk("[BOOT] Virtualization Manager will start after boot\n");
+        }
         else if (strncmp(token, "loglevel=", 9) == 0) {
             printk("[BOOT] Log level set to %s\n", token + 9);
         }

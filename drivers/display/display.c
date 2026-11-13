@@ -988,7 +988,7 @@ display_driver_t *display_get_driver(void)
 /* External driver initializers */
 extern int vga_init(void);
 extern int framebuffer_init(void);
-extern void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp);
+#include "../video/splash.h"
 
 /**
  * graphics_init - Comprehensive graphics subsystem initialization
