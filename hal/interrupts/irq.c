@@ -251,12 +251,17 @@ void interrupt_early_init(void)
 #endif
 }
 
+extern void arch_init_idt(void);
+
 /**
  * interrupt_init - Main interrupt initialization
  */
 void interrupt_init(void)
 {
     pr_info("IRQ: Initializing interrupt subsystem...\n");
+
+    /* Initialize architecture-specific IDT */
+    arch_init_idt();
 
     irq_manager.initialized = true;
 

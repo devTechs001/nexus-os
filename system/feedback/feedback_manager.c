@@ -61,6 +61,12 @@
 /*                         DATA STRUCTURES                                   */
 /*===========================================================================*/
 
+typedef struct feedback_entry feedback_entry_t;
+
+/* Forward declarations */
+void feedback_attach_logs(feedback_entry_t *entry);
+void feedback_queue_for_submission(feedback_entry_t *entry);
+
 /* Feedback Attachment */
 typedef struct {
     char filename[128];
@@ -71,7 +77,7 @@ typedef struct {
 } feedback_attachment_t;
 
 /* Feedback Entry */
-typedef struct {
+typedef struct feedback_entry {
     u32 id;
     u32 type;
     u32 priority;

@@ -34,9 +34,10 @@ int desktop_init(desktop_t *desktop)
     desktop->workspace = 0;
     desktop->workspace_count = DESKTOP_MAX_WORKSPACES;
     
-    /* Screen (will be updated by compositor) */
-    desktop->screen_width = 1920;
-    desktop->screen_height = 1080;
+    /* Screen (use actual boot params dimensions) */
+    boot_params_t *dp = get_boot_params();
+    desktop->screen_width = (dp && dp->gfx_width) ? dp->gfx_width : 1024;
+    desktop->screen_height = (dp && dp->gfx_height) ? dp->gfx_height : 768;
     desktop->screen_depth = 32;
     
     /* Background */

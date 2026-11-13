@@ -534,7 +534,6 @@ s32 sha256_finish(sha_context_t *ctx, u8 *output)
 {
     u32 last;
     u32 padn;
-    u32 msglen;
     u8 msglen_bytes[8];
     u32 i;
 
@@ -549,7 +548,6 @@ s32 sha256_finish(sha_context_t *ctx, u8 *output)
     spin_lock(&ctx->lock);
 
     /* Calculate message length in bits */
-    msglen = ctx->buf_len;
     msglen_bytes[0] = (ctx->total[1] >> 56) & 0xFF;
     msglen_bytes[1] = (ctx->total[1] >> 48) & 0xFF;
     msglen_bytes[2] = (ctx->total[1] >> 40) & 0xFF;

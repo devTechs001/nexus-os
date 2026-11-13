@@ -77,6 +77,7 @@
 #define ABS_RX                      3
 #define ABS_RY                      4
 #define ABS_RZ                      5
+#define ABS_PRESSURE                24
 #define ABS_MAX                     0x3f
 
 /* Relative Axes */

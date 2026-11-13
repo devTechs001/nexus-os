@@ -63,8 +63,8 @@ static struct {
     .initialized = false,
     .renderer_type = 0,  /* Software */
     .hardware_accel = false,
-    .default_foreground = {0, 0, 0, 255},
-    .default_background = {255, 255, 255, 255},
+    .default_foreground = {{{0, 0, 0, 255}}},
+    .default_background = {{{255, 255, 255, 255}}},
     .default_line_width = 1,
     .default_font_size = 12,
     .lock = { .lock = 0 }
@@ -490,12 +490,12 @@ int graphics_blit(graphics_context_t *ctx, void *src, rect_t *src_rect,
 
             if (src_a > 0) {
                 u32 *dst = &dst_pixels[dy * ctx->clip_rect.width + dx];
-                renderer_blend_pixel(dst, (color_t){
+                renderer_blend_pixel(dst, (color_t){{{
                     (src_pixel >> 16) & 0xFF,
                     (src_pixel >> 8) & 0xFF,
                     src_pixel & 0xFF,
                     src_a
-                });
+                }}});
             }
         }
     }

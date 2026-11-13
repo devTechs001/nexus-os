@@ -53,22 +53,22 @@ void arch_init_gdt(void)
     /* Null descriptor */
     set_gdt_entry(0, 0, 0, 0, 0);
 
-    /* Kernel Code (Ring 0, 64-bit) */
+    /* Kernel Code (Ring 0, 64-bit) - 0x08 */
     set_gdt_entry(1, 0, 0xFFFFFFFF, 0x9A, 0xAF);
 
-    /* Kernel Data (Ring 0, 64-bit) */
+    /* Kernel Data (Ring 0, 64-bit) - 0x10 */
     set_gdt_entry(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
 
-    /* User Code (Ring 3, 32-bit - for compatibility) */
+    /* User Code (Ring 3, 32-bit - for compatibility) - 0x18 */
     set_gdt_entry(3, 0, 0xFFFFFFFF, 0xFA, 0xCF);
 
-    /* User Data (Ring 3, 64-bit) */
+    /* User Data (Ring 3, 64-bit) - 0x20 */
     set_gdt_entry(4, 0, 0xFFFFFFFF, 0xF2, 0xCF);
 
-    /* User Code (Ring 3, 64-bit) */
+    /* User Code (Ring 3, 64-bit) - 0x28 */
     set_gdt_entry(5, 0, 0xFFFFFFFF, 0xFA, 0xAF);
 
-    /* TSS (Task State Segment) - uses 2 GDT entries */
+    /* TSS (Task State Segment) - uses 2 GDT entries - 0x30 */
     memset(&tss, 0, sizeof(struct tss_entry));
     tss.iopb_offset = sizeof(struct tss_entry);
     
@@ -94,7 +94,7 @@ void arch_init_gdt(void)
         "mov %%ax, %%fs\n"
         "mov %%ax, %%gs\n"
         "mov %%ax, %%ss\n"
-        : : : "rax", "ax", "memory"
+        : : : "rax", "memory"
     );
 
     /* Load TSS */

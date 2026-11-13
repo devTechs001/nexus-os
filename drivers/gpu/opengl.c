@@ -356,7 +356,7 @@ void glShaderSource(u32 shader, s32 count, const char **string, const s32 *lengt
         if (s->id == shader) {
             s->source[0] = '\0';
             for (s32 j = 0; j < count; j++) {
-                u32 len = length ? length[j] : strlen(string[j]);
+                u32 len = length ? (u32)length[j] : (u32)strlen(string[j]);
                 strncat(s->source, string[j], len);
             }
             break;

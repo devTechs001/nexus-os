@@ -33,6 +33,12 @@ static phys_addr_t mem_end = 0;
 static spinlock_t pmm_lock = { .lock = 0 };
 
 /*===========================================================================*/
+/*                         EXTERNAL SYMBOLS                                  */
+/*===========================================================================*/
+
+extern u8 __kernel_end[];
+
+/*===========================================================================*/
 /*                         BITMAP OPERATIONS                                 */
 /*===========================================================================*/
 
@@ -165,23 +171,17 @@ phys_addr_t pmm_alloc_page(void)
     ssize_t page_idx;
     phys_addr_t addr;
     
-    spin_lock(&pmm_lock);
-    
     if (num_free_pages == 0) {
-        spin_unlock(&pmm_lock);
         return 0;
     }
     
     page_idx = bitmap_find_free(pmm_bitmap, total_pages, 1);
     if (page_idx < 0) {
-        spin_unlock(&pmm_lock);
         return 0;
     }
     
     bitmap_set(pmm_bitmap, page_idx);
     num_free_pages--;
-    
-    spin_unlock(&pmm_lock);
     
     addr = mem_start + (page_idx * PAGE_SIZE);
     memset((void *)addr, 0, PAGE_SIZE);
@@ -383,36 +383,36 @@ void pmm_init(void)
     total_pages = (mem_end - mem_start) / PAGE_SIZE;
     num_free_pages = total_pages;
     
-    /* Calculate bitmap size */
-    bitmap_size = (total_pages + 63) / 64;
+    /* Calculate bitmap size in bytes */
+    bitmap_size = (total_pages + 7) / 8;
     bitmap_pages = (bitmap_size + PAGE_SIZE - 1) / PAGE_SIZE;
     
     pr_info("  Total Memory: %lu MB\n", (total_pages * PAGE_SIZE) / (1024 * 1024));
     pr_info("  Total Pages: %lu\n", total_pages);
     pr_info("  Bitmap Size: %lu bytes (%lu pages)\n", bitmap_size, bitmap_pages);
     
-    /* Allocate bitmap */
-    bitmap_addr = mem_start;
-    pmm_bitmap = (u64 *)KERNEL_VIRTUAL_BASE + bitmap_addr;
+    /* Allocate bitmap right after the kernel image */
+    bitmap_addr = (phys_addr_t)(uintptr_t)__kernel_end;
+    /* Align to page boundary */
+    bitmap_addr = (bitmap_addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    pmm_bitmap = (u64 *)(uintptr_t)bitmap_addr;
     
     /* Clear bitmap (all pages free) */
     memset(pmm_bitmap, 0, bitmap_size);
-    
-    /* Mark bitmap pages as used */
-    for (size_t i = 0; i < bitmap_pages; i++) {
+
+    /* Mark all pages from kernel start to end of bitmap as reserved */
+    phys_addr_t kernel_and_bitmap_end = bitmap_addr + bitmap_pages * PAGE_SIZE;
+    size_t reserved_idx_start = 0;  /* kernel starts at mem_start */
+    size_t reserved_idx_end = (kernel_and_bitmap_end - mem_start) / PAGE_SIZE;
+    if (reserved_idx_end > total_pages)
+        reserved_idx_end = total_pages;
+
+    for (size_t i = reserved_idx_start; i < reserved_idx_end; i++) {
         bitmap_set(pmm_bitmap, i);
     }
-    
-    num_free_pages -= bitmap_pages;
-    reserved_pages = bitmap_pages;
-    
-    /* Mark first MB as reserved */
-    for (size_t i = 0; i < 256; i++) {
-        bitmap_set(pmm_bitmap, i);
-    }
-    
-    num_free_pages -= 256;
-    reserved_pages += 256;
+
+    num_free_pages -= reserved_idx_end;
+    reserved_pages = reserved_idx_end;
     
     pr_info("  Reserved Pages: %lu\n", reserved_pages);
     pr_info("  Free Pages: %lu\n", num_free_pages);

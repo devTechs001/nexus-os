@@ -300,20 +300,17 @@ int vga_init(void)
     u8 misc = vga_inb(VGA_MIS_PORT);
     printk("[VGA] VGA hardware detected (MIS: 0x%02X)\n", misc);
     
-    /* Set default mode */
-    vga_set_mode_vga(320, 200, 8);
-    
-    /* Initialize framebuffer pointer */
+    /* Initialize framebuffer pointer to standard VGA text/graphics memory */
     g_vga.current_mode.framebuffer = (void *)VGA_MEMORY_BASE;
     g_vga.current_mode.phys_base = VGA_MEMORY_BASE;
     
-    g_vga.initialized = true;
+    /* 
+     * NOTE: We NO LONGER set a default mode here. 
+     * The system starts in text mode (Mode 3) by default.
+     * Mode switches should be requested explicitly.
+     */
     
-    printk("[VGA] VGA driver initialized\n");
-    printk("[VGA] Mode: %dx%dx%d\n", 
-           g_vga.current_mode.width,
-           g_vga.current_mode.height,
-           g_vga.current_mode.bpp);
+    g_vga.initialized = true;
     
     return 0;
 }

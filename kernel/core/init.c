@@ -196,9 +196,8 @@ void kernel_init_early(void)
     detect_virtualization();
 
     /* 5. Basic CPU structures */
-    pr_info("  Initializing GDT & IDT...\n");
+    pr_info("  Initializing GDT...\n");
     arch_init_gdt();
-    arch_init_idt();
 
     /* 6. Print virtualization status */
     if (kernel_state.is_vmware) {
@@ -252,10 +251,20 @@ void kernel_init_subsystems(void)
     /* 1. Memory management (Complete) */
     pr_info("  [1/6] Memory management (PMM, Paging, VMM, Heap, Slab)...\n");
     pmm_init();
+    
+    outb(0x3F8, '1');
     arch_init_paging();
+    
+    outb(0x3F8, '2');
     vmm_init();
+    
+    outb(0x3F8, '3');
     heap_init();
+    
+    outb(0x3F8, '4');
     slab_init();
+    
+    outb(0x3F8, '5');
     pr_info("  [OK] Memory management initialized\n");
     
     /* 2. Scheduler */
@@ -298,30 +307,35 @@ void kernel_init_drivers(void)
 {
     pr_info("Initializing device drivers...\n");
     
+    /* Graphics (Initialize early to show splash) */
+    graphics_init();
+    splash_update_progress(10, "Graphics subsystem initialized");
+
     /* Early driver initialization */
     driver_early_init();
     
     /* VFS */
     pr_info("  VFS...\n");
     vfs_init();
+    splash_update_progress(30, "Virtual File System initialized");
     
     /* Storage drivers */
     storage_init();
+    splash_update_progress(50, "Storage drivers initialized");
     
     /* Network */
     pr_info("  Network...\n");
     network_init();
     if (protocol_init() != 0) {
         pr_err("  Failed to initialize network protocols.\n");
+        kernel_panic("Critical Failure: Network protocol initialization failed.");
     }
-    
-    /* Graphics */
-    graphics_init();
-    splash_update_progress(60, "Graphics subsystem initialized");
+    splash_update_progress(60, "Network subsystem ready");
     
     /* Input devices */
     if (input_init() != 0) {
         pr_err("  Failed to initialize input devices.\n");
+        kernel_panic("Critical Failure: Input device initialization failed.");
     }
     splash_update_progress(70, "Input devices ready");
 
@@ -329,7 +343,9 @@ void kernel_init_drivers(void)
     typedef struct resource_sharing_config resource_sharing_config_t;
     extern int resource_sharing_init(resource_sharing_config_t *config);
     extern resource_sharing_config_t *resource_sharing_get_global_config(void);
-    resource_sharing_init(resource_sharing_get_global_config());
+    if (resource_sharing_init(resource_sharing_get_global_config()) != 0) {
+        pr_warn("  Failed to initialize resource sharing.\n");
+    }
     
     /* Late driver initialization */
     driver_late_init();
@@ -423,7 +439,9 @@ void kernel_init_userspace(void)
             onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
             if (wizard) {
                 pr_info("  [GUI] Starting Onboarding Wizard...\n");
-                onboarding_wizard_init(wizard);
+                if (onboarding_wizard_init(wizard) != 0) {
+                    pr_err("  [GUI] Failed to initialize onboarding wizard!\n");
+                }
                 onboarding_wizard_run(wizard);
             }
 
@@ -431,7 +449,10 @@ void kernel_init_userspace(void)
             login_screen_t *login = login_screen_get_instance();
             if (login) {
                 pr_info("  [GUI] Starting Login Screen...\n");
-                login_screen_init(login);
+                if (login_screen_init(login) != 0) {
+                    pr_err("  [GUI] Failed to initialize login screen!\n");
+                    kernel_panic("Critical Failure: Login screen initialization failed.");
+                }
                 login_screen_run(login);
             }
 
@@ -499,10 +520,10 @@ void kernel_main_init(void)
     pr_info("  NEXUS OS Kernel Initialization\n");
     pr_info("===============================================\n\n");
     
-    /* Phase 1: Early initialization */
+    /* Phase 1: Early architecture initialization */
     kernel_init_early();
     
-    /* Phase 2: CPU and interrupts */
+    /* Phase 2: CPU and interrupt subsystems */
     kernel_init_cpus();
     
     /* Phase 3: Kernel subsystems */

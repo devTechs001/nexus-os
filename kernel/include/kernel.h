@@ -333,7 +333,10 @@ typedef struct {
     u32 vga_mode;
     u32 gfx_width;
     u32 gfx_height;
+    u32 gfx_pitch;
     u32 gfx_depth;
+    u32 gfx_type;
+    u64 gfx_addr;
     bool nomodeset;
     bool nosmp;
     bool noapic;

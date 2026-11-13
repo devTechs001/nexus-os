@@ -60,6 +60,19 @@ static void load_system_info(login_screen_t *screen);
 static void load_user_preferences(login_screen_t *screen);
 static int save_login_history(login_screen_t *screen, u32 user_id);
 
+/* Cached screen dimensions from boot params */
+static u32 g_screen_w = 0;
+static u32 g_screen_h = 0;
+
+static void screen_dim_init(void)
+{
+    if (g_screen_w == 0) {
+        boot_params_t *bp = get_boot_params();
+        g_screen_w = (bp && bp->gfx_width) ? bp->gfx_width : 1024;
+        g_screen_h = (bp && bp->gfx_height) ? bp->gfx_height : 768;
+    }
+}
+
 /*===========================================================================*/
 /*                         LOGIN SCREEN INITIALIZATION                       */
 /*===========================================================================*/
@@ -214,12 +227,15 @@ int login_screen_run(login_screen_t *screen)
     if (screen->current_user && screen->password_entry) {
         widget_focus(screen->password_entry);
     }
-    
+
+    /* Load preferences and start animations */
+    load_user_preferences(screen);
+    update_animation(screen);
+
     printk("[LOGIN] Login screen active\n");
 
     return 0;
-}
-
+    }
 /**
  * login_screen_update - Update login screen state and render
  * @screen: Pointer to login screen structure
@@ -842,6 +858,8 @@ bool login_screen_is_authenticated(login_screen_t *screen)
  */
 static int create_main_window(login_screen_t *screen)
 {
+    screen_dim_init();
+
     window_props_t props;
     memset(&props, 0, sizeof(window_props_t));
     
@@ -850,8 +868,8 @@ static int create_main_window(login_screen_t *screen)
     props.flags = WINDOW_FLAG_FULLSCREEN;
     props.bounds.x = 0;
     props.bounds.y = 0;
-    props.bounds.width = 1920;
-    props.bounds.height = 1080;
+    props.bounds.width = g_screen_w;
+    props.bounds.height = g_screen_h;
     props.background = color_from_rgba(26, 26, 46, 255);
     
     screen->main_window = window_create(&props);
@@ -860,7 +878,7 @@ static int create_main_window(login_screen_t *screen)
     }
     
     /* Create main widget container */
-    screen->main_widget = panel_create(NULL, 0, 0, 1920, 1080);
+    screen->main_widget = panel_create(NULL, 0, 0, g_screen_w, g_screen_h);
     if (!screen->main_widget) {
         return -1;
     }
@@ -876,8 +894,9 @@ static int create_main_window(login_screen_t *screen)
  */
 static int create_background(login_screen_t *screen)
 {
+    screen_dim_init();
     /* Create background widget */
-    screen->background_widget = panel_create(screen->main_widget, 0, 0, 1920, 1080);
+    screen->background_widget = panel_create(screen->main_widget, 0, 0, g_screen_w, g_screen_h);
     if (!screen->background_widget) {
         return -1;
     }
@@ -899,7 +918,8 @@ static int create_background(login_screen_t *screen)
  */
 static int create_clock_display(login_screen_t *screen)
 {
-    s32 center_x = 1920 / 2;
+    screen_dim_init();
+    s32 center_x = g_screen_w / 2;
     s32 top_y = 80;
     
     /* Create clock label */
@@ -954,8 +974,9 @@ static int create_user_panel(login_screen_t *screen)
 {
     s32 panel_width = screen->theme.panel_width;
     s32 panel_height = screen->theme.panel_height;
-    s32 center_x = (1920 - panel_width) / 2;
-    s32 center_y = (1080 - panel_height) / 2 + 50;
+    screen_dim_init();
+    s32 center_x = (g_screen_w - panel_width) / 2;
+    s32 center_y = (g_screen_h - panel_height) / 2 + 50;
     
     /* Create user panel */
     screen->user_panel = panel_create(screen->main_widget, 
@@ -970,6 +991,36 @@ static int create_user_panel(login_screen_t *screen)
                       screen->theme.panel_bg,
                       color_from_rgba(80, 80, 100, 100));
     
+    /* Add user list to the panel */
+    create_user_list(screen);
+    
+    return 0;
+}
+
+static int create_user_list(login_screen_t *screen)
+{
+    /* 
+     * Implement user list widget for selecting different users.
+     */
+    if (!screen || !screen->user_panel) {
+        return -1;
+    }
+
+    pr_info("  [Login] Creating user list...\n");
+    
+    /* Simulate adding users to the list with callbacks */
+    for (u32 i = 0; i < screen->user_count && i < 5; i++) {
+        widget_t *user_btn = button_create(screen->user_panel, "User",
+                                          10 + (i * 120), 10, 
+                                          100, 100);
+        if (user_btn) {
+            /* Set callback for user selection */
+            user_btn->on_click = on_user_selected;
+            user_btn->user_data = screen;
+            user_btn->tooltip = (char*)(uintptr_t)i; /* Store index */
+        }
+    }
+
     return 0;
 }
 
@@ -1096,8 +1147,9 @@ static int create_login_form(login_screen_t *screen)
  */
 static int create_session_selector(login_screen_t *screen)
 {
-    s32 center_x = (1920 - screen->theme.panel_width) / 2;
-    s32 y = 1080 - 100;
+    screen_dim_init();
+    s32 center_x = (g_screen_w - screen->theme.panel_width) / 2;
+    s32 y = g_screen_h - 100;
     
     screen->session_selector = combobox_create(screen->main_widget,
                                                 center_x, y, 200, 35);
@@ -1127,38 +1179,39 @@ static int create_power_menu(login_screen_t *screen)
     s32 button_size = 40;
     s32 spacing = 10;
     s32 total_width = (button_size + spacing) * 3;
-    s32 x = 1920 - total_width - 20;
-    s32 y = 1080 - button_size - 20;
-    
+    screen_dim_init();
+    s32 x = g_screen_w - total_width - 20;
+    s32 y = g_screen_h - button_size - 20;
+
     /* Shutdown button */
     widget_t *shutdown_btn = button_create(screen->main_widget, "⏻",
                                             x, y, button_size, button_size);
     if (!shutdown_btn) return -1;
-    
+
     shutdown_btn->on_click = on_power_clicked;
     shutdown_btn->user_data = (void*)(uintptr_t)1; /* Power action ID */
     shutdown_btn->tooltip = "Shutdown";
-    
+
     /* Restart button */
     widget_t *restart_btn = button_create(screen->main_widget, "⟳",
                                            x + button_size + spacing, y,
                                            button_size, button_size);
     if (!restart_btn) return -1;
-    
+
     restart_btn->on_click = on_power_clicked;
     restart_btn->user_data = (void*)(uintptr_t)2;
     restart_btn->tooltip = "Restart";
-    
+
     /* Sleep button */
     widget_t *sleep_btn = button_create(screen->main_widget, "⏾",
                                          x + (button_size + spacing) * 2, y,
                                          button_size, button_size);
     if (!sleep_btn) return -1;
-    
+
     sleep_btn->on_click = on_power_clicked;
     sleep_btn->user_data = (void*)(uintptr_t)3;
     sleep_btn->tooltip = "Sleep";
-    
+
     screen->power_menu = shutdown_btn; /* Reference to power menu */
     
     return 0;
@@ -1172,9 +1225,10 @@ static int create_power_menu(login_screen_t *screen)
  */
 static int create_accessibility_menu(login_screen_t *screen)
 {
+    screen_dim_init();
     s32 button_size = 40;
     s32 x = 20;
-    s32 y = 1080 - button_size - 20;
+    s32 y = g_screen_h - button_size - 20;
     
     screen->accessibility_button = button_create(screen->main_widget, "♿",
                                                   x, y, button_size, button_size);
@@ -1197,10 +1251,11 @@ static int create_accessibility_menu(login_screen_t *screen)
  */
 static int create_on_screen_keyboard(login_screen_t *screen)
 {
+    screen_dim_init();
     s32 kb_width = 800;
     s32 kb_height = 300;
-    s32 x = (1920 - kb_width) / 2;
-    s32 y = 1080 - kb_height - 20;
+    s32 x = (g_screen_w - kb_width) / 2;
+    s32 y = g_screen_h - kb_height - 20;
     
     screen->osk_widget = panel_create(screen->main_widget, x, y, kb_width, kb_height);
     if (!screen->osk_widget) {

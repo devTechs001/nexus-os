@@ -522,7 +522,7 @@ void task_stats(struct task_struct *task);
 
 /* Load Balancing */
 void rebalance_domains(void);
-void idle_balance(int cpu);
+void idle_balance(u32 cpu);
 
 /* High-Resolution Timer Support */
 void hrtimer_init(void);

@@ -998,45 +998,74 @@ extern void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp);
  */
 void graphics_init(void)
 {
+    outb(0x3F8, 'G');
+    outb(0x3F8, 'I');
+    outb(0x3F8, '\n');
     printk("[GRAPHICS] ========================================\n");
     printk("[GRAPHICS] NEXUS OS Graphics Subsystem\n");
     printk("[GRAPHICS] ========================================\n");
 
-    /* 1. Initialize hardware-specific drivers (VGA/SVGA/VESA) */
-    vga_init();
+    boot_params_t *params = get_boot_params();
 
+    /* 1. Initialize hardware-specific drivers (VGA/SVGA/VESA) */
+    /* Skip VGA hardware init if we already have a Multiboot2 framebuffer */
+    if (!params || !params->gfx_addr) {
+        vga_init();
+    } else {
+        printk("[GRAPHICS] Using Multiboot2 framebuffer, skipping legacy VGA init\n");
+    }
+
+    outb(0x3F8, 'G');
+    outb(0x3F8, 'F');
+    outb(0x3F8, '\n');
     /* 2. Initialize the generic framebuffer layer */
     framebuffer_init();
 
+    outb(0x3F8, 'G');
+    outb(0x3F8, 'D');
+    outb(0x3F8, '\n');
     /* 3. Initialize the high-level display management driver */
     display_init();
 
+    outb(0x3F8, 'G');
+    outb(0x3F8, 'S');
+    outb(0x3F8, '\n');
     /* 4. Check boot parameters for graphical mode */
-    boot_params_t *params = get_boot_params();
     if (params && params->graphics_mode) {
         printk("[GRAPHICS] Graphical mode requested, initializing splash screen...\n");
 
-        display_framebuffer_t *fb = display_get_primary_framebuffer();
-        
-        if (fb && fb->base) {
-            /* Use existing primary framebuffer (e.g. from VESA) */
-            splash_init((u32*)fb->base, fb->width, fb->height, fb->stride, fb->bpp);
-            printk("[GRAPHICS] Splash screen active on %dx%dx%d FB\n", 
-                   fb->width, fb->height, fb->bpp);
+        if (params->gfx_addr) {
+            /* Use framebuffer provided by bootloader */
+            splash_init((u32*)params->gfx_addr, params->gfx_width, params->gfx_height, params->gfx_pitch, params->gfx_depth);
+            printk("[GRAPHICS] Splash screen active on Multiboot2 FB: %dx%dx%d at 0x%llX\n", 
+                   params->gfx_width, params->gfx_height, params->gfx_depth, params->gfx_addr);
         } else {
-            /* Fallback: Create a standard 1024x768 framebuffer */
-            display_framebuffer_t new_fb;
-            if (display_create_framebuffer(1024, 768, PIXEL_FORMAT_XRGB8888, &new_fb) == 0) {
-                splash_init((u32*)new_fb.base, 1024, 768, new_fb.stride, new_fb.bpp);
-                printk("[GRAPHICS] Splash screen active on new 1024x768 FB\n");
+            display_framebuffer_t *fb = display_get_primary_framebuffer();
+            
+            if (fb && fb->base) {
+                /* Use existing primary framebuffer (e.g. from VESA) */
+                splash_init((u32*)fb->base, fb->width, fb->height, fb->stride, fb->bpp);
+                printk("[GRAPHICS] Splash screen active on %dx%dx%d FB\n", 
+                       fb->width, fb->height, fb->bpp);
             } else {
-                printk("[ERROR] Failed to create framebuffer for splash screen!\n");
+                /* Fallback: Create a standard 1024x768 framebuffer */
+                display_framebuffer_t new_fb;
+                if (display_create_framebuffer(1024, 768, PIXEL_FORMAT_XRGB8888, &new_fb) == 0) {
+                    splash_init((u32*)new_fb.base, 1024, 768, new_fb.stride, new_fb.bpp);
+                    printk("[GRAPHICS] Splash screen active on new 1024x768 FB\n");
+                } else {
+                    printk("[ERROR] Failed to create framebuffer for splash screen!\n");
+                }
             }
         }
     } else {
         printk("[GRAPHICS] Booting in text mode, skipping graphical splash.\n");
     }
 
+    outb(0x3F8, 'G');
+    outb(0x3F8, 'O');
+    outb(0x3F8, 'K');
+    outb(0x3F8, '\n');
     printk("[GRAPHICS] Graphics subsystem initialization complete.\n");
     printk("[GRAPHICS] ========================================\n");
 }

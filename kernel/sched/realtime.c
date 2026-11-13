@@ -232,7 +232,7 @@ void enqueue_task_rt(struct rq *rq, struct task_struct *task, int flags)
     rt_rq->nr_running++;
 
     /* Update pushable tasks */
-    if (task->rt_priority < rt_rq->pushable_tasks) {
+    if (task->rt_priority < (unsigned int)rt_rq->pushable_tasks) {
         rt_rq->pushable_tasks = task->rt_priority;
     }
 

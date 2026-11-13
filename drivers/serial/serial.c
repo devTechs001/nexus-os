@@ -220,7 +220,7 @@ int serial_read(u32 port_id, void *data, u32 size, u32 timeout_ms)
     u32 count = 0;
     
     for (u32 i = 0; i < size; i++) {
-        if (serial_getc(port_id, &buf[i], timeout_ms) == 0) {
+        if (serial_getc(port_id, (char *)&buf[i], timeout_ms) == 0) {
             count++;
         } else {
             break;

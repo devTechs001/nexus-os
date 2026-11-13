@@ -64,8 +64,10 @@ void interrupt_handler(struct registers *regs)
 {
     /* Exception handling */
     if (regs->isr_num < 32) {
-        pr_err("EXCEPTION %d (error 0x%X) at 0x%llX\n", 
-               (u32)regs->isr_num, (u32)regs->error_code, regs->rip);
+        u64 cr2;
+        __asm__ __volatile__("mov %%cr2, %0" : "=r"(cr2));
+        pr_err("EXCEPTION %d (error 0x%X) at 0x%llX, CR2=0x%llX\n", 
+               (u32)regs->isr_num, (u32)regs->error_code, regs->rip, cr2);
         
         kernel_panic("CPU Exception: %d", (u32)regs->isr_num);
     }

@@ -368,7 +368,7 @@ void splash_run(void)
         splash_render();
         
         /* Small delay for animation timing */
-        sleep_ms(16);  /* ~60fps */
+        delay_ms(16);  /* ~60fps */
     }
 }
 

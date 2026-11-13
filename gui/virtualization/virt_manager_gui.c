@@ -184,7 +184,7 @@ typedef struct {
     /* Sidebar */
     u32 sidebar_width;
     u32 selected_category;
-    char categories[8][32];
+    char categories[16][32];
     u32 category_count;
     
     /* VM List */
@@ -204,7 +204,7 @@ typedef struct {
     resource_graph_t disk_graph;
     
     /* Action Buttons */
-    action_button_t buttons[12];
+    action_button_t buttons[16];
     u32 button_count;
     
     /* Configuration Panels */
@@ -292,15 +292,39 @@ static void gui_draw_icon(u32 x, u32 y, const char *icon, u32 size)
 /* Draw Progress Bar */
 static void gui_draw_progress(u32 x, u32 y, u32 width, u32 height, u32 percent, u32 color)
 {
-    printk("[GUI] Draw progress %u%% at (%u,%u) %ux%u color 0x%x\n",
-           percent, x, y, width, height, color);
+    /* Draw background */
+    gui_draw_rounded_rect(x, y, width, height, 2, COLOR_CARD_BORDER);
+    
+    /* Draw fill */
+    u32 fill_width = (width * percent) / 100;
+    if (fill_width > 0) {
+        gui_draw_rounded_rect(x + 1, y + 1, fill_width - 2, height - 2, 1, color);
+    }
+    
+    printk("[GUI] Rendered progress bar: %u%% at (%u,%u)\n", percent, x, y);
 }
 
 /* Draw Graph */
 static void gui_draw_graph(u32 x, u32 y, u32 width, u32 height, resource_graph_t *graph)
 {
-    printk("[GUI] Draw graph '%s' at (%u,%u) %ux%u\n",
-           graph->label, x, y, width, height);
+    /* Draw background and border */
+    gui_draw_rounded_rect(x, y, width, height, 3, COLOR_CONTENT_BG);
+    
+    /* Draw graph points (simulated) */
+    for (u32 i = 0; i < 59; i++) {
+        u32 x1 = x + (i * width) / 60;
+        u32 y1 = y + height - (graph->values[i] * height) / graph->max_value;
+        u32 x2 = x + ((i + 1) * width) / 60;
+        u32 y2 = y + height - (graph->values[i+1] * height) / graph->max_value;
+        
+        /* In real implementation, would call graphics_draw_line */
+        (void)x1; (void)y1; (void)x2; (void)y2;
+    }
+    
+    /* Draw label */
+    gui_draw_text(x + 5, y + 5, graph->label, COLOR_TITLE_BAR, 12);
+    
+    printk("[GUI] Rendered graph '%s' at (%u,%u)\n", graph->label, x, y);
 }
 
 /*===========================================================================*/
@@ -521,6 +545,15 @@ void virt_manager_gui_render(void)
     /* Draw details panel */
     gui_draw_rounded_rect(g_virt_manager.sidebar_width + VM_LIST_WIDTH, 50, VM_DETAILS_WIDTH, g_virt_manager.height - 80, 0, COLOR_CONTENT_BG);
     
+    /* Implementation of VM Details using unused functions */
+    if (g_virt_manager.selected_vm) {
+        gui_draw_icon(g_virt_manager.sidebar_width + VM_LIST_WIDTH + 20, 70, "vm-icon", 48);
+        gui_draw_progress(g_virt_manager.sidebar_width + VM_LIST_WIDTH + 20, 150, 200, 20, 
+                          g_virt_manager.selected_vm->cpu_usage_percent, COLOR_INFO);
+        gui_draw_graph(g_virt_manager.sidebar_width + VM_LIST_WIDTH + 20, 200, 200, 100, 
+                       &g_virt_manager.cpu_graph);
+    }
+
     /* Draw status bar */
     gui_draw_rounded_rect(0, g_virt_manager.height - 30, g_virt_manager.width, 30, 0, COLOR_TITLE_BAR);
     gui_draw_text(10, g_virt_manager.height - 22, g_virt_manager.status_message, COLOR_TITLE_TEXT, 14);

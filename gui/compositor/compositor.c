@@ -76,9 +76,15 @@ int compositor_init_global(compositor_t *comp)
     comp->surface_count = 0;
     comp->max_surfaces = COMPOSITOR_MAX_SURFACES;
     
-    /* Default display settings */
-    comp->display_width = 1920;
-    comp->display_height = 1080;
+    /* Use actual framebuffer dimensions from boot params when available */
+    boot_params_t *params = get_boot_params();
+    if (params && params->gfx_addr && params->gfx_width && params->gfx_height) {
+        comp->display_width = params->gfx_width;
+        comp->display_height = params->gfx_height;
+    } else {
+        comp->display_width = 1024;
+        comp->display_height = 768;
+    }
     comp->refresh_rate = 60;
     comp->vsync_enabled = true;
     comp->pixel_format = 0x32424752;  /* RGBA8888 */
@@ -1036,6 +1042,18 @@ int compositor_present(compositor_t *comp)
     
     /* Swap buffers */
     swap_buffers(comp);
+    
+    /* Flush front buffer to physical framebuffer if available */
+    boot_params_t *params = get_boot_params();
+    if (params && params->gfx_addr) {
+        void *phys_fb = (void *)(uintptr_t)params->gfx_addr;
+        void *front_data = comp->framebuffers[comp->front_buffer].data;
+        u32 fb_size = comp->display_width * comp->display_height * (comp->color_depth / 8);
+        
+        if (phys_fb && front_data) {
+            memcpy(phys_fb, front_data, fb_size);
+        }
+    }
     
     /* Wait for VSync if enabled */
     if (comp->vsync_enabled) {

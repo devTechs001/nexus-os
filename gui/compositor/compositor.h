@@ -131,7 +131,7 @@ typedef struct {
 /**
  * Compositor State
  */
-typedef struct {
+typedef struct compositor {
     bool initialized;               /* Is Initialized */
     bool running;                   /* Is Running */
     bool active;                    /* Is Active */

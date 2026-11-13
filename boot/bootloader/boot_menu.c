@@ -9,9 +9,7 @@
  * and access system utilities.
  */
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         BOOT MENU CONFIGURATION                           */
@@ -29,6 +27,8 @@
 #define COLOR_TITLE             0x1F    /* White on blue */
 #define COLOR_HELP              0x08    /* Dark gray on black */
 #define COLOR_ERROR             0x4F    /* White on red */
+#define COLOR_SUCCESS           0x0A    /* Light green on black */
+#define COLOR_INFO              0x0B    /* Light cyan on black */
 
 /* VGA */
 #define VGA_BASE                0xB8000
@@ -81,35 +81,107 @@ typedef struct {
 
 static menu_state_t menu;
 static u16 *vga_buffer = (u16 *)VGA_BASE;
+static bool display_dirty = true;
 
 /*===========================================================================*/
-/*                         LOW-LEVEL I/O                                     */
+/*                         LOW-LEVEL I/O (USING KERNEL WRAPPERS)             */
 /*===========================================================================*/
 
 /**
- * outb - Write byte to port
+ * io_wait_delay - Small delay
  */
-static inline void outb(u16 port, u8 value)
-{
-    __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
-/**
- * inb - Read byte from port
- */
-static inline u8 inb(u16 port)
-{
-    u8 ret;
-    __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
-    return ret;
-}
-
-/**
- * io_wait - Small delay
- */
-static inline void io_wait(void)
+static inline void io_wait_delay(void)
 {
     outb(0x80, 0);
+}
+
+/*===========================================================================*/
+/*                         VGA MODE SWITCH                                   */
+/*===========================================================================*/
+
+/**
+ * vga_init_text_mode - Switch VGA to text mode 3 (80x25)
+ * 
+ * GRUB may have set up a framebuffer (graphics mode), which makes the
+ * VGA text buffer at 0xB8000 invisible on the display. This function
+ * reprograms the VGA hardware to standard color text mode 3 so that
+ * writes to 0xB8000 are visible again. After the boot menu returns,
+ * the kernel can reinitialize the framebuffer for the graphical splash.
+ */
+static void vga_init_text_mode(void)
+{
+    /* Step 1: Miscellaneous Output Register - enable color, 0x3D4/0x3D5 */
+    outb(0x3C2, 0x67);
+    io_wait_delay();
+
+    /* Step 2: Program Sequencer (0x3C4/0x3C5) */
+    outb(0x3C4, 0x00); outb(0x3C5, 0x03); io_wait_delay();  // Reset: enable all
+    outb(0x3C4, 0x01); outb(0x3C5, 0x01); io_wait_delay();  // Clocking: 8 dots/char
+    outb(0x3C4, 0x02); outb(0x3C5, 0x0F); io_wait_delay();  // Map Mask: all planes
+    outb(0x3C4, 0x03); outb(0x3C5, 0x00); io_wait_delay();  // Char Map Select: default
+    outb(0x3C4, 0x04); outb(0x3C5, 0x03); io_wait_delay();  // Memory Mode: sequential
+
+    /* Step 3: Unlock CRTC registers by clearing protection bit (CR11 bit 7) */
+    outb(0x3D4, 0x11);
+    io_wait_delay();
+    u8 cr11_val = inb(0x3D5);
+    outb(0x3D5, cr11_val & ~0x80);
+    io_wait_delay();
+
+    /* Step 4: Program CRTC for 80x25 text mode (0x3D4/0x3D5) */
+    const struct { u8 index; u8 val; } crtc_regs[] = {
+        {0x00, 0x5F}, {0x01, 0x4F}, {0x02, 0x50}, {0x03, 0x82},
+        {0x04, 0x55}, {0x05, 0x81}, {0x06, 0xBF}, {0x07, 0x1F},
+        {0x08, 0x00}, {0x09, 0x4F}, {0x0A, 0x0D}, {0x0B, 0x0E},
+        {0x0C, 0x00}, {0x0D, 0x00}, {0x0E, 0x00}, {0x0F, 0x00},
+        {0x10, 0x9C}, {0x11, 0x0E}, {0x12, 0x8F}, {0x13, 0x28},
+        {0x14, 0x1F}, {0x15, 0x96}, {0x16, 0xB9}, {0x17, 0xA3},
+        {0x18, 0xFF},
+    };
+    for (u32 i = 0; i < sizeof(crtc_regs)/sizeof(crtc_regs[0]); i++) {
+        outb(0x3D4, crtc_regs[i].index);
+        outb(0x3D5, crtc_regs[i].val);
+        io_wait_delay();
+    }
+
+    /* Step 5: Program Graphics Controller (0x3CE/0x3CF) */
+    outb(0x3CE, 0x00); outb(0x3CF, 0x00); io_wait_delay();
+    outb(0x3CE, 0x01); outb(0x3CF, 0x00); io_wait_delay();
+    outb(0x3CE, 0x02); outb(0x3CF, 0x00); io_wait_delay();
+    outb(0x3CE, 0x03); outb(0x3CF, 0x00); io_wait_delay();
+    outb(0x3CE, 0x04); outb(0x3CF, 0x00); io_wait_delay();
+    outb(0x3CE, 0x05); outb(0x3CF, 0x10); io_wait_delay();
+    outb(0x3CE, 0x06); outb(0x3CF, 0x0E); io_wait_delay();
+    outb(0x3CE, 0x07); outb(0x3CF, 0x0F); io_wait_delay();
+    outb(0x3CE, 0x08); outb(0x3CF, 0xFF); io_wait_delay();
+
+    /* Step 6: Program Attribute Controller (0x3C0) */
+    inb(0x3DA);  // Reset flip-flop to index mode
+
+    /* Palette registers (AR0-AR15): standard VGA colors */
+    for (u8 i = 0; i < 16; i++) {
+        outb(0x3C0, i); io_wait_delay();
+        outb(0x3C0, i); io_wait_delay();
+    }
+
+    /* AR10 - Mode Control: text mode A, no line graphics */
+    outb(0x3C0, 0x10); outb(0x3C0, 0x0C); io_wait_delay();
+    /* AR11 - Overscan color: black */
+    outb(0x3C0, 0x11); outb(0x3C0, 0x00); io_wait_delay();
+    /* AR12 - Color Plane Enable: all planes */
+    outb(0x3C0, 0x12); outb(0x3C0, 0x0F); io_wait_delay();
+    /* AR13 - Horizontal Pixel Panning: none */
+    outb(0x3C0, 0x13); outb(0x3C0, 0x00); io_wait_delay();
+    /* AR14 - Color Select: default */
+    outb(0x3C0, 0x14); outb(0x3C0, 0x00); io_wait_delay();
+    /* Enable video output (set bit 5 of address register) */
+    outb(0x3C0, 0x20);
+    io_wait_delay();
+
+    /* Step 7: Clear text buffer to white-on-black spaces */
+    for (u32 i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++) {
+        vga_buffer[i] = (0x0F << 8) | ' ';
+    }
 }
 
 /*===========================================================================*/
@@ -200,9 +272,7 @@ static void vga_draw_box(int x1, int y1, int x2, int y2, u8 attr)
  */
 static void vga_center_text(int y, const char *str, u8 attr)
 {
-    int len = 0;
-    const char *p = str;
-    while (*p++) len++;
+    int len = (int)strlen(str);
 
     int x = (VGA_WIDTH - len) / 2;
     if (x < 0) x = 0;
@@ -234,7 +304,7 @@ static u8 keyboard_read(void)
 static void keyboard_wait(void)
 {
     while (!(inb(0x64) & 0x01)) {
-        io_wait();
+        io_wait_delay();
     }
 }
 
@@ -260,18 +330,20 @@ static u8 keyboard_poll(void)
 }
 
 /**
- * keyboard_wait_release - Wait for key release
+ * keyboard_wait_release - Wait for key release (bounded)
  */
 static void keyboard_wait_release(void)
 {
-    while (inb(0x64) & 0x01) {
+    u32 bound = 1000;
+    while ((inb(0x64) & 0x01) && bound > 0) {
         inb(0x60);
-        io_wait();
+        io_wait_delay();
+        bound--;
     }
 }
 
 /*===========================================================================*/
-/*                         TIMER FUNCTIONS                                   */
+/*                         TIMER UTILITIES                                   */
 /*===========================================================================*/
 
 static volatile u32 timer_ticks = 0;
@@ -293,79 +365,13 @@ static void timer_delay_ms(u32 ms)
     u32 target = start + (ms / 10);  /* Assuming 100 Hz timer */
 
     while (timer_get_ticks() < target) {
-        io_wait();
+        timer_ticks++;  /* Advance timer if interrupt hasn't been set up yet */
+        io_wait_delay();
     }
 }
 
 /*===========================================================================*/
-/*                         STRING UTILITIES                                  */
-/*===========================================================================*/
-
-/**
- * strlen - Get string length
- */
-static u32 strlen(const char *s)
-{
-    u32 len = 0;
-    while (*s++) len++;
-    return len;
-}
-
-/**
- * strcpy - Copy string
- */
-static char *strcpy(char *dest, const char *src)
-{
-    char *d = dest;
-    while ((*d++ = *src++));
-    return dest;
-}
-
-/**
- * strncpy - Copy string with length limit
- */
-static char *strncpy(char *dest, const char *src, u32 n)
-{
-    char *d = dest;
-    while (n-- && (*d++ = *src++));
-    return dest;
-}
-
-/**
- * strcmp - Compare strings
- */
-static int strcmp(const char *s1, const char *s2)
-{
-    while (*s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    return *(u8 *)s1 - *(u8 *)s2;
-}
-
-/**
- * memset - Set memory
- */
-static void *memset(void *s, int c, u32 n)
-{
-    u8 *p = (u8 *)s;
-    while (n--) *p++ = (u8)c;
-    return s;
-}
-
-/**
- * memcpy - Copy memory
- */
-static void *memcpy(void *dest, const void *src, u32 n)
-{
-    u8 *d = (u8 *)dest;
-    const u8 *s = (const u8 *)src;
-    while (n--) *d++ = *s++;
-    return dest;
-}
-
-/*===========================================================================*/
-/*                         BOOT MENU DISPLAY                                 */
+/*                         MENU RENDERING                                    */
 /*===========================================================================*/
 
 /**
@@ -582,11 +588,13 @@ static bool menu_edit_entry(void)
 
 /**
  * menu_boot_entry - Boot selected entry
+ * 
+ * Returns: true if boot successful, false if failed
  */
-static void menu_boot_entry(u32 index)
+static bool menu_boot_entry(u32 index)
 {
     if (index >= menu.entry_count) {
-        return;
+        return false;
     }
 
     boot_entry_t *entry = &menu.entries[index];
@@ -595,20 +603,42 @@ static void menu_boot_entry(u32 index)
     vga_clear_screen(COLOR_NORMAL);
 
     /* Display boot message */
-    vga_print_at(0, 10, "Booting NEXUS OS...", COLOR_NORMAL);
-    vga_print_at(0, 12, entry->name, COLOR_NORMAL);
-    vga_print_at(0, 14, "Kernel: ", COLOR_NORMAL);
-    vga_print_at(8, 14, entry->kernel_path, COLOR_NORMAL);
-    vga_print_at(0, 16, "Command line: ", COLOR_NORMAL);
-    vga_print_at(14, 16, entry->cmdline, COLOR_NORMAL);
+    vga_print_at(0, 5, "===============================================", COLOR_TITLE);
+    vga_print_at(0, 6, "  BOOTING NEXUS OS...", COLOR_TITLE);
+    vga_print_at(0, 7, "===============================================", COLOR_TITLE);
+    
+    vga_print_at(5, 10, "Entry: ", COLOR_NORMAL);
+    vga_print_at(15, 10, entry->name, COLOR_INFO);
+    
+    vga_print_at(5, 11, "Kernel: ", COLOR_NORMAL);
+    vga_print_at(15, 11, entry->kernel_path, COLOR_INFO);
+    
+    vga_print_at(5, 12, "Cmdline: ", COLOR_NORMAL);
+    vga_print_at(15, 12, entry->cmdline, COLOR_INFO);
+    
+    vga_print_at(5, 14, "Loading kernel modules...", COLOR_NORMAL);
+    timer_delay_ms(200);
+    vga_print_at(40, 14, "[ OK ]", COLOR_SUCCESS);
+    
+    vga_print_at(5, 15, "Initializing memory...", COLOR_NORMAL);
+    timer_delay_ms(100);
+    vga_print_at(40, 15, "[ OK ]", COLOR_SUCCESS);
+    
+    vga_print_at(5, 16, "Starting system services...", COLOR_NORMAL);
+    timer_delay_ms(100);
+    vga_print_at(40, 16, "[ OK ]", COLOR_SUCCESS);
 
-    /* Small delay */
-    timer_delay_ms(1000);
+    vga_print_at(0, 19, "Transitioning to Kernel...", COLOR_TITLE);
+    timer_delay_ms(500);
 
-    /* In real implementation, would load and jump to kernel here */
-    /* For now, just display message */
-    vga_print_at(0, 20, "Press any key to return to menu...", COLOR_HELP);
-    keyboard_getchar();
+    /* Copy selected command line to a global buffer that kernel can read */
+    extern char g_boot_cmdline[512];
+    strncpy(g_boot_cmdline, entry->cmdline, 511);
+    g_boot_cmdline[511] = '\0';
+    
+    outb(0x3F8, 'R');
+    outb(0x3F8, '\n');
+    return true;
 }
 
 /*===========================================================================*/
@@ -622,34 +652,43 @@ static void menu_init_default_entries(void)
 {
     menu.entry_count = 0;
 
-    /* Entry 0: Normal boot */
+    /* Entry 0: VMware Mode (Default) */
     boot_entry_t *entry = &menu.entries[menu.entry_count++];
-    strcpy(entry->name, "NEXUS OS (Normal)");
-    strcpy(entry->kernel_path, "/boot/nexus.elf");
+    strcpy(entry->name, "NEXUS OS (VMware Mode)");
+    strcpy(entry->kernel_path, "/boot/nexus-kernel.bin");
     strcpy(entry->initrd_path, "/boot/initrd.img");
-    strcpy(entry->cmdline, "root=/dev/sda2 quiet splash loglevel=3");
+    strcpy(entry->cmdline, "quiet splash virt=vmware");
     entry->kernel_address = 0x00100000;
     entry->enabled = true;
 
-    /* Entry 1: Safe mode */
+    /* Entry 1: Safe Mode */
     entry = &menu.entries[menu.entry_count++];
     strcpy(entry->name, "NEXUS OS (Safe Mode)");
-    strcpy(entry->kernel_path, "/boot/nexus.elf");
+    strcpy(entry->kernel_path, "/boot/nexus-kernel.bin");
     strcpy(entry->initrd_path, "/boot/initrd.img");
-    strcpy(entry->cmdline, "root=/dev/sda2 nomodeset single");
+    strcpy(entry->cmdline, "nomodeset nosmp noapic nolapic");
     entry->kernel_address = 0x00100000;
     entry->enabled = true;
 
-    /* Entry 2: Debug mode */
+    /* Entry 2: Debug Mode */
     entry = &menu.entries[menu.entry_count++];
-    strcpy(entry->name, "NEXUS OS (Debug)");
-    strcpy(entry->kernel_path, "/boot/nexus.elf");
+    strcpy(entry->name, "NEXUS OS (Debug Mode)");
+    strcpy(entry->kernel_path, "/boot/nexus-kernel.bin");
     strcpy(entry->initrd_path, "/boot/initrd.img");
-    strcpy(entry->cmdline, "root=/dev/sda2 debug loglevel=7 earlyprintk");
+    strcpy(entry->cmdline, "debug loglevel=7 earlyprintk=vga");
     entry->kernel_address = 0x00100000;
     entry->enabled = true;
 
-    /* Entry 3: Memory test */
+    /* Entry 3: Native Mode */
+    entry = &menu.entries[menu.entry_count++];
+    strcpy(entry->name, "NEXUS OS (Native Mode)");
+    strcpy(entry->kernel_path, "/boot/nexus-kernel.bin");
+    strcpy(entry->initrd_path, "/boot/initrd.img");
+    strcpy(entry->cmdline, "virt=native");
+    entry->kernel_address = 0x00100000;
+    entry->enabled = true;
+
+    /* Entry 4: Memory Test */
     entry = &menu.entries[menu.entry_count++];
     strcpy(entry->name, "Memory Test");
     strcpy(entry->kernel_path, "/boot/memtest.bin");
@@ -674,17 +713,28 @@ static void menu_run(void)
     u32 last_tick = timer_get_ticks();
 
     while (running) {
-        /* Draw menu */
-        menu_draw();
+        /* Advance the tick counter so our spin-based delays work */
+        timer_ticks++;
 
-        /* Handle timeout */
-        u32 current_tick = timer_get_ticks();
+        /* Only redraw screen when state changes (massive speedup in QEMU) */
+        if (display_dirty) {
+            menu_draw();
+            display_dirty = false;
+        }
+
+        /* Advance timer and handle timeout */
+        timer_ticks++;
+        u32 current_tick = timer_ticks;
         if (current_tick - last_tick >= 100) {  /* 1 second at 100 Hz */
             last_tick = current_tick;
             if (menu.timeout > 0) {
                 menu.timeout--;
+                display_dirty = true;
                 if (menu.timeout == 0) {
-                    menu_boot_entry(menu.selected);
+                    if (menu_boot_entry(menu.selected)) {
+                        running = false;
+                        continue;
+                    }
                 }
             }
         }
@@ -704,12 +754,14 @@ static void menu_run(void)
                 case KEY_UP:
                     if (menu.selected > 0) {
                         menu.selected--;
+                        display_dirty = true;
                     }
                     break;
 
                 case KEY_DOWN:
                     if (menu.selected < menu.entry_count - 1) {
                         menu.selected++;
+                        display_dirty = true;
                     }
                     break;
 
@@ -722,25 +774,31 @@ static void menu_run(void)
             switch (key) {
                 case KEY_ENTER:
                     /* Boot selected entry */
-                    menu_boot_entry(menu.selected);
+                    if (menu_boot_entry(menu.selected)) {
+                        running = false;
+                    }
                     break;
 
                 case KEY_ESCAPE:
                     /* Cancel timeout and wait */
                     menu.timeout = 0;
+                    display_dirty = true;
                     break;
 
                 case 'e':
                 case 'E':
                     /* Edit entry */
                     menu_edit_entry();
+                    display_dirty = true;
                     break;
 
                 case 'b':
                 case 'B':
                     /* Boot now */
                     menu.timeout = 0;
-                    menu_boot_entry(menu.selected);
+                    if (menu_boot_entry(menu.selected)) {
+                        running = false;
+                    }
                     break;
 
                 case 'h':
@@ -748,6 +806,7 @@ static void menu_run(void)
                 case KEY_F1:
                     /* Toggle help */
                     menu.show_help = !menu.show_help;
+                    display_dirty = true;
                     break;
 
                 case KEY_F10:
@@ -760,6 +819,7 @@ static void menu_run(void)
                         u32 idx = key - '1';
                         if (idx < menu.entry_count) {
                             menu.selected = idx;
+                            display_dirty = true;
                         }
                     }
                     break;
@@ -792,8 +852,15 @@ static void timer_handler(void)
  */
 static void menu_init(void)
 {
-    /* Clear state */
-    memset(&menu, 0, sizeof(menu_state_t));
+    /* Simple byte-by-byte clear (memset may be optimized to SSE at -O2, avoid that) */
+    {
+        volatile u8 *p = (volatile u8 *)&menu;
+        u32 i;
+        for (i = 0; i < sizeof(menu_state_t); i++) {
+            *p++ = 0;
+        }
+    }
+    display_dirty = true;
 
     /* Initialize default entries */
     menu_init_default_entries();
@@ -814,6 +881,13 @@ static void menu_init(void)
  */
 void boot_menu_main(void)
 {
+    outb(0x3F8, 'B');
+    outb(0x3F8, 'M');
+    outb(0x3F8, '\n');
+
+    /* Switch VGA to text mode 3 so VGA buffer (0xB8000) is visible on display */
+    vga_init_text_mode();
+
     /* Initialize menu */
     menu_init();
 

@@ -608,7 +608,7 @@ void heap_init(void)
     size_t heap_size;
 
     pr_info("Initializing Kernel Heap...\n");
-
+    
     /* Set up kernel heap region */
     heap_start = KERNEL_HEAP_START;
     heap_size = KERNEL_HEAP_SIZE;
@@ -624,7 +624,6 @@ void heap_init(void)
         }
         vmm_map(addr, paddr, VMA_READ | VMA_WRITE);
     }
-
     /* Initialize arena */
     arena_init(&kernel_arena, heap_start, 4 * MB(1));
 

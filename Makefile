@@ -195,7 +195,8 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
             $(GUI_DIR)/renderer/renderer.c \
             $(SECURITY_DIR)/auth/auth.c \
             $(SECURITY_DIR)/auth/authorization.c \
-            $(SECURITY_DIR)/auth/pam.c
+            $(SECURITY_DIR)/auth/pam.c \
+            boot/bootloader/boot_menu.c
 
 # Object files
 ASM_OBJECTS = $(BUILD_DIR)/boot.o \
@@ -352,7 +353,8 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/cpu_core.o \
             $(BUILD_DIR)/apic.o \
             $(BUILD_DIR)/ecc.o \
-            $(BUILD_DIR)/sha.o
+            $(BUILD_DIR)/sha.o \
+            $(BUILD_DIR)/boot_menu.o
 
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
@@ -1090,6 +1092,10 @@ $(BUILD_DIR)/sha.o: $(SECURITY_DIR)/crypto/sha.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
 
+$(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1
+
 # Link kernel
 $(KERNEL_BIN): $(OBJECTS)
 	@echo "  [LD]    $@"
@@ -1111,29 +1117,28 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo '' >> $@
 	@echo 'menuentry "🖥️  NEXUS OS - Graphical Mode (Default)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
-	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin gfxpayload=1024x768x32' >> $@
-	@echo '    boot' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash virt=vmware' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "📟  NEXUS OS - Text Mode (VGA Console)" {' >> $@
 	@echo '    set gfxpayload=text' >> $@
-	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin vga=791' >> $@
-	@echo '    boot' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "🛡️  NEXUS OS - Safe Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic nolapic' >> $@
-	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "🐛  NEXUS OS - Debug Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin debug loglevel=7 earlyprintk=vga' >> $@
-	@echo '    boot' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "⚡  NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
-	@echo '    boot' >> $@
+	@echo '}' >> $@
+	@echo '' >> $@
+	@echo 'menuentry "🛠️  NEXUS OS - Interactive Boot Menu" {' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@
 
 # Create bootable ISO

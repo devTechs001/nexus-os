@@ -211,10 +211,10 @@ s64 sys_wait4(struct syscall_args *args)
     pr_debug("sys_wait4: waiting for PID %d\n", pid);
 
     /* Find child process */
-    if (pid == -1) {
+    if ((s32)pid == -1) {
         /* Wait for any child */
         ret = wait_for_children(&exit_code, options);
-    } else if (pid > 0) {
+    } else if ((s32)pid > 0) {
         /* Wait for specific child */
         child = task_by_pid(pid);
         if (!child) {

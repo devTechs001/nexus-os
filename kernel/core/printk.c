@@ -76,6 +76,17 @@ int vprintk(const char *fmt, __builtin_va_list args)
             fmt++;
         }
 
+        /* Precision (skip . and digits — we don't use precision) */
+        if (*fmt == '.') {
+            fmt++;
+            while (*fmt >= '0' && *fmt <= '9')
+                fmt++;
+        }
+
+        /* Length modifier: skip 'l' (and 'll') — all ints are 64-bit */
+        while (*fmt == 'l')
+            fmt++;
+
         char tmp[128];
         int num_len = 0;
 
@@ -154,6 +165,10 @@ int vprintk(const char *fmt, __builtin_va_list args)
     }
 
     *str = '\0';
+
+    /* Output to VGA console */
+    extern void console_write(const char *str, u32 len);
+    console_write(printk_buffer, len);
 
     /* Output to serial port - with status check */
     {

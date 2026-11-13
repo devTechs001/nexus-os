@@ -62,6 +62,14 @@ static void console_putchar(char c)
     u16 *cell;
     u16 ch_attr;
 
+    /* Always output to serial for debugging */
+    while (!(inb(0x3FD) & 0x20));
+    outb(0x3F8, (u8)c);
+    if (c == '\n') {
+        while (!(inb(0x3FD) & 0x20));
+        outb(0x3F8, '\r');
+    }
+
     if (!g_console.initialized)
         return;
 
@@ -131,10 +139,10 @@ void console_write(const char *str, u32 len)
 
     /* Update cursor */
     u32 pos = g_console.cursor_y * VGA_TEXT_WIDTH + g_console.cursor_x;
-    outb(0x0E, 0x3D4);
-    outb((pos >> 8) & 0xFF, 0x3D5);
-    outb(0x0F, 0x3D4);
-    outb(pos & 0xFF, 0x3D5);
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, (pos >> 8) & 0xFF);
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, pos & 0xFF);
 }
 
 /**
@@ -172,10 +180,10 @@ void console_clear(void)
     g_console.cursor_y = 0;
 
     /* Update cursor */
-    outb(0x0E, 0x3D4);
-    outb(0, 0x3D5);
-    outb(0x0F, 0x3D4);
-    outb(0, 0x3D5);
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, 0);
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, 0);
 }
 
 /**

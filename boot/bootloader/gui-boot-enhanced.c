@@ -209,14 +209,20 @@ static void boot_selected_entry(u32 index)
     vga_print(0, 10, "Booting NEXUS OS...", 0x07);
     vga_print(0, 12, entry->title, 0x07);
     vga_print(0, 14, "Kernel: ", 0x07);
-    vga_print(8, 14, "/boot/nexus.elf", 0x07);
+    vga_print(8, 14, "/boot/nexus-kernel.bin", 0x07);
     vga_print(0, 16, "Command line: ", 0x07);
     vga_print(14, 16, entry->kernel_params, 0x07);
 
-    for (volatile u32 i = 0; i < 50000000; i++);
+    /* Transition delay */
+    for (volatile u32 i = 0; i < 20000000; i++);
 
-    vga_print(0, 20, "Press any key to return to menu...", 0x08);
-    read_key();
+    /* Set global boot command line */
+    extern char g_boot_cmdline[512];
+    strncpy(g_boot_cmdline, entry->kernel_params, 511);
+    g_boot_cmdline[511] = '\0';
+
+    /* Exit the menu loop */
+    boot_state.running = false;
 }
 
 static void handle_input(void)
@@ -239,7 +245,9 @@ static void handle_input(void)
                 break;
             case 0x1C:  /* Enter */
                 boot_selected_entry(boot_state.current_entry);
-                draw_boot_menu();
+                break;
+            case 0x01:  /* Escape - cancel timeout */
+                boot_state.timeout = 0xFFFFFFFF;
                 break;
         }
     }
@@ -248,7 +256,7 @@ static void handle_input(void)
 void graphical_boot_menu(void)
 {
     boot_state.current_entry = 0;
-    boot_state.timeout = BOOT_MENU_TIMEOUT;
+    boot_state.timeout = BOOT_MENU_TIMEOUT * 100; /* Approximate units */
     boot_state.running = true;
     
     /* Find default entry */
@@ -263,16 +271,20 @@ void graphical_boot_menu(void)
     draw_boot_menu();
     
     /* Main loop */
-    while (boot_state.running && boot_state.timeout > 0) {
+    while (boot_state.running) {
         handle_input();
         
-        /* Simple delay */
-        for (volatile u32 i = 0; i < 1000000; i++);
-        
-        boot_state.timeout--;
-        update_timeout_display();
+        if (boot_state.timeout != 0xFFFFFFFF && boot_state.timeout > 0) {
+            boot_state.timeout--;
+            if (boot_state.timeout == 0) {
+                boot_selected_entry(boot_state.current_entry);
+            }
+            if (boot_state.timeout % 100 == 0) {
+                update_timeout_display();
+            }
+        }
+
+        /* Small delay */
+        for (volatile u32 i = 0; i < 100000; i++);
     }
-    
-    /* Boot selected entry */
-    /* In real implementation, would load kernel with parameters */
 }

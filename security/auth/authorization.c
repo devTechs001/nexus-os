@@ -545,7 +545,7 @@ s32 authz_group_add_member(u32 group_id, u32 uid)
  */
 s32 authz_group_remove_member(u32 group_id, u32 uid)
 {
-    authz_group_t *group;
+    authz_group_t *group = NULL;
     u32 i, j;
 
     for (i = 0; i < AUTHZ_MAX_GROUPS; i++) {
@@ -588,7 +588,7 @@ s32 authz_group_remove_member(u32 group_id, u32 uid)
  */
 bool authz_group_is_member(u32 group_id, u32 uid)
 {
-    authz_group_t *group;
+    authz_group_t *group = NULL;
     u32 i;
 
     for (i = 0; i < AUTHZ_MAX_GROUPS; i++) {

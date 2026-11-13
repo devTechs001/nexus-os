@@ -743,8 +743,8 @@ int ahci_identify_device(ahci_port_t *port)
     identify_data[0] = 0x0040;  /* ATA device */
     identify_data[10] = 0x1234; /* Serial (mock) */
     identify_data[27] = 0x5678; /* Model (mock) */
-    identify_data[60] = 1000000; /* LBA count (low) */
-    identify_data[61] = 0;      /* LBA count (high) */
+    identify_data[60] = 0x4240; /* LBA count (low 16 bits of 1000000) */
+    identify_data[61] = 0x000F; /* LBA count (high 16 bits of 1000000) */
     identify_data[100] = 512;   /* Native max LBA (low) */
     
     memcpy(dma_buffer, identify_data, 512);

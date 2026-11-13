@@ -741,17 +741,17 @@ void bootloader_main(void)
     /* Small delay */
     for (volatile u32 i = 0; i < 1000000; i++);
 
-    /* Jump to kernel */
-    typedef void (*kernel_entry_t)(boot_params_t *);
+    /* Jump to kernel - clear multiboot registers since we're not GRUB */
+    typedef void (*kernel_entry_t)(void);
     kernel_entry_t kernel_entry = (kernel_entry_t)KERNEL_LOAD_ADDRESS;
 
-    /* Pass boot params on stack */
     __asm__ volatile(
-        "push %0\n"
-        "call *%1\n"
+        "xor %%ebx, %%ebx\n"    /* Clear EBX - no multiboot info */
+        "xor %%eax, %%eax\n"    /* Clear EAX - no multiboot magic */
+        "jmp *%0\n"             /* Jump to kernel entry point */
         :
-        : "r"(&boot_params), "r"(kernel_entry)
-        : "memory"
+        : "r"(kernel_entry)
+        : "ebx", "eax", "memory"
     );
 
     /* Should never reach here */

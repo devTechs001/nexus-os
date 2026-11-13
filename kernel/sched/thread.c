@@ -17,6 +17,11 @@ extern atomic_t process_count;
 bool signal_pending(struct task_struct *task);
 bool signal_pending_current(void);
 
+/* Architecture-specific interfaces */
+extern int arch_init_thread(struct task_struct *thread, struct task_struct *parent,
+                            void (*fn)(void *), void *arg);
+extern void arch_setup_user_stack(struct task_struct *thread, size_t stack_size);
+
 /*===========================================================================*/
 /*                         THREAD MANAGEMENT DATA                            */
 /*===========================================================================*/
@@ -557,7 +562,7 @@ void user_thread_sleep(u64 ns)
 int thread_join(struct task_struct *thread, void **ret)
 {
     int exit_code;
-    pid_t pid;
+    s32 pid;
 
     if (!thread) {
         return -EINVAL;
@@ -566,7 +571,7 @@ int thread_join(struct task_struct *thread, void **ret)
     /* Wait for thread to exit */
     pid = wait_for_task(thread, &exit_code, 0);
     if (pid < 0) {
-        return pid;
+        return (int)pid;
     }
 
     /* Get return value */
@@ -850,12 +855,6 @@ void thread_stats(void)
 /*===========================================================================*/
 /*                         ARCHITECTURE INTERFACES                           */
 /*===========================================================================*/
-
-/* These functions must be implemented by architecture-specific code */
-
-extern int arch_init_thread(struct task_struct *thread, struct task_struct *parent,
-                            void (*fn)(void *), void *arg);
-extern void arch_setup_user_stack(struct task_struct *thread, size_t stack_size);
 
 /* Architecture-specific implementations (stubs for now) */
 int arch_init_thread(struct task_struct *thread, struct task_struct *parent,

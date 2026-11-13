@@ -21,4 +21,11 @@ void arch_init_paging(void)
     /* if vmm_init needs assistance. */
 
     pr_info("x86_64 paging initialized (4-level, 2MB pages enabled)\n");
+    
+    /* Early serial debug */
+    outb(0x3F8, 'P');
+    outb(0x3F8, 'G');
+    outb(0x3F8, 'O');
+    outb(0x3F8, 'K');
+    outb(0x3F8, '\n');
 }

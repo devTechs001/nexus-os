@@ -506,7 +506,7 @@ int sock_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
         return -EINVAL;
     }
 
-    if (addr_len < sizeof(struct sockaddr_in)) {
+    if ((size_t)addr_len < sizeof(struct sockaddr_in)) {
         return -EINVAL;
     }
 
@@ -562,7 +562,7 @@ int sock_connect(struct socket *sock, struct sockaddr *addr, int addr_len)
         return -EINVAL;
     }
 
-    if (addr_len < sizeof(struct sockaddr_in)) {
+    if ((size_t)addr_len < sizeof(struct sockaddr_in)) {
         return -EINVAL;
     }
 

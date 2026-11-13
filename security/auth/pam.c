@@ -488,8 +488,8 @@ int pam_set_item(pam_handle_t *pamh, int item_type, const void *item)
  */
 int pam_authenticate(pam_handle_t *pamh, int flags)
 {
-    const char *user;
-    const char *authtok;
+    const char *user = NULL;
+    const char *authtok = NULL;
     pam_message_t msg;
     pam_response_t *resp = NULL;
     int ret;
@@ -772,8 +772,8 @@ int pam_close_session(pam_handle_t *pamh, int flags)
 int pam_chauthtok(pam_handle_t *pamh, int flags)
 {
     const char *user;
-    const char *oldtok;
-    const char *newtok;
+    const char *oldtok = NULL;
+    const char *newtok = NULL;
     auth_user_t *auth_user;
     pam_message_t msg;
     pam_response_t *resp = NULL;

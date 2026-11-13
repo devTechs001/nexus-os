@@ -11,7 +11,7 @@
 /*                         BOOT CONFIGURATION                                */
 /*===========================================================================*/
 
-static boot_params_t g_boot_params = {
+boot_params_t g_boot_params = {
     .graphics_mode = true,
     .text_mode = false,
     .safe_mode = false,
@@ -99,9 +99,12 @@ void parse_boot_params(const char *cmdline)
             g_boot_params.debug_mode = true;
             printk("[BOOT] Debug mode enabled\n");
         }
-        else if (strcmp(token, "loglevel=7") == 0) {
-            g_boot_params.debug_mode = true;
-            printk("[BOOT] Log level: 7 (debug)\n");
+        else if (strcmp(token, "splash") == 0) {
+            g_boot_params.graphics_mode = true;
+            printk("[BOOT] Splash screen enabled\n");
+        }
+        else if (strncmp(token, "loglevel=", 9) == 0) {
+            printk("[BOOT] Log level set to %s\n", token + 9);
         }
         else if (strcmp(token, "earlyprintk=vga") == 0) {
             g_boot_params.debug_mode = true;
@@ -109,7 +112,13 @@ void parse_boot_params(const char *cmdline)
         }
         else if (strcmp(token, "virt=native") == 0) {
             g_boot_params.native_mode = true;
+            g_boot_params.vmware_mode = false;
             printk("[BOOT] Native hardware mode\n");
+        }
+        else if (strcmp(token, "virt=vmware") == 0) {
+            g_boot_params.vmware_mode = true;
+            g_boot_params.native_mode = false;
+            printk("[BOOT] VMware optimized mode\n");
         }
     }
     

@@ -10,6 +10,11 @@
 /* Forward declarations */
 bool vruntime_before(u64 a, u64 b);
 void rb_erase(struct rb_node *node, struct rb_root *root);
+void rb_erase_fixup(struct rb_root *root, struct rb_node *node,
+                    struct rb_node *parent);
+void rb_rotate_left(struct rb_root *root, struct rb_node *node);
+void rb_rotate_right(struct rb_root *root, struct rb_node *node);
+void rb_insert_color(struct rb_node *node, struct rb_root *root);
 static inline void rb_insert_color_cached(struct rb_node *node,
                                            struct rb_root *root,
                                            struct rb_node **leftmost);
@@ -451,7 +456,6 @@ void enqueue_task_fair(struct rq *rq, struct task_struct *task, int flags)
     struct rb_node **link = &cfs_rq->tasks_timeline.rb_node;
     struct rb_node *parent = NULL;
     struct sched_entity *entry;
-    int leftmost = 1;
 
     /* Update task vruntime if needed */
     if (task->state == TASK_NEW) {
@@ -472,7 +476,6 @@ void enqueue_task_fair(struct rq *rq, struct task_struct *task, int flags)
             link = &(*link)->rb_left;
         } else {
             link = &(*link)->rb_right;
-            leftmost = 0;
         }
     }
 

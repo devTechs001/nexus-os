@@ -10,7 +10,7 @@
 #include "../../kernel/include/kernel.h"
 
 /* PCI constants */
-#define PCI_ANY_ID  0xFFFFFFFF
+#define PCI_ANY_ID  0xFFFF
 
 /*===========================================================================*/
 /*                         BLUETOOTH CONFIGURATION                           */

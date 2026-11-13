@@ -890,7 +890,6 @@ static void slab_free(void *cache, void *obj)
 void slab_init(void)
 {
     pr_info("Initializing Slab Allocator...\n");
-
     spin_lock_init(&slab_caches_lock);
 
     /* Create general purpose caches */

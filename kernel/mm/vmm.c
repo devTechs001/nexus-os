@@ -85,7 +85,7 @@ static inline u64 pte_create(phys_addr_t paddr, u32 flags)
  */
 static inline phys_addr_t pte_get_addr(u64 entry)
 {
-    return (entry & PAGE_MASK);
+    return (entry & PAGE_MASK) & 0x000FFFFFFFFFFFFFULL;
 }
 
 /**
@@ -231,8 +231,8 @@ static u64 *vmm_get_pdpt(u64 *pml4e, bool create)
             return NULL;
         }
 
-        paddr = vmm_virt_to_phys((virt_addr_t)pdpt);
-        *pml4e = pte_create(paddr, VMA_READ | VMA_WRITE);
+        paddr = vmm_phys_to_virt((virt_addr_t)pdpt);
+        *pml4e = pte_create(paddr, VMA_READ | VMA_WRITE | VMA_EXEC);
 
         return pdpt;
     }
@@ -264,7 +264,7 @@ static u64 *vmm_get_pd(u64 *pdpte, bool create)
         }
 
         paddr = vmm_virt_to_phys((virt_addr_t)pd);
-        *pdpte = pte_create(paddr, VMA_READ | VMA_WRITE);
+        *pdpte = pte_create(paddr, VMA_READ | VMA_WRITE | VMA_EXEC);
 
         return pd;
     }
@@ -302,7 +302,7 @@ static u64 *vmm_get_pt(u64 *pde, bool create)
         }
 
         paddr = vmm_virt_to_phys((virt_addr_t)pt);
-        *pde = pte_create(paddr, VMA_READ | VMA_WRITE);
+        *pde = pte_create(paddr, VMA_READ | VMA_WRITE | VMA_EXEC);
 
         return pt;
     }
@@ -317,28 +317,42 @@ static u64 *vmm_get_pt(u64 *pde, bool create)
 static u64 *vmm_walk_page_table(u64 *pml4, virt_addr_t vaddr, bool create)
 {
     u64 *pml4e;
-    u64 *pdpte;
-    u64 *pde;
+    u64 *pdpt;
+    u64 *pdpt_entry;
+    u64 *pd;
+    u64 *pd_entry;
+    u64 *pt;
     u64 *pte;
 
     /* Get PML4 entry */
     pml4e = &pml4[get_pml4_index(vaddr)];
 
     /* Get PDPT */
-    pdpte = vmm_get_pdpt(pml4e, create);
-    if (!pdpte) {
+    pdpt = vmm_get_pdpt(pml4e, create);
+    if (!pdpt) {
         return NULL;
     }
 
-    /* Get PD */
-    pde = &pdpte[get_pd_index(vaddr)];
-    pdpte = vmm_get_pd(pde, create);
-    if (!pdpte) {
+    /* Get PD entry via PDPT index */
+    pdpt_entry = &pdpt[get_pdpt_index(vaddr)];
+
+    /* Get Page Directory */
+    pd = vmm_get_pd(pdpt_entry, create);
+    if (!pd) {
         return NULL;
     }
 
-    /* Get PT */
-    pte = &pdpte[get_pt_index(vaddr)];
+    /* Get PTE via PD index */
+    pd_entry = &pd[get_pd_index(vaddr)];
+
+    /* Get Page Table */
+    pt = vmm_get_pt(pd_entry, create);
+    if (!pt) {
+        return NULL;
+    }
+
+    /* Get PTE via PT index */
+    pte = &pt[get_pt_index(vaddr)];
 
     return pte;
 }
@@ -393,10 +407,8 @@ phys_addr_t vmm_virt_to_phys(virt_addr_t vaddr)
     u64 *pte;
     phys_addr_t paddr;
 
-    /* For kernel direct-mapped region */
-    if (vaddr >= KERNEL_VIRTUAL_BASE) {
-        return vaddr - KERNEL_VIRTUAL_BASE;
-    }
+    /* For kernel direct-mapped region - identity mapped during early boot */
+    return vaddr;
 
     spin_lock(&vmm_lock);
 
@@ -418,7 +430,8 @@ phys_addr_t vmm_virt_to_phys(virt_addr_t vaddr)
  */
 virt_addr_t vmm_phys_to_virt(phys_addr_t paddr)
 {
-    return paddr + KERNEL_VIRTUAL_BASE;
+    /* Identity-mapped during early boot (VMM hasn't set up high-half yet) */
+    return paddr;
 }
 
 /*===========================================================================*/
@@ -441,11 +454,8 @@ result_t vmm_map(virt_addr_t vaddr, phys_addr_t paddr, u32 flags)
         return EINVAL;
     }
 
-    spin_lock(&vmm_lock);
-
     pte = vmm_walk_page_table(kernel_pml4, vaddr, true);
     if (!pte) {
-        spin_unlock(&vmm_lock);
         return ENOMEM;
     }
 
@@ -454,8 +464,6 @@ result_t vmm_map(virt_addr_t vaddr, phys_addr_t paddr, u32 flags)
 
     /* Flush TLB for this address */
     vmm_flush_tlb_addr(vaddr);
-
-    spin_unlock(&vmm_lock);
 
     return OK;
 }
@@ -831,9 +839,6 @@ struct address_space *vmm_get_current_as(void)
  */
 static void vmm_init_kernel_as(void)
 {
-    phys_addr_t paddr;
-    u64 entry;
-
     kernel_as = (struct address_space *)kmalloc(sizeof(struct address_space));
     if (!kernel_as) {
         pr_err("VMM: Failed to allocate kernel address space\n");
@@ -854,19 +859,12 @@ static void vmm_init_kernel_as(void)
     kernel_as->vmas = NULL;
     kernel_as->size = 0;
 
-    /* Map kernel code and data */
-    paddr = KERNEL_PHYSICAL_BASE;
-
-    /* Create identity mapping for kernel */
-    for (virt_addr_t vaddr = KERNEL_VIRTUAL_BASE;
-         vaddr < KERNEL_VIRTUAL_BASE + (64 * MB(1));
-         vaddr += PAGE_SIZE) {
-
-        entry = pte_create(paddr, VMA_READ | VMA_WRITE | VMA_EXEC);
-        kernel_pml4[get_pml4_index(vaddr)] = entry;
-
-        paddr += PAGE_SIZE;
-    }
+    /* Adopt boot.asm identity mapping (0-4GB) into the new page table */
+    u64 current_cr3;
+    __asm__ __volatile__("mov %%cr3, %0" : "=r"(current_cr3));
+    u64 *boot_pml4 = (u64 *)current_cr3;  /* Identity-mapped */
+    for (int i = 0; i < 4; i++)          /* Copy 4 GB of identity mapping */
+        kernel_pml4[i] = boot_pml4[i];
 
     current_as = kernel_as;
 
@@ -890,7 +888,14 @@ void vmm_init(void)
     /* Initialize kernel address space */
     vmm_init_kernel_as();
 
-    /* Flush TLB */
+    /* Switch to the new kernel page table */
+    if (kernel_pml4) {
+        phys_addr_t pml4_paddr = vmm_virt_to_phys((virt_addr_t)kernel_pml4);
+        __asm__ __volatile__("mov %0, %%cr3" :: "r"(pml4_paddr));
+        pr_info("VMM: Switched to new kernel page table at 0x%lx\n", pml4_paddr);
+    }
+
+    /* Flush TLB (already done by CR3 reload, but for completeness) */
     vmm_flush_tlb();
 
     pr_info("VMM: 4-level paging enabled\n");

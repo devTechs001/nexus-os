@@ -692,12 +692,12 @@ int acpi_enter_sleep_state(u32 state)
 
     /* Write to PM1a control register */
     if (acpi_manager.acpi.pm1a_cnt_addr) {
-        /* outw(pm1a_value, acpi_manager.acpi.pm1a_cnt_addr); */
+        vga_outw(acpi_manager.acpi.pm1a_cnt_addr, pm1a_value);
     }
 
     /* Write to PM1b control register if present */
     if (acpi_manager.acpi.pm1b_cnt_addr) {
-        /* outw(pm1b_value, acpi_manager.acpi.pm1b_cnt_addr); */
+        vga_outw(acpi_manager.acpi.pm1b_cnt_addr, pm1b_value);
     }
 
     /* Wait for sleep (CPU will halt) */

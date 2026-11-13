@@ -16,7 +16,7 @@
 #define PCI_MAX_DEVICES           256
 #define PCI_MAX_BARS              6
 #define PCI_MAX_IRQ_LINES         32
-#define PCI_ANY_ID                0xFFFFFFFF
+#define PCI_ANY_ID                0xFFFF
 
 /* PCI Config Space Offsets */
 #define PCI_CONFIG_VENDOR_ID      0x00

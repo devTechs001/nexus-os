@@ -189,7 +189,7 @@ static void vga_putchar(char c, u8 color)
 /**
  * vga_clear - Clear screen
  */
-static void vga_clear(u8 color)
+void vga_clear(u8 color)
 {
     for (u32 i = 0; i < VGA_HEIGHT * VGA_WIDTH; i++) {
         vga_buffer[i] = ' ' | (color << 8);
@@ -529,6 +529,15 @@ void kernel_main_64(u64 multiboot_info, u64 multiboot_magic)
     kernel_main(multiboot_info);
 }
 
+/* Global boot parameters */
+extern boot_params_t g_boot_params;
+
+/* Global buffer for boot menu command line */
+__section(".bss") char g_boot_cmdline[512];
+
+/* External boot menu entry point */
+extern void boot_menu_main(void);
+
 /**
  * kernel_main - Main kernel entry point
  * @multiboot_info: Pointer to multiboot info structure from bootloader
@@ -538,6 +547,15 @@ void kernel_main_64(u64 multiboot_info, u64 multiboot_magic)
 void kernel_main(u64 multiboot_info)
 {
     const char *cmdline = NULL;
+
+    /* Early serial debug - confirm we reached kernel_main */
+    outb(0x3F8, 'K');
+    outb(0x3F8, 'E');
+    outb(0x3F8, 'R');
+    outb(0x3F8, 'N');
+    outb(0x3F8, 'E');
+    outb(0x3F8, 'L');
+    outb(0x3F8, '\n');
 
     /* Parse multiboot info to get command line */
     if (multiboot_info) {
@@ -554,7 +572,15 @@ void kernel_main(u64 multiboot_info)
             /* Type 1 = command line tag */
             if (type == 1 && size > 8) {
                 cmdline = (const char *)(tag + 2);
-                break;
+            }
+            /* Type 8 = framebuffer info tag */
+            else if (type == 8 && size >= 32) {
+                g_boot_params.gfx_addr = *(u64 *)((u8 *)tag + 8);
+                g_boot_params.gfx_pitch = tag[4];
+                g_boot_params.gfx_width = tag[5];
+                g_boot_params.gfx_height = tag[6];
+                g_boot_params.gfx_depth = ((u8 *)tag)[28];
+                g_boot_params.gfx_type = ((u8 *)tag)[29];
             }
 
             /* Move to next tag (align to 8 bytes) */
@@ -562,11 +588,21 @@ void kernel_main(u64 multiboot_info)
         }
     }
 
-    /* Parse boot parameters */
+    /* Parse boot parameters or show menu */
     if (cmdline && cmdline[0]) {
         parse_boot_params(cmdline);
     } else {
-        printk("[BOOT] No command line provided, using defaults\n");
+        printk("[BOOT] No command line provided. Launching Interactive Boot Menu...\n");
+        boot_menu_main();
+        
+        /* If boot_menu_main returns, it has filled g_boot_cmdline */
+        if (g_boot_cmdline[0]) {
+            printk("[BOOT] Booting with parameters: %s\n", g_boot_cmdline);
+            parse_boot_params(g_boot_cmdline);
+        } else {
+            printk("[BOOT] No selection made, using default VMware mode\n");
+            parse_boot_params("quiet splash virt=vmware");
+        }
     }
 
     /* Initialize consolidated console first */
@@ -894,10 +930,6 @@ u32 kernel_get_state(void)
 /*===========================================================================*/
 
 /* Memory Management - now implemented in mm/*.c */
-/* void vmm_init(void) { } */
-/* void heap_init(void) { } */
-/* void slab_init(void) { } */
-/* void pmm_init(void) { } */
 
 /* Interrupt initialization */
 extern void interrupt_init(void);
