@@ -1237,14 +1237,79 @@ int desktop_hide_context_menu(desktop_environment_t *env)
  */
 int desktop_add_menu_item(desktop_menu_t *menu, menu_item_t *item)
 {
+    menu_item_t *tail;
+
     if (!menu || !item) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would add to menu's item list */
+
+    /*
+     * This incremented item_count and stored nothing. The item the caller had
+     * just built -- label, icon, shortcut, click handler -- was dropped on the
+     * floor, so every context menu and start menu in the GUI had a non-zero
+     * item count and an empty item list, and rendering them produced nothing.
+     *
+     * Items are chained through menu_item_t.next so the menu has no fixed
+     * capacity.
+     */
+    item->next = NULL;
+
+    if (!menu->items) {
+        menu->items = item;
+    } else {
+        for (tail = menu->items; tail->next; tail = tail->next) {
+            /* find end */
+        }
+        tail->next = item;
+    }
+
     menu->item_count++;
-    
+
     return 0;
+}
+
+/**
+ * menu_item_create - Allocate and initialise a menu item
+ * @label: Item label (empty string for a separator)
+ * @icon: Icon path, or NULL
+ * @shortcut: Shortcut text, or NULL
+ *
+ * Returns: new item, or NULL on failure
+ *
+ * See desktop-env.h: the GUI called a three-argument create_menu_item() that
+ * did not exist anywhere in the tree.
+ */
+menu_item_t *menu_item_create(const char *label, const char *icon,
+                             const char *shortcut)
+{
+    menu_item_t *item = kmalloc(sizeof(menu_item_t));
+
+    if (!item) {
+        return NULL;
+    }
+
+    memset(item, 0, sizeof(*item));
+
+    if (label) {
+        strncpy(item->label, label, sizeof(item->label) - 1);
+    }
+
+    if (icon) {
+        strncpy(item->icon_path, icon, sizeof(item->icon_path) - 1);
+    }
+
+    if (shortcut) {
+        strncpy(item->shortcut, shortcut, sizeof(item->shortcut) - 1);
+    }
+
+    item->enabled = true;
+
+    /* An empty label with no icon is the conventional separator. */
+    if (item->label[0] == '\0') {
+        item->item_type = 1;
+    }
+
+    return item;
 }
 
 /**

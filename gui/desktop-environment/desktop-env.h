@@ -504,6 +504,23 @@ int desktop_toggle_start_menu(desktop_environment_t *env);
 int desktop_show_context_menu(desktop_environment_t *env, s32 x, s32 y);
 int desktop_hide_context_menu(desktop_environment_t *env);
 int desktop_add_menu_item(desktop_menu_t *menu, menu_item_t *item);
+
+/**
+ * menu_item_create - Allocate and initialise a menu item
+ * @label: Item label (may be empty for a separator)
+ * @icon: Icon path (may be NULL)
+ * @shortcut: Keyboard shortcut text (may be NULL)
+ *
+ * Returns: new item, or NULL on failure. Free with kfree().
+ *
+ * Callers throughout the GUI built items with a three-argument
+ * create_menu_item() with this exact signature. No such function existed: the
+ * only create_menu_item() in the tree was a static helper inside desktop-env.c
+ * that fills in a caller-provided struct and takes five arguments, so every
+ * call site was an implicit declaration with a different prototype.
+ */
+menu_item_t *menu_item_create(const char *label, const char *icon,
+                             const char *shortcut);
 int desktop_remove_menu_item(desktop_menu_t *menu, u32 item_id);
 
 /* Search */
