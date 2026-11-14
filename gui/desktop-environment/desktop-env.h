@@ -125,7 +125,7 @@ typedef struct {
 /**
  * Desktop Icon
  */
-typedef struct {
+typedef struct desktop_icon {
     u32 icon_id;                    /* Icon ID */
     char name[128];                 /* Icon Name */
     char path[512];                 /* Item Path */
@@ -189,7 +189,7 @@ typedef struct {
 /**
  * Search Bar
  */
-typedef struct {
+typedef struct search_bar {
     u32 search_id;                  /* Search ID */
     char placeholder[64];           /* Placeholder Text */
     char query[512];                /* Current Query */
@@ -212,7 +212,7 @@ typedef struct {
 /**
  * Panel Item (for taskbar, system tray, etc.)
  */
-typedef struct {
+typedef struct panel_item {
     u32 item_id;                    /* Item ID */
     char name[64];                  /* Item Name */
     char icon_path[256];            /* Icon Path */
@@ -262,7 +262,7 @@ typedef struct {
 /**
  * System Tray Item
  */
-typedef struct {
+typedef struct system_tray_item {
     u32 tray_id;                    /* Tray ID */
     char name[64];                  /* Item Name */
     char icon_path[256];            /* Icon Path */
@@ -293,7 +293,7 @@ typedef struct {
 /**
  * Notification
  */
-typedef struct {
+typedef struct notification {
     u32 notify_id;                  /* Notification ID */
     char title[128];                /* Title */
     char message[512];              /* Message */
@@ -343,7 +343,7 @@ typedef struct {
 /**
  * Clock/Calendar Widget
  */
-typedef struct {
+typedef struct clock_widget {
     s32 x;                          /* X Position */
     s32 y;                          /* Y Position */
     u32 width;                      /* Width */
@@ -409,6 +409,11 @@ typedef struct {
     
     /* Menus */
     desktop_menu_t start_menu;      /* Start Menu */
+    /*
+     * Backing store for start_menu.items. desktop_menu_t holds a pointer, and
+     * nothing ever allocated one, so the menu was constructed empty.
+     */
+    menu_item_t start_menu_items[DESKTOP_MAX_MENU_ITEMS];
     desktop_menu_t context_menu;    /* Context Menu */
     desktop_menu_t *active_menu;    /* Active Menu */
     
