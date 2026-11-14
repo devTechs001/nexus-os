@@ -152,6 +152,11 @@ extern int onboarding_wizard_update(onboarding_wizard_t *wizard);
 /* gui/compositor/window_manager.c - draws the window list to a framebuffer. */
 extern int window_manager_render(u32 *fb, u32 pitch, u32 fb_w, u32 fb_h);
 
+/* resource_sharing MODE_VMWARE; defined here because init.c does not include
+ * resource-sharing.h (it declares the interface locally to avoid pulling the
+ * whole subsystem header into core init). */
+#define MODE_RESOURCE_VMWARE 0
+
 /* Initcall sections */
 extern initcall_t __initcall_start[], __initcall_end[];
 
@@ -377,7 +382,55 @@ void kernel_init_drivers(void)
     if (resource_sharing_init(resource_sharing_get_global_config()) != 0) {
         pr_warn("  Failed to initialize resource sharing.\n");
     }
+
+    /*
+     * "virt=vmware" used to be parsed into g_boot_params.vmware_mode, printed
+     * once, and then ignored - the flag changed no behaviour at all. Honour it
+     * here: it forces the VMware guest configuration even when CPUID detection
+     * disagrees, which is what the flag is for (an operator who knows the
+     * platform better than a vendor string does).
+     */
+    {
+        boot_params_t *bp = get_boot_params();
+        if (bp && bp->vmware_mode) {
+            extern int resource_sharing_quick_setup(resource_sharing_config_t *cfg,
+                                                    int mode);
+            if (resource_sharing_quick_setup(resource_sharing_get_global_config(),
+                                             MODE_RESOURCE_VMWARE) == 0) {
+                pr_info("  [VM] VMware mode forced by boot parameter.\n");
+            } else {
+                pr_warn("  [VM] Forcing VMware mode failed.\n");
+            }
+        }
+    }
     
+    /*
+     * Nested virtualization, only when asked for.
+     *
+     * nested_virt_init() had no caller anywhere in the tree - the whole module
+     * was unreachable, which is why its VMXON/VMCLEAR/VMLAUNCH gaps never
+     * showed up in testing.
+     */
+    {
+        boot_params_t *bp = get_boot_params();
+        if (bp && bp->nested_virt) {
+            extern int nested_virt_init(void);
+            extern int nested_virt_enable(u32 level);
+
+            pr_info("  [VIRT] Probing nested virtualization...\n");
+            if (nested_virt_init() == 0) {
+                if (nested_virt_enable(1) == 0) {
+                    pr_info("  [VIRT] Nested virtualization level 1 enabled.\n");
+                } else {
+                    pr_warn("  [VIRT] Nested virtualization unavailable on "
+                            "this CPU/firmware.\n");
+                }
+            } else {
+                pr_warn("  [VIRT] Nested virtualization init failed.\n");
+            }
+        }
+    }
+
     /* Late driver initialization */
     driver_late_init();
     

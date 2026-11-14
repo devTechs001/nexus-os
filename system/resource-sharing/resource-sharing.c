@@ -218,6 +218,20 @@ u64 vmware_backdoor_cmd(u32 cmd, u32 ebx, u32 ecx, u32 edx)
     u32 port = 0x5658;    /* VMware Backdoor Port 'VX' */
 
     /*
+     * Refuse to touch the backdoor port unless CPUID says we are on VMware.
+     *
+     * This used to issue `inl` on port 0x5658 unconditionally. On bare metal,
+     * or under VirtualBox/QEMU/Hyper-V, that port is not the VMware backdoor
+     * and reading it is undefined; it can raise #GP and take the machine down
+     * during boot. Everything here is guarded by the detect result instead.
+     */
+    if (g_resource_config.virtualization_mode != MODE_VMWARE) {
+        printk("[VMWARE] Backdoor command 0x%X skipped - not running on VMware "
+               "(mode=%d)\n", cmd, g_resource_config.virtualization_mode);
+        return 0;
+    }
+
+    /*
      * VMware Backdoor I/O
      * EAX = Magic Number
      * EBX = Parameter / Return

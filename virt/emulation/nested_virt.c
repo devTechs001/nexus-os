@@ -8,6 +8,7 @@
 
 #include "../../kernel/include/types.h"
 #include "../../kernel/include/kernel.h"
+#include "../../kernel/mm/mm.h"   /* vmm_virt_to_phys, virt_addr_t */
 
 #define NESTED_VMX_MAX_LEVELS     3
 #define NESTED_VMX_VPID_MAX       0xFFFF
@@ -216,41 +217,203 @@ static int nested_vmx_init(void)
     return 0;
 }
 
-/* Enable Nested VMX */
+/*
+ * Read the VMX capability MSR that reports which bits of CR4/CR0 may be set
+ * while VMX is active, and which are required. IA32_VMX_CR4_FIXED0 is 0x484.
+ */
+static u64 vmx_cr4_fixed0(void)
+{
+    u32 lo, hi;
+
+    __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0x484u));
+    return ((u64)hi << 32) | lo;
+}
+
+/*
+ * Enable Nested VMX - real instruction sequence.
+ *
+ * This used to set a boolean and print "enabled" without executing anything.
+ * The sequence below is the architectural one: set CR4.VMXE, write the VMCS
+ * revision identifier into the VMXON region, then VMXON against its physical
+ * address, checking CF for failure.
+ *
+ * Everything is gated on CPUID reporting VMX (bit 5 of ECX on leaf 1) and the
+ * MSR lock bit (IA32_FEATURE_CONTROL, 0x3A, bit 0). Without the lock bit set,
+ * VMXON raises #GP; a kernel that calls it anyway dies at boot. Where the
+ * hardware cannot support it, this reports that and returns failure rather
+ * than claiming success.
+ */
 static int nested_vmx_enable(void)
 {
+    u64 cr4;
+    u64 fixed0;
+    u8 failed;
+
     printk("[NESTED-VIRT] Enabling nested VMX...\n");
-    
-    /* VMXON instruction would be executed here */
+
+    if (!g_nested_virt.nested_vmx_supported) {
+        printk("[NESTED-VIRT] VMX not reported by CPUID - not enabling\n");
+        return -1;
+    }
+
+    /* IA32_FEATURE_CONTROL must have the lock bit and VMXON-outside-SMX set. */
+    {
+        u32 lo, hi;
+        __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0x3Au));
+
+        if (!(lo & (1u << 0))) {
+            printk("[NESTED-VIRT] IA32_FEATURE_CONTROL not locked - firmware "
+                   "has not enabled VMX, not enabling\n");
+            return -1;
+        }
+        if (!(lo & (1u << 2))) {
+            printk("[NESTED-VIRT] VMXON outside SMX not permitted - "
+                   "not enabling\n");
+            return -1;
+        }
+    }
+
+    if (!g_nested_virt.vmx_state.vmxon_region_virt) {
+        printk("[NESTED-VIRT] No VMXON region allocated\n");
+        return -1;
+    }
+
+    /* Record the physical address of the VMXON region. */
+    g_nested_virt.vmx_state.vmxon_region_phys =
+        (u64)vmm_virt_to_phys((virt_addr_t)g_nested_virt.vmx_state.vmxon_region_virt);
+
+    /* The VMXON region must carry the VMCS revision identifier. */
+    *(u32 *)g_nested_virt.vmx_state.vmxon_region_virt =
+        g_nested_virt.vmx_state.vmcs_revision_id;
+
+    /* Set CR4.VMXE (bit 13), honouring the fixed bits the CPU requires. */
+    __asm__ __volatile__("mov %%cr4, %0" : "=r"(cr4));
+
+    fixed0 = vmx_cr4_fixed0();
+    cr4 |= fixed0;
+    cr4 |= (1ull << 13);            /* CR4.VMXE */
+
+    __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4) : "memory");
+
+    /* VMXON [phys] - sets CF on failure. */
+    failed = 0;
+    __asm__ __volatile__(
+        "vmxon %1\n\t"
+        "setc %0"
+        : "=q"(failed)
+        : "m"(g_nested_virt.vmx_state.vmxon_region_phys)
+        : "memory", "cc");
+
+    if (failed) {
+        printk("[NESTED-VIRT] VMXON failed (CF set) - VMX not left on\n");
+
+        /* Clear VMXE again; leaving it set with VMX off is invalid. */
+        __asm__ __volatile__("mov %%cr4, %0" : "=r"(cr4));
+        cr4 &= ~(1ull << 13);
+        __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4) : "memory");
+
+        g_nested_virt.vmx_state.vmxon_enabled = false;
+        return -1;
+    }
+
     g_nested_virt.vmx_state.vmxon_enabled = true;
-    
-    printk("[NESTED-VIRT] Nested VMX enabled\n");
-    
+
+    printk("[NESTED-VIRT] VMXON succeeded, VMX operation entered "
+           "(root region 0x%lX)\n",
+           (u64)g_nested_virt.vmx_state.vmxon_region_phys);
+
     return 0;
 }
 
-/* Disable Nested VMX */
+/* Disable Nested VMX - real VMXOFF, then clear CR4.VMXE. */
 static int nested_vmx_disable(void)
 {
+    u64 cr4;
+
     printk("[NESTED-VIRT] Disabling nested VMX...\n");
-    
-    /* VMXOFF instruction would be executed here */
+
+    if (!g_nested_virt.vmx_state.vmxon_enabled) {
+        return 0;
+    }
+
+    __asm__ __volatile__("vmxoff" ::: "memory", "cc");
+
+    __asm__ __volatile__("mov %%cr4, %0" : "=r"(cr4));
+    cr4 &= ~(1ull << 13);           /* clear CR4.VMXE */
+    __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4) : "memory");
+
     g_nested_virt.vmx_state.vmxon_enabled = false;
-    
-    printk("[NESTED-VIRT] Nested VMX disabled\n");
-    
+
+    printk("[NESTED-VIRT] VMXOFF executed, VMX operation left\n");
+
     return 0;
 }
 
-/* Create Nested VMCS */
+/*
+ * Create Nested VMCS - real VMCLEAR + VMPTRLD.
+ *
+ * Both instructions take a 64-bit memory operand containing the physical
+ * address of the VMCS region (verified against the assembler: the register
+ * form is invalid), and both report failure in CF.
+ *
+ * VMCLEAR is required before a region may be loaded for the first time or
+ * reused; the SDM makes it an error to VMPTRLD a region that is already
+ * current or that has never been cleared.
+ */
 static int nested_vmcs_create(void)
 {
+    u8 failed;
+
     printk("[NESTED-VIRT] Creating nested VMCS...\n");
-    
-    /* VMCLEAR instruction */
-    /* VMPTRLD instruction */
-    
-    printk("[NESTED-VIRT] Nested VMCS created\n");
+
+    if (!g_nested_virt.vmx_state.vmxon_enabled) {
+        printk("[NESTED-VIRT] VMX is not enabled - cannot load a VMCS\n");
+        return -1;
+    }
+
+    if (!g_nested_virt.vmx_state.vmcs_region_virt) {
+        printk("[NESTED-VIRT] No VMCS region allocated\n");
+        return -1;
+    }
+
+    g_nested_virt.vmx_state.vmcs_region_phys =
+        (u64)vmm_virt_to_phys((virt_addr_t)g_nested_virt.vmx_state.vmcs_region_virt);
+
+    /* The VMCS revision identifier must be the first field of the region. */
+    *(u32 *)g_nested_virt.vmx_state.vmcs_region_virt =
+        g_nested_virt.vmx_state.vmcs_revision_id;
+
+    /* VMCLEAR [phys] */
+    failed = 0;
+    __asm__ __volatile__(
+        "vmclear %1\n\t"
+        "setc %0"
+        : "=q"(failed)
+        : "m"(g_nested_virt.vmx_state.vmcs_region_phys)
+        : "memory", "cc");
+
+    if (failed) {
+        printk("[NESTED-VIRT] VMCLEAR failed (CF set)\n");
+        return -1;
+    }
+
+    /* VMPTRLD [phys] */
+    failed = 0;
+    __asm__ __volatile__(
+        "vmptrld %1\n\t"
+        "setc %0"
+        : "=q"(failed)
+        : "m"(g_nested_virt.vmx_state.vmcs_region_phys)
+        : "memory", "cc");
+
+    if (failed) {
+        printk("[NESTED-VIRT] VMPTRLD failed (CF set)\n");
+        return -1;
+    }
+
+    printk("[NESTED-VIRT] VMCS loaded at 0x%lX (current)\n",
+           (u64)g_nested_virt.vmx_state.vmcs_region_phys);
+
     
     return 0;
 }
@@ -259,16 +422,27 @@ static int nested_vmcs_create(void)
 static int nested_vmx_run(void)
 {
     printk("[NESTED-VIRT] Running nested VM...\n");
-    
-    /* VMLAUNCH or VMRESUME instruction */
-    
-    /* Handle VM-Exit */
-    /* - Reflect to L1 hypervisor if needed */
-    /* - Handle in L0 if it's a physical exit */
-    
-    printk("[NESTED-VIRT] Nested VM execution complete\n");
-    
-    return 0;
+
+    /*
+     * VMLAUNCH is deliberately NOT executed here.
+     *
+     * Launching a VMCS that has not been fully configured does not fail
+     * politely: the CPU enters guest state built from whatever is in the
+     * control fields - zeroed memory - and the first instruction fetch goes to
+     * a guest-physical address with no EPT mapping. The result is a VM-exit
+     * storm or a triple fault, at ring -1, with no handler installed.
+     *
+     * A real implementation has to populate the entire VMCS first: pin-based
+     * and primary/secondary processor controls, exit controls, the guest and
+     * host state areas, CR0/CR4 fixed bits, MSR bitmaps and an EPT identity
+     * map. That work is not done, so this refuses rather than launching a
+     * half-built guest and hanging the machine.
+     */
+    printk("[NESTED-VIRT] VMLAUNCH not performed: the VMCS is not configured "
+           "(no guest/host state, no EPT). Refusing to launch - a VMCS entered "
+           "in this state faults the CPU rather than failing cleanly.\n");
+
+    return -1;
 }
 
 /* Forward declarations: the EPT violation handler flushes through INVEPT. */
@@ -533,19 +707,37 @@ int nested_virt_enable(u32 level)
     }
     
     printk("[NESTED-VIRT] Enabling nested virtualization level %u\n", level);
-    
+
+    /*
+     * The results were discarded and this always returned success, so a
+     * caller could not tell "VMX is on" from "the firmware never allowed it".
+     * VMXON and VMCLEAR/VMPTRLD can all fail, and failing silently is how a
+     * hypervisor ends up believing it has hardware it does not have.
+     */
+    int vmx_rc = 0;
+    int svm_rc = 0;
+
     if (g_nested_virt.nested_vmx_supported) {
-        nested_vmx_enable();
+        vmx_rc = nested_vmx_enable();
     }
-    
+
     if (g_nested_virt.nested_svm_supported) {
-        nested_svm_enable();
+        svm_rc = nested_svm_enable();
     }
-    
+
+    if (vmx_rc != 0 && svm_rc != 0) {
+        printk("[NESTED-VIRT] Neither VMX nor SVM could be enabled - "
+               "nested virtualization is unavailable\n");
+        return -1;
+    }
+
     g_nested_virt.max_nested_level = level;
-    
-    printk("[NESTED-VIRT] Nested virtualization enabled (level %u)\n", level);
-    
+
+    printk("[NESTED-VIRT] Nested virtualization enabled (level %u, "
+           "vmx=%s, svm=%s)\n", level,
+           vmx_rc == 0 ? "on" : "off",
+           svm_rc == 0 ? "on" : "off");
+
     return 0;
 }
 

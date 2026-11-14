@@ -362,6 +362,7 @@ typedef struct {
     bool nolapic;
     bool vm_manager;    /* launch the Virtualization Manager after boot */
     bool terminal;      /* launch the Terminal (shell) after boot */
+    bool nested_virt;  /* probe and enable nested virtualization */
 } boot_params_t;
 
 void parse_boot_params(const char *cmdline);

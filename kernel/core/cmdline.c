@@ -122,6 +122,16 @@ void parse_boot_params(const char *cmdline)
             g_boot_params.terminal = true;
             printk("[BOOT] Terminal will start after boot\n");
         }
+        else if (strcmp(token, "nested_virt") == 0) {
+            /*
+             * Opt in to probing and enabling nested virtualization. Off by
+             * default: VMXON is only safe once firmware has set the
+             * IA32_FEATURE_CONTROL lock bit, and there is no reason to touch
+             * the VMX state on a machine that has no use for it.
+             */
+            g_boot_params.nested_virt = true;
+            printk("[BOOT] Nested virtualization will be probed\n");
+        }
         else if (strncmp(token, "loglevel=", 9) == 0) {
             printk("[BOOT] Log level set to %s\n", token + 9);
         }
