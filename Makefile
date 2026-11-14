@@ -1268,29 +1268,29 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo 'set menu_color_highlight=black/blue' >> $@
 	@echo 'set menu_color_normal=light-gray/black' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🖥️  NEXUS OS - Graphical Mode (Default)" {' >> $@
+	@echo 'menuentry "[GRAPHICAL] NEXUS OS - Graphical Mode (Default)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash virt=auto' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "📟  NEXUS OS - Text Mode (VGA Console)" {' >> $@
+	@echo 'menuentry "[TEXT]      NEXUS OS - Text Mode (VGA Console)" {' >> $@
 	@echo '    set gfxpayload=text' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🛡️  NEXUS OS - Safe Mode" {' >> $@
+	@echo 'menuentry "[SAFE]      NEXUS OS - Safe Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic nolapic' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🐛  NEXUS OS - Debug Mode" {' >> $@
+	@echo 'menuentry "[DEBUG]     NEXUS OS - Debug Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin debug loglevel=7 earlyprintk=vga' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "⚡  NEXUS OS - Native Hardware" {' >> $@
+	@echo 'menuentry "[NATIVE]    NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🛠️  NEXUS OS - Interactive Boot Menu" {' >> $@
+	@echo 'menuentry "[MENU]      NEXUS OS - Interactive Boot Menu" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@
 

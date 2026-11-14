@@ -142,8 +142,35 @@ __section(".data") static u32 vga_cursor_y = 0;
 /**
  * vga_putchar - Write character to VGA buffer
  */
+/*
+ * COM1 mirror.
+ *
+ * Everything the kernel prints went ONLY to the VGA text buffer at 0xB8000.
+ * Once GRUB has put the machine into a linear framebuffer graphics mode that
+ * memory is no longer scanned out, so every diagnostic - including
+ * "[SPLASH] ... skipped", the framebuffer address, and the probe result - was
+ * written somewhere nobody could ever see. A blank screen and a working boot
+ * produced byte-identical evidence.
+ *
+ * Mirroring to COM1 (0x3F8) makes the boot log readable over a serial console
+ * regardless of what the display is doing, which is what any "the screen is
+ * blank" report actually needs.
+ */
+static void serial_mirror(char c)
+{
+    /* Wait for the transmit holding register to drain (bounded). */
+    for (u32 spin = 0; spin < 100000; spin++) {
+        if (inb(0x3FD) & 0x20) {
+            break;
+        }
+    }
+    outb(0x3F8, (u8)c);
+}
+
 static void vga_putchar(char c, u8 color)
 {
+    serial_mirror(c);
+
     if (c == '\n') {
         vga_cursor_x = 0;
         vga_cursor_y++;
@@ -308,27 +335,41 @@ int vprintk(const char *fmt, __builtin_va_list args)
             }
             case 'd':
             case 'i': {
-                s64 val = __builtin_va_arg(args, s64);
+                /*
+                 * Read as int, NOT s64.
+                 *
+                 * Varargs are promoted to int and no further, so a caller
+                 * passing -5 puts a 32-bit -5 in a register. Consuming 64 bits
+                 * for it read the (zero-extended) full register and printed
+                 * 4294967291. Every negative %d in the tree - hundreds of
+                 * error codes, return values and deltas - printed as a huge
+                 * unsigned number. Verified against the real SysV ABI.
+                 */
+                int val = __builtin_va_arg(args, int);
                 if (val < 0) {
                     vga_putchar('-', color);
-                    val = -val;
+                    (void)val;
+                    print_decimal((u64)(-(s64)val), color);
+                } else {
+                    print_decimal((u64)val, color);
                 }
-                print_decimal((u64)val, color);
                 break;
             }
             case 'u': {
-                u64 val = __builtin_va_arg(args, u64);
-                print_decimal(val, color);
+                /* 32-bit read: matches how the call sites pass values.
+                   Use %lu / %llu for 64-bit ones. */
+                unsigned int val = __builtin_va_arg(args, unsigned int);
+                print_decimal((u64)val, color);
                 break;
             }
             case 'x': {
-                u64 val = __builtin_va_arg(args, u64);
-                print_hex(val, color, false, 0);
+                unsigned int val = __builtin_va_arg(args, unsigned int);
+                print_hex((u64)val, color, false, 0);
                 break;
             }
             case 'X': {
-                u64 val = __builtin_va_arg(args, u64);
-                print_hex(val, color, true, 0);
+                unsigned int val = __builtin_va_arg(args, unsigned int);
+                print_hex((u64)val, color, true, 0);
                 break;
             }
             case 'p': {
@@ -345,8 +386,56 @@ int vprintk(const char *fmt, __builtin_va_list args)
                 vga_putchar('%', color);
                 break;
             case 'l':
-                p++; /* Skip 'l' modifier, we handle 64-bit by default */
-                continue;
+                /*
+                 * Length modifier. Values are promoted to 64-bit by default
+                 * here, so consume "l" and any second "l" and then decode
+                 * the real conversion.
+                 *
+                 * The previous code did `p++; continue;`, which skipped the
+                 * 'l' without consuming the argument, then printed the
+                 * conversion letter literally on the next iteration. Varargs
+                 * are positional, so every %lu/%llu/%llX call read one
+                 * argument too few and every following value in that call was
+                 * the wrong one - 450+ call sites across the tree.
+                 */
+                p++;
+                if (*p == 'l') {
+                    p++;
+                }
+                switch (*p) {
+                case 'd':
+                case 'i': {
+                    /* %ld / %lld: callers pass long or u64-width values. */
+                    s64 val = __builtin_va_arg(args, s64);
+                    if (val < 0) {
+                        vga_putchar('-', color);
+                        val = -val;
+                    }
+                    print_decimal((u64)val, color);
+                    break;
+                }
+                case 'u': {
+                    u64 val = __builtin_va_arg(args, u64);
+                    print_decimal(val, color);
+                    break;
+                }
+                case 'x': {
+                    u64 val = __builtin_va_arg(args, u64);
+                    print_hex(val, color, false, 0);
+                    break;
+                }
+                case 'X': {
+                    u64 val = __builtin_va_arg(args, u64);
+                    print_hex(val, color, true, 0);
+                    break;
+                }
+                default:
+                    vga_putchar('%', color);
+                    vga_putchar('l', color);
+                    vga_putchar(*p ? *p : '?', color);
+                    break;
+                }
+                break;
             case '\0':
                 return 0;
             default:
