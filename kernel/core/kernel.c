@@ -171,6 +171,14 @@ static void vga_putchar(char c, u8 color)
 {
     serial_mirror(c);
 
+    /*
+     * Keep the recent log in RAM so it can be painted onto a linear
+     * framebuffer when the VGA text buffer is not being scanned out. Without
+     * this the only record of a failed graphical boot is invisible.
+     */
+    extern void fbcon_capture_char(char c);
+    fbcon_capture_char(c);
+
     if (c == '\n') {
         vga_cursor_x = 0;
         vga_cursor_y++;

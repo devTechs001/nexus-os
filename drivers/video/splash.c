@@ -617,6 +617,16 @@ void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp)
 {
     if (!fb || width == 0 || height == 0) {
         printk("[SPLASH] No framebuffer supplied, graphical splash skipped\n");
+
+        /*
+         * Nothing to draw on. If VGA text memory is still being scanned out
+         * the console already shows this; if GRUB switched to a graphics mode
+         * and then handed us no framebuffer, the screen is genuinely dead and
+         * there is no surface to explain that on. Say so explicitly rather
+         * than leaving the next reader to rediscover it.
+         */
+        printk("[SPLASH] No displayable surface available - if the screen is "
+               "blank, the bootloader did not provide a framebuffer.\n");
         return;
     }
 
@@ -637,7 +647,16 @@ void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp)
      */
     if (bpp != 0 && bpp != 16 && bpp != 24 && bpp != 32) {
         printk("[SPLASH] Framebuffer is %ubpp; unsupported depth "
-               "- graphical splash skipped\n", bpp);
+               "- falling back to on-screen text console\n", bpp);
+
+        /*
+         * Do not return into a black screen. If we have an address at all we
+         * can still put the boot log where the user is actually looking.
+         */
+        extern void fbcon_set_framebuffer(void *, u32, u32, u32, u32);
+        extern void fbcon_render(u32, u32);
+        fbcon_set_framebuffer(fb, width, height, pitch ? pitch : width * 2, 16);
+        fbcon_render(0x00000000, 0x00E8F0F2);
         return;
     }
 

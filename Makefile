@@ -330,6 +330,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/console.o \
             $(BUILD_DIR)/splash.o \
+            $(BUILD_DIR)/fbconsole.o \
             $(BUILD_DIR)/font8x16.o \
             $(BUILD_DIR)/icon_library.o \
             $(BUILD_DIR)/icon_library_extra.o \
@@ -904,6 +905,10 @@ $(BUILD_DIR)/console.o: $(DRIVERS_DIR)/video/console.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
 
 $(BUILD_DIR)/splash.o: $(DRIVERS_DIR)/video/splash.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
+
+$(BUILD_DIR)/fbconsole.o: $(DRIVERS_DIR)/video/fbconsole.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
 
