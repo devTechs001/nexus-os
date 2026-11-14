@@ -330,6 +330,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/display_manager.o \
             $(BUILD_DIR)/console.o \
             $(BUILD_DIR)/splash.o \
+            $(BUILD_DIR)/fbconsole.o \
             $(BUILD_DIR)/font8x16.o \
             $(BUILD_DIR)/icon_library.o \
             $(BUILD_DIR)/icon_library_extra.o \
@@ -907,6 +908,10 @@ $(BUILD_DIR)/splash.o: $(DRIVERS_DIR)/video/splash.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
 
+$(BUILD_DIR)/fbconsole.o: $(DRIVERS_DIR)/video/fbconsole.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
+
 $(BUILD_DIR)/font8x16.o: $(DRIVERS_DIR)/video/font8x16.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
@@ -1268,29 +1273,29 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo 'set menu_color_highlight=black/blue' >> $@
 	@echo 'set menu_color_normal=light-gray/black' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🖥️  NEXUS OS - Graphical Mode (Default)" {' >> $@
+	@echo 'menuentry "[GRAPHICAL] NEXUS OS - Graphical Mode (Default)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash virt=auto' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "📟  NEXUS OS - Text Mode (VGA Console)" {' >> $@
+	@echo 'menuentry "[TEXT]      NEXUS OS - Text Mode (VGA Console)" {' >> $@
 	@echo '    set gfxpayload=text' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🛡️  NEXUS OS - Safe Mode" {' >> $@
+	@echo 'menuentry "[SAFE]      NEXUS OS - Safe Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic nolapic' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🐛  NEXUS OS - Debug Mode" {' >> $@
+	@echo 'menuentry "[DEBUG]     NEXUS OS - Debug Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin debug loglevel=7 earlyprintk=vga' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "⚡  NEXUS OS - Native Hardware" {' >> $@
+	@echo 'menuentry "[NATIVE]    NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
-	@echo 'menuentry "🛠️  NEXUS OS - Interactive Boot Menu" {' >> $@
+	@echo 'menuentry "[MENU]      NEXUS OS - Interactive Boot Menu" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@
 

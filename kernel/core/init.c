@@ -620,9 +620,35 @@ void kernel_init_userspace(void)
                                 (readback == sentinel) ? "WRITABLE" : "WRITE LOST");
                     }
                 } else {
-                    extern struct compositor *compositor_get_instance(void);
-                    extern int compositor_present(struct compositor *comp);
-                    compositor_present(compositor_get_instance());
+                    /*
+                     * The framebuffer is unusable - usually a depth the
+                     * renderer cannot write (16 or 24bpp) or no address at
+                     * all.
+                     *
+                     * This used to call compositor_present(), which swaps and
+                     * blits a buffer nothing had rendered into: a guaranteed
+                     * black screen, once per frame, forever. Painting the boot
+                     * log into whatever surface we do have at least tells the
+                     * user why the GUI is not appearing instead of leaving
+                     * them staring at nothing.
+                     */
+                    extern void fbcon_set_framebuffer(void *, u32, u32, u32, u32);
+                    extern void fbcon_render(u32, u32);
+
+                    static bool explained = false;
+                    if (!explained && gfx && gfx->gfx_addr &&
+                        gfx->gfx_width && gfx->gfx_height) {
+                        explained = true;
+                        fbcon_set_framebuffer((void *)(uintptr_t)gfx->gfx_addr,
+                                              gfx->gfx_width, gfx->gfx_height,
+                                              gfx->gfx_pitch,
+                                              gfx->gfx_depth ? gfx->gfx_depth : 32);
+                        fbcon_render(0x00000000, 0x00E8F0F2);
+
+                        pr_err("[GUI] Framebuffer unusable (depth=%u); showing "
+                               "boot log on screen instead of a black frame\n",
+                               gfx->gfx_depth);
+                    }
                 }
 
                 /* Frame rate limiting */

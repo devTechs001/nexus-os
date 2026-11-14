@@ -74,9 +74,55 @@ static splash_state_t g_splash;
 /*                         PIXEL PRIMITIVES                                  */
 /*===========================================================================*/
 
-static inline u32 splash_stride_px(void)
+/*
+ * Store one XRGB pixel at the requested depth.
+ *
+ * Keep the 32bpp path a plain word write - it is the common case and boot
+ * cares about speed. 24bpp is three bytes per pixel and 16bpp is RGB565.
+ */
+static inline void splash_store(s32 x, s32 y, u32 color)
 {
-    return g_splash.pitch / 4;
+    u8  *base = (u8 *)g_splash.framebuffer;
+    u32  stride = g_splash.pitch;
+    u8  *p = base + (u32)y * stride;
+
+    switch (g_splash.bpp) {
+    case 16:
+        ((u16 *)p)[x] = (u16)(((color >> 19) & 0x1F) << 11 |
+                              ((color >> 10) & 0x3F) << 5  |
+                              ((color >> 3)  & 0x1F));
+        break;
+    case 24:
+        p += (u32)x * 3;
+        p[0] = (u8)(color);
+        p[1] = (u8)(color >> 8);
+        p[2] = (u8)(color >> 16);
+        break;
+    default:
+        ((u32 *)p)[x] = color;
+        break;
+    }
+}
+
+static inline u32 splash_load(s32 x, s32 y)
+{
+    u8  *base = (u8 *)g_splash.framebuffer;
+    u8  *p = base + (u32)y * g_splash.pitch;
+
+    switch (g_splash.bpp) {
+    case 16: {
+        u16 v = ((u16 *)p)[x];
+        u32 r = (v >> 11) & 0x1F, g = (v >> 5) & 0x3F, b = v & 0x1F;
+        return ((r << 3) | (r >> 2)) << 16 |
+               ((g << 2) | (g >> 4)) << 8  |
+               ((b << 3) | (b >> 2));
+    }
+    case 24:
+        p += (u32)x * 3;
+        return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16);
+    default:
+        return ((u32 *)p)[x];
+    }
 }
 
 static inline void splash_put_pixel(s32 x, s32 y, u32 color)
@@ -86,7 +132,7 @@ static inline void splash_put_pixel(s32 x, s32 y, u32 color)
     if ((u32)x >= g_splash.width || (u32)y >= g_splash.height)
         return;
 
-    g_splash.framebuffer[(u32)y * splash_stride_px() + (u32)x] = color;
+    splash_store(x, y, color);
 }
 
 /* Blend `color` over the existing pixel with the given alpha (0..255) */
@@ -99,8 +145,7 @@ static inline void splash_blend_pixel(s32 x, s32 y, u32 color, u8 alpha)
     if (alpha == 0)
         return;
 
-    u32 *dst = &g_splash.framebuffer[(u32)y * splash_stride_px() + (u32)x];
-    u32 old = *dst;
+    u32 old = splash_load(x, y);
 
     u32 orr = (old >> 16) & 0xFF, og = (old >> 8) & 0xFF, ob = old & 0xFF;
     u32 nr = (color >> 16) & 0xFF, ng = (color >> 8) & 0xFF, nb = color & 0xFF;
@@ -109,7 +154,7 @@ static inline void splash_blend_pixel(s32 x, s32 y, u32 color, u8 alpha)
     u32 g = (og  * (255 - alpha) + ng * alpha) / 255;
     u32 b = (ob  * (255 - alpha) + nb * alpha) / 255;
 
-    *dst = (r << 16) | (g << 8) | b;
+    splash_store(x, y, (r << 16) | (g << 8) | b);
 }
 
 static void splash_draw_rect(s32 x, s32 y, u32 w, u32 h, u32 color)
@@ -354,12 +399,68 @@ static void splash_draw_logo(s32 cx, s32 cy, u32 size, u8 alpha)
 /*                         TEXT                                              */
 /*===========================================================================*/
 
+/*
+ * Splash text is drawn through splash_store() rather than reusing
+ * font8x16_draw_string_centered(), because that function takes a u32* and
+ * writes 32-bit words unconditionally. At 16 or 24bpp it would scribble the
+ * wrong pixel format across the screen. The glyph bitmaps come from the same
+ * font8x16 table, so the glyphs look identical.
+ */
 static void splash_text_centered(s32 cx, s32 y, const char *s, u32 color,
                                  u32 scale, u8 alpha)
 {
-    font8x16_draw_string_centered(g_splash.framebuffer,
-                                  g_splash.width, g_splash.height,
-                                  g_splash.pitch, cx, y, s, color, scale, alpha);
+    if (!s || !*s) {
+        return;
+    }
+
+    if (scale == 0) {
+        scale = 1;
+    }
+
+    s32 len = 0;
+    for (const char *p = s; *p; p++) {
+        len++;
+    }
+
+    s32 width = len * FONT8X16_WIDTH * (s32)scale;
+    s32 x = cx - width / 2;
+
+    for (const char *p = s; *p; p++) {
+        const u8 *glyph = font8x16_glyph(*p);
+
+        for (u32 row = 0; row < FONT8X16_HEIGHT; row++) {
+            u8 bits = glyph[row];
+            if (!bits) {
+                continue;
+            }
+
+            for (u32 col = 0; col < FONT8X16_WIDTH; col++) {
+                if (!(bits & (0x80 >> col))) {
+                    continue;
+                }
+
+                for (u32 dy = 0; dy < scale; dy++) {
+                    for (u32 dx = 0; dx < scale; dx++) {
+                        s32 px = x + (s32)(col * scale + dx);
+                        s32 py = y + (s32)(row * scale + dy);
+
+                        if ((u32)px >= g_splash.width ||
+                            (u32)py >= g_splash.height) {
+                            continue;
+                        }
+
+                        if (alpha >= 255) {
+                            splash_put_pixel(px, py, color);
+                        } else {
+                            splash_blend_pixel(px, py, color, alpha);
+                        }
+                    }
+                }
+            }
+        }
+
+        x += FONT8X16_WIDTH * (s32)scale;
+    }
 }
 
 /*===========================================================================*/
@@ -430,13 +531,15 @@ static void splash_draw_spinner(s32 cx, s32 y)
         u32 alpha = (i == (g_splash.spinner % 3)) ? 255 : 70;
         s32 dx = ((s32)i - 1) * 12;
 
-        u32 *dst = NULL;
+        /*
+         * Bounds check only - the circle/blend helpers below do their own
+         * clipping. This used to compute a u32* into the framebuffer purely to
+         * test it for NULL, which is meaningless now the surface may be 16 or
+         * 24bpp and is addressed as bytes.
+         */
         s32 px = cx + dx;
         if (px >= 0 && (u32)px < g_splash.width && y >= 0 &&
             (u32)y < g_splash.height) {
-            dst = &g_splash.framebuffer[(u32)y * splash_stride_px() + (u32)px];
-        }
-        if (dst) {
             splash_draw_circle(px, y, 3, SPLASH_ACCENT);
             if (alpha < 255) {
                 /* dim the inactive dots */
@@ -514,25 +617,59 @@ void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp)
 {
     if (!fb || width == 0 || height == 0) {
         printk("[SPLASH] No framebuffer supplied, graphical splash skipped\n");
+
+        /*
+         * Nothing to draw on. If VGA text memory is still being scanned out
+         * the console already shows this; if GRUB switched to a graphics mode
+         * and then handed us no framebuffer, the screen is genuinely dead and
+         * there is no surface to explain that on. Say so explicitly rather
+         * than leaving the next reader to rediscover it.
+         */
+        printk("[SPLASH] No displayable surface available - if the screen is "
+               "blank, the bootloader did not provide a framebuffer.\n");
         return;
     }
 
     /*
-     * The renderer writes 32-bit XRGB pixels. Rendering into a 16- or 24-bpp
-     * surface would produce colour garbage rather than a splash, so refuse
-     * the framebuffer instead of pretending to draw on it.
+     * The pixel helpers below write through a 32-bit pointer, so the surface
+     * must be treated as 32-bit words and narrowed per-depth on store.
+     *
+     * Previously this refused any framebuffer that was not exactly 32bpp and
+     * returned without drawing anything. That is the single most likely cause
+     * of a black boot screen: grub.cfg asks for 1024x768x32, but if the
+     * hardware or VM cannot supply it GRUB silently falls back - commonly to
+     * 24 or 16bpp - and the kernel then declined to draw and said so only on
+     * a VGA text buffer that is not being scanned out. The result was a black
+     * screen with no diagnostic anywhere.
+     *
+     * 16, 24 and 32bpp are now all supported, so a mode fallback degrades the
+     * colour accuracy instead of erasing the splash.
      */
-    if (bpp && bpp != 32) {
-        printk("[SPLASH] Framebuffer is %ubpp; the splash renderer needs 32bpp "
-               "- graphical splash skipped (console output continues)\n", bpp);
+    if (bpp != 0 && bpp != 16 && bpp != 24 && bpp != 32) {
+        printk("[SPLASH] Framebuffer is %ubpp; unsupported depth "
+               "- falling back to on-screen text console\n", bpp);
+
+        /*
+         * Do not return into a black screen. If we have an address at all we
+         * can still put the boot log where the user is actually looking.
+         */
+        extern void fbcon_set_framebuffer(void *, u32, u32, u32, u32);
+        extern void fbcon_render(u32, u32);
+        fbcon_set_framebuffer(fb, width, height, pitch ? pitch : width * 2, 16);
+        fbcon_render(0x00000000, 0x00E8F0F2);
         return;
     }
 
     g_splash.framebuffer = fb;
     g_splash.width = width;
     g_splash.height = height;
-    g_splash.pitch = pitch ? pitch : width * 4;
     g_splash.bpp = bpp ? bpp : 32;
+    /*
+     * Fall back to the tightly-packed stride for the real depth, not always
+     * width*4 - a 16bpp surface has 2 bytes per pixel and assuming 4 would
+     * step off the end of every scanline.
+     */
+    g_splash.pitch = pitch ? pitch : width * (g_splash.bpp / 8);
 
     g_splash.progress = 0;
     g_splash.progress_target = 0;
@@ -541,10 +678,37 @@ void splash_init(u32 *fb, u32 width, u32 height, u32 pitch, u32 bpp)
     g_splash.spinner = 0;
     g_splash.initialized = true;
 
-    splash_render(0);
+    /*
+     * The very first frame drew the logo at alpha 0 - fully transparent - so
+     * the initial screen showed a gradient and a wordmark with no mark above
+     * it until some later splash_update_progress() call repainted. Paint it
+     * opaque immediately; the fade-in, if wanted, belongs on top of a visible
+     * mark rather than in place of one.
+     */
+    splash_render(255);
 
-    printk("[SPLASH] Graphical boot screen active: %ux%u @ %ubpp\n",
-           width, height, g_splash.bpp);
+    printk("[SPLASH] Graphical boot screen active: %ux%u @ %ubpp "
+           "(pitch %u, fb 0x%lX)\n",
+           width, height, g_splash.bpp, g_splash.pitch,
+           (u64)(uintptr_t)fb);
+
+    /*
+     * Prove the writes landed. A wrong address, an unmapped page or a
+     * read-only scanout buffer all present identically as a black screen, and
+     * none of them can be distinguished from a drawing bug by looking at it.
+     * Writing a pixel and reading it back turns "the screen is black" into a
+     * fact about which of those is happening.
+     */
+    if (width > 0 && height > 0) {
+        u32 saved = splash_load(0, 0);
+        splash_put_pixel(0, 0, 0x00FF00FFu);
+        u32 readback = splash_load(0, 0);
+        splash_put_pixel(0, 0, saved);
+
+        printk("[SPLASH] Framebuffer write test: wrote 0x00FF00FF read 0x%08X (%s)\n",
+               readback, (readback == 0x00FF00FFu) ? "OK"
+                                                  : "WRITE LOST - wrong or unmapped address");
+    }
 }
 
 /**
