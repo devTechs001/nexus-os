@@ -7,6 +7,7 @@
  */
 
 #include "input.h"
+#include "input_chars.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
 
@@ -772,4 +773,73 @@ const char *input_get_event_type_name(u32 type)
 input_driver_t *input_get_driver(void)
 {
     return &g_input_driver;
+}
+
+/*===========================================================================*/
+/*                     TYPED-CHARACTER ACCESS                                */
+/*===========================================================================*/
+
+/*
+ * GUI code needs "what did the user type", but cannot include this header: the
+ * tree has two incompatible input_event_t definitions (flat here, unioned in
+ * gui/gui.h) and including both fails to compile. These two functions give
+ * callers a type-free way in - see drivers/input/input_chars.h.
+ */
+
+/**
+ * input_poll_char - Pop the next typed character
+ *
+ * Returns: Character (0x20..0x7E), '\n', '\b', 27, or 0 when nothing is queued
+ */
+int input_poll_char(void)
+{
+    input_event_t ev;
+
+    /*
+     * Drain until a printable or editing key is found. The driver queues
+     * releases and relative motion too; those are skipped without consuming
+     * anything the caller would have wanted.
+     */
+    for (u32 guard = 0; guard < 64; guard++) {
+        if (input_read_event(&ev) != 0) {
+            return 0;
+        }
+
+        if (ev.type != EV_KEY) {
+            continue;
+        }
+
+        /* The PS/2 driver puts the translated character in value (0 = release). */
+        if (ev.value <= 0) {
+            continue;
+        }
+
+        char c = (char)(ev.value & 0xFF);
+
+        if (c == '\n' || c == '\r' || c == '\b') {
+            return (c == '\r') ? '\n' : c;
+        }
+
+        if (c >= 0x20 && c < 0x7F) {
+            return (int)c;
+        }
+
+        if (ev.code == KEY_ESC) {
+            return 27;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * input_flush_chars - Drop any pending typed characters
+ */
+void input_flush_chars(void)
+{
+    input_event_t ev;
+
+    while (input_read_event(&ev) == 0) {
+        /* discard */
+    }
 }

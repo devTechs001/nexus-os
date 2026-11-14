@@ -343,6 +343,15 @@ int login_screen_update_clock(login_screen_t *screen);
 int login_screen_update_status(login_screen_t *screen, const char *status);
 int login_screen_update_message(login_screen_t *screen, const char *message);
 int login_screen_update(login_screen_t *screen);
+
+/* Input. The login screen previously had none: the password field could not be
+ * filled and Enter could never be pressed, so the fully implemented
+ * authentication path was unreachable. */
+int login_screen_poll_input(login_screen_t *screen);
+int login_screen_handle_char_code(login_screen_t *screen, int c);
+int login_screen_handle_char(login_screen_t *screen, char c);
+int login_screen_handle_backspace(login_screen_t *screen);
+int login_screen_handle_enter(login_screen_t *screen);
 int login_screen_show_error(login_screen_t *screen, const char *error);
 int login_screen_clear_error(login_screen_t *screen);
 int login_screen_set_theme(login_screen_t *screen, const char *theme_name);

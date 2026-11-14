@@ -11,6 +11,7 @@
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/config.h"
 #include "../../security/auth/auth.h"
+#include "../../drivers/input/input_chars.h"
 
 /*===========================================================================*/
 /*                         GLOBAL LOGIN SCREEN INSTANCE                      */
@@ -245,7 +246,189 @@ int login_screen_run(login_screen_t *screen)
     printk("[LOGIN] Login screen active\n");
 
     return 0;
+}
+
+/*===========================================================================*/
+/*                            INPUT HANDLING                                 */
+/*===========================================================================*/
+
+/*
+ * The login screen had no input handling of any kind. 2538 lines: user list,
+ * password field, session selector, clock, power menu, accessibility panel,
+ * all built and painted - and not one line reading a keystroke. It was a
+ * picture of a login screen. perform_authentication() and
+ * login_screen_authenticate() were complete; nothing could ever reach them.
+ *
+ * These functions close that loop. They drain the input driver's event queue,
+ * turn typed characters into the password buffer, and on Enter run the
+ * authentication path that already existed.
+ */
+
+/** Refresh the password field with a masked version of what has been typed. */
+static void update_password_display(login_screen_t *screen)
+{
+    if (!screen || !screen->password_entry) {
+        return;
     }
+
+    char display[LOGIN_PASSWORD_MAX + 1];
+    u32 n = screen->password_length;
+
+    if (n > LOGIN_PASSWORD_MAX) {
+        n = LOGIN_PASSWORD_MAX;
+    }
+
+    for (u32 i = 0; i < n; i++) {
+        display[i] = '*';
+    }
+    display[n] = '\0';
+
+    widget_set_text(screen->password_entry, display);
+}
+
+/**
+ * login_screen_handle_char - Append a typed character to the password
+ * @screen: Pointer to login screen structure
+ * @c: Character to append
+ *
+ * Returns: 0 on success, -1 if the field is full
+ */
+int login_screen_handle_char(login_screen_t *screen, char c)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    if (screen->state != LOGIN_STATE_LOCKED &&
+        screen->state != LOGIN_STATE_UNLOCKED) {
+        return -1;   /* ignore typing while authenticating */
+    }
+
+    if (screen->password_length >= LOGIN_PASSWORD_MAX - 1) {
+        return -1;
+    }
+
+    screen->password_buffer[screen->password_length++] = c;
+    screen->password_buffer[screen->password_length] = '\0';
+
+    update_password_display(screen);
+
+    return 0;
+}
+
+/**
+ * login_screen_handle_backspace - Remove the last typed character
+ * @screen: Pointer to login screen structure
+ *
+ * Returns: 0 on success, -1 if already empty
+ */
+int login_screen_handle_backspace(login_screen_t *screen)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    if (screen->password_length == 0) {
+        return -1;
+    }
+
+    screen->password_length--;
+    screen->password_buffer[screen->password_length] = '\0';
+
+    update_password_display(screen);
+
+    return 0;
+}
+
+/**
+ * login_screen_handle_enter - Submit whatever has been typed
+ * @screen: Pointer to login screen structure
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int login_screen_handle_enter(login_screen_t *screen)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    return perform_authentication(screen);
+}
+
+/**
+ * login_screen_handle_char_code - Apply one character from the input driver
+ * @screen: Pointer to login screen structure
+ * @c: Character, or one of the INPUT_KEY_CHAR_* control values
+ *
+ * Returns: 0 if handled, -1 otherwise
+ *
+ * Uses the type-free character API rather than the raw event, because the tree
+ * contains two incompatible input_event_t definitions and including the
+ * driver's header alongside gui.h does not compile.
+ */
+int login_screen_handle_char_code(login_screen_t *screen, int c)
+{
+    if (!screen) {
+        return -EINVAL;
+    }
+
+    if (c == INPUT_KEY_CHAR_ENTER) {
+        login_screen_handle_enter(screen);
+        return 0;
+    }
+
+    if (c == INPUT_KEY_CHAR_BACKSPACE) {
+        login_screen_handle_backspace(screen);
+        return 0;
+    }
+
+    if (c == INPUT_KEY_CHAR_ESCAPE) {
+        if (screen->password_length > 0) {
+            screen->password_length = 0;
+            screen->password_buffer[0] = '\0';
+            update_password_display(screen);
+            login_screen_clear_error(screen);
+        }
+        return 0;
+    }
+
+    if (c >= 0x20 && c < 0x7F) {
+        login_screen_handle_char(screen, (char)c);
+        return 0;
+    }
+
+    return -1;
+}
+
+/**
+ * login_screen_poll_input - Read typed characters and apply them
+ * @screen: Pointer to login screen structure
+ *
+ * Returns: 0 if anything was consumed, -1 otherwise
+ */
+int login_screen_poll_input(login_screen_t *screen)
+{
+    if (!screen || !screen->active) {
+        return -1;
+    }
+
+    bool consumed = false;
+
+    for (u32 guard = 0; guard < 32; guard++) {
+        int c = input_poll_char();
+
+        if (c == INPUT_KEY_NONE) {
+            break;
+        }
+
+        if (login_screen_handle_char_code(screen, c) == 0) {
+            consumed = true;
+        }
+    }
+
+    return consumed ? 0 : -1;
+}
+
 /**
  * login_screen_update - Update login screen state and render
  * @screen: Pointer to login screen structure
