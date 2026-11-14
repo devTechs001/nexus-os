@@ -257,7 +257,17 @@ static int arena_grow(struct heap_arena *arena, size_t size)
                 return -1;
             }
             vaddr = arena->brk + (i * PAGE_SIZE);
-            vmm_map(vaddr, paddr, VMA_READ | VMA_WRITE);
+
+            /*
+             * A failed mapping must stop the grow. Continuing would hand out a
+             * block whose backing pages do not exist, and the resulting fault
+             * would surface in the caller rather than here.
+             */
+            if (vmm_map(vaddr, paddr, VMA_READ | VMA_WRITE) != OK) {
+                pr_err("Heap: arena_grow failed to map 0x%lx\n",
+                       (unsigned long)vaddr);
+                return -1;
+            }
         }
     }
 
@@ -625,7 +635,15 @@ void heap_init(void)
     heap_start = KERNEL_HEAP_START;
     heap_size = KERNEL_HEAP_SIZE;
 
-    /* Map initial heap pages */
+    /*
+     * Map the initial heap pages.
+     *
+     * vmm_map() used to have its result discarded. A mapping that fails leaves
+     * the arena covering addresses the CPU cannot reach, and the failure shows
+     * up much later as an exception inside whichever allocator touches the
+     * page first - with nothing pointing back here. Fail at the point of
+     * allocation instead.
+     */
     for (virt_addr_t addr = heap_start;
          addr < heap_start + (4 * MB(1));
          addr += PAGE_SIZE) {
@@ -634,7 +652,11 @@ void heap_init(void)
             pr_err("Heap: Failed to allocate initial pages\n");
             return;
         }
-        vmm_map(addr, paddr, VMA_READ | VMA_WRITE);
+        if (vmm_map(addr, paddr, VMA_READ | VMA_WRITE) != OK) {
+            pr_err("Heap: Failed to map heap page 0x%lx -> 0x%lx\n",
+                   (unsigned long)addr, (unsigned long)paddr);
+            return;
+        }
     }
     /* Initialize arena */
     arena_init(&kernel_arena, heap_start, 4 * MB(1));
