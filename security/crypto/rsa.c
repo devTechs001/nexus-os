@@ -25,107 +25,68 @@
 /*                         BIG INTEGER UTILITIES                             */
 /*===========================================================================*/
 
-/**
- * mpi_cmp - Compare two multi-precision integers
- * @a: First number
- * @a_len: Length of first number
- * @b: Second number
- * @b_len: Length of second number
+
+/*
+ * Big-integer arithmetic for RSA.
  *
- * Returns: -1 if a < b, 0 if a == b, 1 if a > b
+ * The previous implementation was not arithmetic. mpi_mod() ran its subtraction
+ * loop over the wrong span (it indexed `remainder + i` -- offset by the byte
+ * index, not the byte weight), mpi_exp_mod() never applied a modulus at all
+ * ("Simplified: just multiply result by itself"), and both RSA encrypt and
+ * decrypt had the exponentiation commented out and replaced with memcpy. The
+ * net effect was that "RSA encryption" returned the padded plaintext and
+ * "RSA decryption" read the padding back off it, so a "ciphertext" on the wire
+ * was the cleartext message in the clear.
+ *
+ * These routines work on big-endian byte strings of equal length, which is what
+ * rsa_key_t stores. Values are kept in fixed-width buffers of `len` bytes and
+ * are always < n when used as residues.
  */
-static s32 mpi_cmp(const u8 *a, u32 a_len, const u8 *b, u32 b_len)
+
+/* Number of significant bits in a big-endian buffer. */
+static u32 mpi_bit_length(const u8 *a, u32 len)
 {
     u32 i;
 
-    /* Compare lengths first */
-    if (a_len > b_len) {
-        return 1;
-    } else if (a_len < b_len) {
-        return -1;
-    }
+    for (i = 0; i < len; i++) {
+        if (a[i] != 0) {
+            u8 v = a[i];
+            u32 b = 0;
 
-    /* Compare bytes from most significant */
-    for (i = 0; i < a_len; i++) {
-        if (a[i] > b[i]) {
-            return 1;
-        } else if (a[i] < b[i]) {
-            return -1;
+            while (v) {
+                b++;
+                v >>= 1;
+            }
+            return (len - i - 1) * 8 + b;
         }
     }
 
-    return 0;
+    return 0;   /* zero */
 }
 
-/**
- * mpi_add - Add two multi-precision integers
- * @result: Result buffer
- * @result_len: Result length
- * @a: First operand
- * @a_len: First operand length
- * @b: Second operand
- * @b_len: Second operand length
- *
- * Returns: Carry out (0 or 1)
- */
-static u8 mpi_add(u8 *result, u32 result_len,
-                  const u8 *a, u32 a_len,
-                  const u8 *b, u32 b_len)
+/* Return the bit at position `bit` (0 = least significant). */
+static u32 mpi_get_bit(const u8 *a, u32 len, u32 bit)
 {
-    u32 i;
-    u32 carry = 0;
-    u32 min_len = (a_len < b_len) ? a_len : b_len;
-    u32 max_len = (a_len > b_len) ? a_len : b_len;
-    const u8 *longer = (a_len > b_len) ? a : b;
+    u32 byte_index = bit / 8;
+    u32 bit_index  = bit % 8;
 
-    crypto_memzero(result, result_len);
-
-    /* Add overlapping parts */
-    for (i = 0; i < min_len && i < result_len; i++) {
-        u32 sum = a[a_len - 1 - i] + b[b_len - 1 - i] + carry;
-        result[result_len - 1 - i] = sum & 0xFF;
-        carry = sum >> 8;
+    if (byte_index >= len) {
+        return 0;
     }
 
-    /* Propagate through longer operand */
-    for (; i < max_len && i < result_len; i++) {
-        u32 sum = longer[max_len - 1 - i] + carry;
-        result[result_len - 1 - i] = sum & 0xFF;
-        carry = sum >> 8;
-    }
-
-    /* Final carry */
-    if (carry && result_len > max_len) {
-        result[result_len - 1 - max_len] = carry;
-    }
-
-    return (u8)carry;
+    /* Big-endian: bit 0 is the LSB of the LAST byte. */
+    return (a[len - 1 - byte_index] >> bit_index) & 1;
 }
 
-/**
- * mpi_sub - Subtract two multi-precision integers
- * @result: Result buffer
- * @result_len: Result length
- * @a: Minuend
- * @a_len: Minuend length
- * @b: Subtrahend
- * @b_len: Subtrahend length
- *
- * Assumes a >= b.
- * Returns: Borrow (0 or 1)
- */
-static u8 mpi_sub(u8 *result, u32 result_len,
-                  const u8 *a, u32 a_len,
-                  const u8 *b, u32 b_len)
+/* result = a - b, returns the borrow. a, b, result are `len` bytes. */
+static u8 mpi_sub_len(u8 *result, const u8 *a, const u8 *b, u32 len)
 {
     u32 i;
     s32 borrow = 0;
 
-    crypto_memzero(result, result_len);
-
-    for (i = 0; i < result_len; i++) {
-        s32 ai = (i < a_len) ? a[a_len - 1 - i] : 0;
-        s32 bi = (i < b_len) ? b[b_len - 1 - i] : 0;
+    for (i = 0; i < len; i++) {
+        s32 ai = a[len - 1 - i];
+        s32 bi = b[len - 1 - i];
         s32 diff = ai - bi - borrow;
 
         if (diff < 0) {
@@ -135,155 +96,212 @@ static u8 mpi_sub(u8 *result, u32 result_len,
             borrow = 0;
         }
 
-        result[result_len - 1 - i] = diff & 0xFF;
+        result[len - 1 - i] = (u8)diff;
     }
 
     return (u8)borrow;
 }
 
-/**
- * mpi_mul_digit - Multiply MPI by single digit
- * @result: Result buffer
- * @result_len: Result length
- * @a: Operand
- * @a_len: Operand length
- * @digit: Single byte digit
- *
- * Returns: Carry out
- */
-static u8 mpi_mul_digit(u8 *result, u32 result_len,
-                        const u8 *a, u32 a_len, u8 digit)
+/* Compare `len`-byte big-endian a and b: <0, 0, >0. */
+static s32 mpi_cmp_len(const u8 *a, const u8 *b, u32 len)
 {
     u32 i;
-    u32 carry = 0;
 
-    crypto_memzero(result, result_len);
-
-    for (i = 0; i < a_len && i < result_len; i++) {
-        u32 prod = a[a_len - 1 - i] * digit + carry;
-        result[result_len - 1 - i] = prod & 0xFF;
-        carry = prod >> 8;
+    for (i = 0; i < len; i++) {
+        if (a[i] != b[i]) {
+            return (s32)a[i] - (s32)b[i];
+        }
     }
 
-    if (carry && a_len < result_len) {
-        result[result_len - 1 - a_len] = carry;
-    }
-
-    return (u8)carry;
+    return 0;
 }
 
-/**
- * mpi_mod - Compute remainder of division
- * @remainder: Output remainder
- * @remainder_len: Remainder buffer length
- * @dividend: Dividend
- * @dividend_len: Dividend length
- * @divisor: Divisor
- * @divisor_len: Divisor length
+/*
+ * result = a * b mod n
  *
- * Returns: OK on success, error code on failure
+ * Schoolbook multiply into a double-width product, then binary long division
+ * MSB-first. The running remainder needs `len + 1` bytes: before each step it
+ * is < n, and (acc << 1 | bit) can be as large as 2n-1, which does not fit in
+ * `len` bytes when n has its top bit set. Reducing in a `len`-byte frame
+ * silently discards that bit and produces an answer that is not congruent.
  */
-static s32 mpi_mod(u8 *remainder, u32 remainder_len,
-                   const u8 *dividend, u32 dividend_len,
-                   const u8 *divisor, u32 divisor_len)
+static s32 mpi_mul_mod(u8 *result, const u8 *a, const u8 *b,
+                       const u8 *n, u32 len)
 {
+    u8 product[2 * RSA_MAX_KEY_SIZE];
+    u8 acc[RSA_MAX_KEY_SIZE + 1];
+    u8 n_ext[RSA_MAX_KEY_SIZE + 1];
     u32 i;
-    u8 temp[512];
-    u8 shifted_divisor[512];
+    s32 bit;
+    s32 top;
 
-    if (divisor_len == 0 || divisor_len > sizeof(shifted_divisor)) {
-        return CRYPTO_ERR_INVALID_INPUT;
+    if (len == 0 || len > RSA_MAX_KEY_SIZE) {
+        return CRYPTO_ERR_BUFFER_SMALL;
     }
 
-    /* Handle simple case: dividend < divisor */
-    if (dividend_len < divisor_len ||
-        (dividend_len == divisor_len && mpi_cmp(dividend, dividend_len, divisor, divisor_len) < 0)) {
-        if (remainder_len >= dividend_len) {
-            crypto_memzero(remainder, remainder_len - dividend_len);
-            memcpy(remainder + remainder_len - dividend_len, dividend, dividend_len);
+    memset(product, 0, sizeof(product));
+
+    /* Schoolbook: for each byte of b, accumulate a * b[i] at its byte weight. */
+    for (i = 0; i < len; i++) {
+        u32 digit = b[len - 1 - i];
+        u32 carry = 0;
+        u32 k;
+
+        if (digit == 0) {
+            continue;
         }
-        return CRYPTO_OK;
-    }
 
-    /* Initialize remainder with dividend */
-    crypto_memzero(remainder, remainder_len);
-    if (dividend_len <= remainder_len) {
-        memcpy(remainder + remainder_len - dividend_len, dividend, dividend_len);
-    }
+        for (k = 0; k < len; k++) {
+            u32 pos = 2 * len - 1 - (i + k);
+            u32 prod = (u32)a[len - 1 - k] * digit + product[pos] + carry;
 
-    /* Long division algorithm */
-    for (i = 0; i <= dividend_len - divisor_len; i++) {
-        /* Check if we can subtract */
-        if (mpi_cmp(remainder + i, divisor_len, divisor, divisor_len) >= 0) {
-            mpi_sub(remainder + i, divisor_len,
-                    remainder + i, divisor_len,
-                    divisor, divisor_len);
+            product[pos] = (u8)(prod & 0xFF);
+            carry = prod >> 8;
+        }
+
+        /* Propagate the remaining carry upward. */
+        {
+            s32 pos = (s32)(2 * len - 1 - (i + len));
+
+            while (carry && pos >= 0) {
+                u32 sum = product[pos] + carry;
+
+                product[pos] = (u8)(sum & 0xFF);
+                carry = sum >> 8;
+                pos--;
+            }
         }
     }
+
+    /* n in a len+1 byte frame, so it can be compared against a len+1 acc. */
+    memset(n_ext, 0, sizeof(n_ext));
+    memcpy(n_ext + 1, n, len);
+
+    memset(acc, 0, sizeof(acc));
+
+    top = (s32)mpi_bit_length(product, 2 * len) - 1;
+
+    for (bit = top; bit >= 0; bit--) {
+        u32 carry = mpi_get_bit(product, 2 * len, (u32)bit);
+        u32 j;
+
+        /* acc = (acc << 1) | carry, in len+1 bytes */
+        for (j = 0; j < len + 1; j++) {
+            u32 cur = acc[len - j];
+            acc[len - j] = (u8)(((cur << 1) | carry) & 0xFF);
+            carry = cur >> 7;
+        }
+
+        if (mpi_cmp_len(acc, n_ext, len + 1) >= 0) {
+            mpi_sub_len(acc, acc, n_ext, len + 1);
+        }
+    }
+
+    memcpy(result, acc + 1, len);
+
+    memset(product, 0, sizeof(product));
+    memset(acc, 0, sizeof(acc));
 
     return CRYPTO_OK;
 }
 
-/**
- * mpi_exp_mod - Modular exponentiation: result = base^exp mod mod
- * @result: Output result
- * @result_len: Result length
- * @base: Base
- * @base_len: Base length
- * @exp: Exponent
- * @exp_len: Exponent length
- * @mod: Modulus
- * @mod_len: Modulus length
+/*
+ * result = base^exp mod n
  *
- * Uses square-and-multiply algorithm.
- *
- * Returns: OK on success, error code on failure
+ * Square-and-multiply, left to right, over the bits of exp.
  */
 static s32 mpi_exp_mod(u8 *result, u32 result_len,
                        const u8 *base, u32 base_len,
                        const u8 *exp, u32 exp_len,
                        const u8 *mod, u32 mod_len)
 {
-    u8 temp[512];
-    u8 temp2[512];
+    u8 acc[RSA_MAX_KEY_SIZE];
+    u8 b[RSA_MAX_KEY_SIZE];
+    u32 len;
     s32 bit;
-    s32 byte;
-    u32 i;
+    s32 top;
 
-    if (result_len < mod_len || mod_len > sizeof(temp)) {
+    if (!result || !base || !exp || !mod) {
+        return CRYPTO_ERR_INVALID_INPUT;
+    }
+
+    if (mod_len == 0 || mod_len > RSA_MAX_KEY_SIZE || result_len < mod_len) {
         return CRYPTO_ERR_BUFFER_SMALL;
     }
 
-    /* Initialize result = 1 */
-    crypto_memzero(result, result_len);
-    result[result_len - 1] = 1;
+    len = mod_len;
 
-    /* Initialize temp = base mod mod */
-    crypto_memzero(temp, sizeof(temp));
-    if (base_len <= mod_len) {
-        memcpy(temp + mod_len - base_len, base, base_len);
+    /* b = base mod n */
+    memset(b, 0, sizeof(b));
+    if (base_len <= len) {
+        memcpy(b + (len - base_len), base, base_len);
+        while (mpi_cmp_len(b, mod, len) >= 0) {
+            mpi_sub_len(b, b, mod, len);
+        }
     } else {
-        mpi_mod(temp + mod_len - mod_len, mod_len, base, base_len, mod, mod_len);
-    }
+        /*
+         * Base wider than the modulus: reduce by long division, one byte at a
+         * time, MSB first. The remainder is kept in a len+1 byte frame for the
+         * same reason as in mpi_mul_mod().
+         */
+        u8 rem[RSA_MAX_KEY_SIZE + 1];
+        u8 mod_ext[RSA_MAX_KEY_SIZE + 1];
+        u32 i;
 
-    /* Square-and-multiply from most significant bit */
-    for (byte = exp_len - 1; byte >= 0; byte--) {
-        for (bit = 7; bit >= 0; bit--) {
-            /* Square: result = result^2 mod mod */
-            /* Simplified: just multiply result by itself */
-            /* Full implementation would use proper MPI multiplication */
+        memset(rem, 0, sizeof(rem));
+        memset(mod_ext, 0, sizeof(mod_ext));
+        memcpy(mod_ext + 1, mod, len);
 
-            if (exp[byte] & (1 << bit)) {
-                /* Multiply: result = result * temp mod mod */
-                /* Simplified multiplication */
-                mpi_mul_digit(temp2, sizeof(temp2), result, result_len, 1);
-                memcpy(result, temp2, result_len);
+        for (i = 0; i < base_len; i++) {
+            u32 carry = base[i];
+            u32 j;
+
+            /* rem = (rem << 8) | base[i] */
+            for (j = 0; j < len + 1; j++) {
+                u32 cur = rem[len - j];
+                rem[len - j] = (u8)(((cur << 8) | carry) & 0xFF);
+                carry = cur >> 24;
             }
 
-            /* Square temp for next bit */
-            /* Simplified */
+            while (mpi_cmp_len(rem, mod_ext, len + 1) >= 0) {
+                mpi_sub_len(rem, rem, mod_ext, len + 1);
+            }
+        }
+
+        memcpy(b, rem + 1, len);
+        memset(rem, 0, sizeof(rem));
+    }
+
+    /* acc = 1 */
+    memset(acc, 0, sizeof(acc));
+    acc[len - 1] = 1;
+
+    top = (s32)mpi_bit_length(exp, exp_len) - 1;
+
+    for (bit = top; bit >= 0; bit--) {
+        s32 ret = mpi_mul_mod(acc, acc, acc, mod, len);
+
+        if (ret != CRYPTO_OK) {
+            goto out;
+        }
+
+        if (mpi_get_bit(exp, exp_len, (u32)bit)) {
+            ret = mpi_mul_mod(acc, acc, b, mod, len);
+            if (ret != CRYPTO_OK) {
+                goto out;
+            }
         }
     }
+
+    if (result_len > len) {
+        memset(result, 0, result_len - len);
+    }
+
+    memcpy(result + (result_len - len), acc, len);
+
+out:
+    memset(acc, 0, sizeof(acc));
+    memset(b, 0, sizeof(b));
 
     return CRYPTO_OK;
 }
@@ -305,7 +323,7 @@ static s32 mpi_exp_mod(u8 *result, u32 result_len,
  *
  * Returns: OK on success, error code on failure
  */
-static s32 rsa_encrypt_pkcs1(rsa_context_t *ctx, const u8 *input, u32 input_len,
+static s32 rsa_encrypt_pkcs1_ctx(rsa_context_t *ctx, const u8 *input, u32 input_len,
                              u8 *output, u32 *output_len)
 {
     u8 em[RSA_MAX_KEY_SIZE];
@@ -346,12 +364,24 @@ static s32 rsa_encrypt_pkcs1(rsa_context_t *ctx, const u8 *input, u32 input_len,
     em[2 + ps_len] = 0x00;
     memcpy(em + 3 + ps_len, input, input_len);
 
-    /* RSA operation: c = em^e mod n */
-    /* Simplified - full implementation would use proper MPI */
-    memcpy(c, em, em_len);
+    /*
+     * c = em^e mod n
+     *
+     * This was `memcpy(c, em, em_len)` with the exponentiation commented out,
+     * so the "ciphertext" was the padded plaintext: RSA encryption provided no
+     * confidentiality whatsoever.
+     */
+    {
+        s32 xret = mpi_exp_mod(c, em_len, em, em_len,
+                               ctx->key.e, ctx->key.size,
+                               ctx->key.n, ctx->key.size);
 
-    /* For demonstration, just copy (real impl does modular exponentiation) */
-    /* mpi_exp_mod(c, em_len, em, em_len, ctx->key.e, ctx->key.size, ctx->key.n, ctx->key.size); */
+        if (xret != CRYPTO_OK) {
+            crypto_memzero(em, sizeof(em));
+            crypto_memzero(c, sizeof(c));
+            return xret;
+        }
+    }
 
     memcpy(output, c, em_len);
     *output_len = em_len;
@@ -373,7 +403,7 @@ static s32 rsa_encrypt_pkcs1(rsa_context_t *ctx, const u8 *input, u32 input_len,
  *
  * Returns: OK on success, error code on failure
  */
-static s32 rsa_decrypt_pkcs1(rsa_context_t *ctx, const u8 *input, u32 input_len,
+static s32 rsa_decrypt_pkcs1_ctx(rsa_context_t *ctx, const u8 *input, u32 input_len,
                              u8 *output, u32 *output_len)
 {
     u8 em[RSA_MAX_KEY_SIZE];
@@ -395,10 +425,26 @@ static s32 rsa_decrypt_pkcs1(rsa_context_t *ctx, const u8 *input, u32 input_len,
         return CRYPTO_ERR_INVALID_INPUT;
     }
 
-    /* RSA operation: em = c^d mod n */
-    /* Simplified - full implementation would use CRT optimization */
-    memcpy(em, input, em_len);
-    /* mpi_exp_mod(em, em_len, input, input_len, ctx->key.d, ctx->key.size, ctx->key.n, ctx->key.size); */
+    /*
+     * em = c^d mod n
+     *
+     * This was `memcpy(em, input, em_len)` with the exponentiation commented
+     * out: "decryption" read the padding straight back off the input, so it
+     * only ever worked on input that was already padded plaintext.
+     *
+     * CRT (the p/q/dp/dq optimisation) is not used; a plain d exponentiation
+     * is slower but correct.
+     */
+    {
+        s32 xret = mpi_exp_mod(em, em_len, input, input_len,
+                               ctx->key.d, ctx->key.size,
+                               ctx->key.n, ctx->key.size);
+
+        if (xret != CRYPTO_OK) {
+            crypto_memzero(em, sizeof(em));
+            return xret;
+        }
+    }
 
     /* Verify and remove padding */
     if (em[0] != 0x00 || em[1] != 0x02) {
@@ -670,20 +716,33 @@ s32 rsa_encrypt(rsa_context_t *ctx, const u8 *input, u8 *output, u32 *output_len
         return CRYPTO_ERR_INVALID_INPUT;
     }
 
+    /*
+     * Padding failure has to reach the caller. This ignored the return value
+     * of the PKCS#1 routine and then reported CRYPTO_OK, so an encryption that
+     * could not build a valid block - oversized input, no room for the
+     * mandatory 0x00 0x02 non-zero padding string, etc. - returned success
+     * with whatever happened to be in `output`. A caller would then transmit
+     * an all-zero or stale buffer believing it RSA ciphertext.
+     */
     spin_lock(&ctx->lock);
 
-    switch (ctx->padding) {
-        case RSA_PAD_PKCS1_V15:
-            rsa_encrypt_pkcs1(ctx, input, ctx->key.size - 11, output, output_len);
-            break;
-        default:
-            spin_unlock(&ctx->lock);
-            return CRYPTO_ERR_GENERAL;
+    {
+        s32 ret;
+
+        switch (ctx->padding) {
+            case RSA_PAD_PKCS1_V15:
+                ret = rsa_encrypt_pkcs1_ctx(ctx, input, ctx->key.size - 11,
+                                            output, output_len);
+                break;
+            default:
+                spin_unlock(&ctx->lock);
+                return CRYPTO_ERR_GENERAL;
+        }
+
+        spin_unlock(&ctx->lock);
+
+        return ret;
     }
-
-    spin_unlock(&ctx->lock);
-
-    return CRYPTO_OK;
 }
 
 /**
@@ -707,20 +766,31 @@ s32 rsa_decrypt(rsa_context_t *ctx, const u8 *input, u8 *output, u32 *output_len
         return CRYPTO_ERR_INVALID_INPUT;
     }
 
+    /*
+     * A failed PKCS#1 unpad is the signal that the ciphertext was malformed or
+     * the key was wrong. Swallowing it here meant every forged or corrupted
+     * ciphertext "decrypted successfully" into uninitialised output - a
+     * padding-oracle and a silent-corruption bug at once.
+     */
     spin_lock(&ctx->lock);
 
-    switch (ctx->padding) {
-        case RSA_PAD_PKCS1_V15:
-            rsa_decrypt_pkcs1(ctx, input, ctx->key.size, output, output_len);
-            break;
-        default:
-            spin_unlock(&ctx->lock);
-            return CRYPTO_ERR_GENERAL;
+    {
+        s32 ret;
+
+        switch (ctx->padding) {
+            case RSA_PAD_PKCS1_V15:
+                ret = rsa_decrypt_pkcs1_ctx(ctx, input, ctx->key.size,
+                                            output, output_len);
+                break;
+            default:
+                spin_unlock(&ctx->lock);
+                return CRYPTO_ERR_GENERAL;
+        }
+
+        spin_unlock(&ctx->lock);
+
+        return ret;
     }
-
-    spin_unlock(&ctx->lock);
-
-    return CRYPTO_OK;
 }
 
 /**
@@ -953,6 +1023,31 @@ s32 rsa_encrypt_pkcs1(const rsa_key_t *key, const u8 *input, u32 input_len,
 {
     rsa_context_t ctx;
     s32 ret;
+    u32 max_len;
+
+    /*
+     * input_len was accepted and never looked at. The PKCS#1 padding path
+     * receives the message length implicitly as key.size - 11 and copies
+     * input_len-independent data, so oversize input would have been encrypted
+     * from a fixed-size view of the buffer - reading past it when the message
+     * was short, and silently truncating it when long.
+     *
+     * Maximum message length for PKCS#1 v1.5 is k - 11 bytes where k is the
+     * modulus length.
+     */
+    if (!key || !input || !output || !output_len) {
+        return CRYPTO_ERR_INVALID_INPUT;
+    }
+
+    if (key->size < 11) {
+        return CRYPTO_ERR_INVALID_KEY;
+    }
+
+    max_len = key->size - 11;
+
+    if (input_len > max_len) {
+        return CRYPTO_ERR_INVALID_INPUT;
+    }
 
     ret = rsa_init(&ctx);
     if (ret != CRYPTO_OK) return ret;
@@ -963,7 +1058,8 @@ s32 rsa_encrypt_pkcs1(const rsa_key_t *key, const u8 *input, u32 input_len,
         return ret;
     }
 
-    ret = rsa_encrypt(&ctx, input, output, output_len);
+    /* rsa_encrypt() pads to ctx->key.size - 11, so hand it that count. */
+    ret = rsa_encrypt_pkcs1_ctx(&ctx, input, input_len, output, output_len);
 
     rsa_free(&ctx);
     return ret;
@@ -996,7 +1092,7 @@ s32 rsa_decrypt_pkcs1(const rsa_key_t *key, const u8 *input, u32 input_len,
         return ret;
     }
 
-    ret = rsa_decrypt(&ctx, input, output, output_len);
+    ret = rsa_decrypt_pkcs1_ctx(&ctx, input, input_len, output, output_len);
 
     rsa_free(&ctx);
     return ret;

@@ -15,7 +15,18 @@
 /*                         GLOBAL WIZARD INSTANCE                            */
 /*===========================================================================*/
 
+/*
+ * The setup wizard's instance. Nothing referenced it: setup_wizard_init()
+ * required the caller to supply storage, so the wizard a user reached from the
+ * boot menu had no owner and no way to be found again by the event handlers.
+ * Exposed through accessors below.
+ */
 static setup_wizard_t g_wizard;
+
+setup_wizard_t *setup_wizard_get_instance(void)
+{
+    return &g_wizard;
+}
 
 /*===========================================================================*/
 /*                         FORWARD DECLARATIONS                              */
@@ -97,6 +108,533 @@ static void on_back_clicked(widget_t *button);
 static void on_next_clicked(widget_t *button);
 static void on_cancel_clicked(widget_t *button);
 static void on_help_clicked(widget_t *button);
+
+/*===========================================================================*/
+/*                         PAGE HANDLERS                                     */
+/*===========================================================================*/
+
+/*
+ * Every handler declared above was declared and never defined. GCC linked
+ * them as implicit declarations, so each of the 31 page callbacks in the
+ * table was an undefined symbol: the wizard could not advance past the first
+ * page, and a `next` on the welcome page would have called through a null
+ * pointer on the first wizard anyone ran.
+ *
+ * Each handler now validates what its page actually needs before allowing the
+ * wizard forward. on_enter/on_leave refresh the UI and keep the page's
+ * completion flag honest; validate/on_next refuse to advance on bad input.
+ */
+
+/* --- Welcome -------------------------------------------------------------- */
+
+static bool page_welcome_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    /* Nothing on this page to validate; it only has to render. */
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_welcome_on_next(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Language ------------------------------------------------------------- */
+
+static bool page_language_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    /* A language must be selected before this page can be left; the default
+     * index is 0, which is a real entry as long as the list is populated. */
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_language_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /* The index has to address an entry that exists. selected_language is a
+     * u32, so it is never negative, but it can point past a short table. */
+    if (wizard->language_count == 0 ||
+        wizard->selected_language >= wizard->language_count) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_language_on_next(setup_page_t *page)
+{
+    if (!page_language_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Keyboard ------------------------------------------------------------- */
+
+static bool page_keyboard_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_keyboard_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    if (wizard->keyboard_count == 0 ||
+        wizard->selected_keyboard >= wizard->keyboard_count) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_keyboard_on_next(setup_page_t *page)
+{
+    if (!page_keyboard_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- License -------------------------------------------------------------- */
+
+static bool page_license_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    /* The licence must be accepted explicitly, so entering the page never
+     * implies acceptance. */
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_license_on_next(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /*
+     * installation_options_t has no accept_license field, so acceptance is
+     * tracked on the page: the widget layer sets is_valid when the user
+     * accepts. Advancing on entry alone is how a licence screen becomes a
+     * no-op, so refuse unless acceptance was actually recorded.
+     */
+    (void)wizard;
+
+    if (!page->is_valid) {
+        return false;
+    }
+    page->is_valid = true;
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Install Type --------------------------------------------------------- */
+
+static bool page_install_type_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_install_type_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /* install_mode must address one of the modes the wizard implements. */
+    if (wizard->options.install_mode > INSTALL_MODE_ENCRYPTED) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_install_type_on_next(setup_page_t *page)
+{
+    if (!page_install_type_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Disk select ---------------------------------------------------------- */
+
+static bool page_disk_select_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_disk_select_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    if (wizard->disk_count == 0 ||
+        wizard->selected_disk >= wizard->disk_count) {
+        return false;
+    }
+
+    /* A disk with no reported size cannot be the install target. */
+    if (wizard->disks[wizard->selected_disk].size_bytes == 0) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_disk_select_on_next(setup_page_t *page)
+{
+    if (!page_disk_select_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Partition ------------------------------------------------------------ */
+
+static bool page_partition_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_partition_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /*
+     * A custom install partitions by hand and so requires a plan. The
+     * automatic modes generate one during the install, so an empty plan is
+     * legitimate there.
+     */
+    if (wizard->options.install_mode == INSTALL_MODE_CUSTOM &&
+        wizard->plan_count == 0) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_partition_on_next(setup_page_t *page)
+{
+    if (!page_partition_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Network -------------------------------------------------------------- */
+
+static bool page_network_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    /* Networking is optional; the page is valid on entry because the user is
+     * allowed to skip it. */
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_network_on_next(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /* If a network was selected, it has to be one that exists. A skip is
+     * selected_network == 0 with no networks present. */
+    if (wizard->network_count > 0 &&
+        wizard->selected_network >= wizard->network_count) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- User ----------------------------------------------------------------- */
+
+static bool page_user_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_user_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /* A username and password are mandatory; without them the installed
+     * system has no account that can log in. */
+    if (wizard->user.username[0] == '\0') {
+        return false;
+    }
+
+    if (strlen(wizard->user.password) < SETUP_PASSWORD_MIN) {
+        return false;
+    }
+
+    /* Names are used to build the home directory path. */
+    if (strchr(wizard->user.username, '/') != NULL) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_user_on_next(setup_page_t *page)
+{
+    if (!page_user_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Timezone ------------------------------------------------------------- */
+
+static bool page_timezone_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = false;
+    return true;
+}
+
+static bool page_timezone_validate(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    if (wizard->timezone_count == 0 ||
+        wizard->selected_timezone >= wizard->timezone_count) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_timezone_on_next(setup_page_t *page)
+{
+    if (!page_timezone_validate(page)) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Confirm -------------------------------------------------------------- */
+
+static bool page_confirm_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = true;
+    return true;
+}
+
+static bool page_confirm_on_next(setup_page_t *page)
+{
+    setup_wizard_t *wizard;
+
+    if (!page) {
+        return false;
+    }
+
+    wizard = (setup_wizard_t *)page->page_data;
+
+    if (!wizard) {
+        return false;
+    }
+
+    /*
+     * Last chance to refuse a contradictory configuration. This is the page
+     * that starts writing to disk, so re-check the fields the install action
+     * depends on rather than trusting that the earlier pages ran.
+     */
+    if (wizard->user.username[0] == '\0' ||
+        strlen(wizard->user.password) < SETUP_PASSWORD_MIN) {
+        return false;
+    }
+
+    page->is_complete = true;
+    return true;
+}
+
+/* --- Install -------------------------------------------------------------- */
+
+static bool page_install_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    /* The install itself is started by the wizard, not by page entry. */
+    page->is_valid = true;
+    return true;
+}
+
+/* --- Complete ------------------------------------------------------------- */
+
+static bool page_complete_on_enter(setup_page_t *page)
+{
+    if (!page) {
+        return false;
+    }
+
+    page->is_valid = true;
+    page->is_complete = true;
+    return true;
+}
 
 /*===========================================================================*/
 /*                         WIZARD INITIALIZATION                             */
@@ -523,19 +1061,19 @@ int setup_wizard_goto_page(setup_wizard_t *wizard, u32 page_id)
         return -EINVAL;
     }
     
-    setup_page_t *current = &wizard->pages[wizard->current_page];
+    setup_page_t *cur_page = &wizard->pages[wizard->current_page];
     setup_page_t *next = &wizard->pages[page_id];
     
     setup_log(wizard, "Navigating to page %d: %s", page_id, next->title);
     
-    /* Call on_leave for current page */
-    if (current && current->on_leave) {
-        if (!current->on_leave(current)) {
+    /* Call on_leave for the page being left */
+    if (cur_page && cur_page->on_leave) {
+        if (!cur_page->on_leave(cur_page)) {
             setup_log_warning(wizard, "Page %d on_leave returned false", wizard->current_page);
         }
     }
     
-    /* Update current page */
+    /* Update the active page */
     wizard->current_page = page_id;
     wizard->stage_start_time = get_time_ms();
     
@@ -577,19 +1115,19 @@ int setup_wizard_next_page(setup_wizard_t *wizard)
         return -EINVAL;
     }
     
-    setup_page_t *current = &wizard->pages[wizard->current_page];
+    setup_page_t *cur_page = &wizard->pages[wizard->current_page];
     
-    /* Validate current page */
-    if (current->validate) {
-        if (!current->validate(current)) {
+    /* Validate the active page */
+    if (cur_page->validate) {
+        if (!cur_page->validate(cur_page)) {
             setup_log_warning(wizard, "Page %d validation failed", wizard->current_page);
             return -1;
         }
     }
     
     /* Call on_next handler */
-    if (current->on_next) {
-        if (!current->on_next(current)) {
+    if (cur_page->on_next) {
+        if (!cur_page->on_next(cur_page)) {
             setup_log_error(wizard, -1, "Page %d on_next failed", wizard->current_page);
             return -1;
         }
@@ -615,11 +1153,11 @@ int setup_wizard_previous_page(setup_wizard_t *wizard)
         return -EINVAL;
     }
     
-    setup_page_t *current = &wizard->pages[wizard->current_page];
+    setup_page_t *cur_page = &wizard->pages[wizard->current_page];
     
     /* Call on_back handler */
-    if (current->on_back) {
-        if (!current->on_back(current)) {
+    if (cur_page->on_back) {
+        if (!cur_page->on_back(cur_page)) {
             setup_log_warning(wizard, "Page %d on_back returned false", wizard->current_page);
         }
     }
@@ -633,10 +1171,10 @@ int setup_wizard_previous_page(setup_wizard_t *wizard)
 }
 
 /**
- * setup_wizard_get_current_page - Get current page
+ * setup_wizard_get_current_page - Get cur_page page
  * @wizard: Pointer to wizard structure
  *
- * Returns: Pointer to current page, or NULL on error
+ * Returns: Pointer to cur_page page, or NULL on error
  */
 setup_page_t *setup_wizard_get_current_page(setup_wizard_t *wizard)
 {

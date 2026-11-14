@@ -28,6 +28,9 @@
 #define SETUP_USERNAME_MAX          64
 #define SETUP_HOSTNAME_MAX          64
 #define SETUP_PASSWORD_MAX          128
+/* Shortest password the wizard will accept. There was no minimum at all, so a
+ * user account could be created with an empty password. */
+#define SETUP_PASSWORD_MIN          8
 #define SETUP_TIMEZONE_MAX          64
 #define SETUP_KEYMAP_MAX            16
 #define SETUP_LOG_BUFFER_SIZE       131072
@@ -459,6 +462,16 @@ typedef struct setup_wizard {
 
 /* Wizard initialization and lifecycle */
 int setup_wizard_init(setup_wizard_t *wizard);
+
+/**
+ * setup_wizard_get_instance - The process-wide wizard instance
+ *
+ * Returns: pointer to the wizard, never NULL
+ *
+ * The GUI event handlers are plain callbacks with no user-data argument, so
+ * they need a way to reach the wizard they belong to.
+ */
+setup_wizard_t *setup_wizard_get_instance(void);
 int setup_wizard_run(setup_wizard_t *wizard);
 int setup_wizard_shutdown(setup_wizard_t *wizard);
 bool setup_wizard_is_running(setup_wizard_t *wizard);
