@@ -1295,6 +1295,11 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
+	@echo 'menuentry "[TERM]      NEXUS OS - Terminal (Nexus Shell)" {' >> $@
+	@echo '    set gfxpayload=1024x768x32' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash terminal virt=auto' >> $@
+	@echo '}' >> $@
+	@echo '' >> $@
 	@echo 'menuentry "[MENU]      NEXUS OS - Interactive Boot Menu" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
 	@echo '}' >> $@

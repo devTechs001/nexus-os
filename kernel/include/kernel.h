@@ -361,6 +361,7 @@ typedef struct {
     bool noapic;
     bool nolapic;
     bool vm_manager;    /* launch the Virtualization Manager after boot */
+    bool terminal;      /* launch the Terminal (shell) after boot */
 } boot_params_t;
 
 void parse_boot_params(const char *cmdline);

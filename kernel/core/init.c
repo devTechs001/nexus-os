@@ -136,7 +136,10 @@ typedef struct onboarding_wizard onboarding_wizard_t;
 extern int gui_framework_init(void);
 extern int desktop_init_global(void);
 extern int nexus_app_launch(int app);   /* gui/apps_nexus.c */
+extern int nexus_app_active(void);
 #define NEXUS_APP_VM_MANAGER 1         /* matches nexus_app_t */
+#define NEXUS_APP_TERMINAL   5         /* matches nexus_app_t */
+extern void terminal_gui_feed_chars(void);
 extern login_screen_t *login_screen_get_instance(void);
 extern int login_screen_init(login_screen_t *screen);
 extern int login_screen_run(login_screen_t *screen);
@@ -477,6 +480,18 @@ void kernel_init_userspace(void)
                 }
             }
 
+            /*
+             * The Terminal is reachable with the "terminal" boot parameter.
+             * Its window, shell binding and cell renderer were all finished
+             * and nothing ever started them.
+             */
+            if (params->terminal) {
+                pr_info("  [GUI] Starting Terminal...\n");
+                if (nexus_app_launch(NEXUS_APP_TERMINAL) != 0) {
+                    pr_err("  [GUI] Terminal failed to start\n");
+                }
+            }
+
             /* Check if onboarding is needed (first boot) */
             onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
             if (wizard) {
@@ -534,6 +549,17 @@ void kernel_init_userspace(void)
                  */
                 login_screen_poll_input(login);
                 login_screen_update(login);
+
+                /*
+                 * If the Terminal owns the screen it needs the keyboard.
+                 * login_screen_poll_input() leaves characters it could not
+                 * consume queued, so this reads what is left rather than
+                 * competing with the login screen for the same keys.
+                 */
+                if (nexus_app_active() == NEXUS_APP_TERMINAL) {
+                    extern void terminal_gui_feed_chars(void);
+                    terminal_gui_feed_chars();
+                }
                 onboarding_wizard_update(wizard);
 
                 /*

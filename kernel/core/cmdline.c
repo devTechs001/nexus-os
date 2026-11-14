@@ -112,6 +112,16 @@ void parse_boot_params(const char *cmdline)
             g_boot_params.vm_manager = true;
             printk("[BOOT] Virtualization Manager will start after boot\n");
         }
+        else if (strcmp(token, "terminal") == 0) {
+            /*
+             * Start the Terminal instead of dropping straight to the desktop.
+             * The terminal, shell and cell renderer were all implemented and
+             * had no entry point at all, so this is the only way to reach
+             * them on a system whose desktop has no command parser yet.
+             */
+            g_boot_params.terminal = true;
+            printk("[BOOT] Terminal will start after boot\n");
+        }
         else if (strncmp(token, "loglevel=", 9) == 0) {
             printk("[BOOT] Log level set to %s\n", token + 9);
         }
