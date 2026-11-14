@@ -203,6 +203,15 @@ struct task_struct {
     
     /* Architecture Specific */
     void *arch;
+
+    /*
+     * Entry point of the loaded program, set by exec_process().
+     *
+     * Zero for a kernel thread. Non-zero means the task represents a ring-3
+     * program whose image is resident and whose entry address is known; the
+     * hand-off itself is enter_user_mode() (syscall_entry.S).
+     */
+    u64 user_entry;
     
     /* Reference Count */
     atomic_t refcount;

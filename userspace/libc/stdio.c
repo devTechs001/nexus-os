@@ -13,13 +13,16 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <limits.h>
+#include "../../userspace/include/stdio.h"
+#include "../../userspace/include/string.h"
+#include "../../userspace/include/stdlib.h"
 
 /*===========================================================================*/
 /*                         TYPE DEFINITIONS                                  */
 /*===========================================================================*/
 
-/* File structure */
-typedef struct {
+/* File structure - this is struct nexus_file, forward-declared in stdio.h. */
+struct nexus_file {
     int fd;                     /* File descriptor */
     int flags;                  /* File flags */
     char *buffer;               /* I/O buffer */
@@ -29,7 +32,9 @@ typedef struct {
     bool eof;                   /* End of file flag */
     bool error;                 /* Error flag */
     bool is_buffered;           /* Buffered I/O flag */
-} FILE;
+};
+
+typedef struct nexus_file FILE;
 
 /* File flags */
 #define FILE_READ       0x0001
@@ -1095,11 +1100,9 @@ FILE *fdopen(int fd, const char *mode)
 /*                         CONSTANTS                                         */
 /*===========================================================================*/
 
-#define EOF         (-1)
-#define BUFSIZ      4096
+/* EOF, BUFSIZ, SEEK_* and the buffering modes now come from
+ * userspace/include/stdio.h, which this file includes. Only the constants that
+ * have no counterpart there are defined here. */
 #define FOPEN_MAX   256
 #define FILENAME_MAX 256
 #define L_tmpnam    256
-#define SEEK_SET    0
-#define SEEK_CUR    1
-#define SEEK_END    2

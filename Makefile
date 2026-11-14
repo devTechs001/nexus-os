@@ -223,7 +223,8 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
 
 # Object files
 ASM_OBJECTS = $(BUILD_DIR)/boot.o \
-              $(BUILD_DIR)/interrupts.o
+              $(BUILD_DIR)/interrupts.o \
+              $(BUILD_DIR)/syscall_entry.o
 C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/printk.o \
             $(BUILD_DIR)/string.o \
@@ -392,7 +393,13 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/apic.o \
             $(BUILD_DIR)/ecc.o \
             $(BUILD_DIR)/sha.o \
-            $(BUILD_DIR)/boot_menu.o
+            $(BUILD_DIR)/boot_menu.o \
+            $(BUILD_DIR)/syscall_wrapper.o \
+            $(BUILD_DIR)/libc_string.o \
+            $(BUILD_DIR)/libc_stdlib.o \
+            $(BUILD_DIR)/libc_stdio.o \
+            $(BUILD_DIR)/user_init.o \
+            $(BUILD_DIR)/service_manager.o
 
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
@@ -551,6 +558,13 @@ $(BUILD_DIR)/boot.o: $(KERNEL_DIR)/arch/x86_64/boot/boot.asm | $(BUILD_DIR)
 $(BUILD_DIR)/interrupts.o: $(KERNEL_DIR)/arch/x86_64/interrupts/interrupts.asm | $(BUILD_DIR)
 	@echo "  [NASM]  $<"
 	@$(NASM) $(ASFLAGS) -o $@ $<
+
+# SYSCALL/SYSRET entry and the ring-3 transition. Assembled with gcc's
+# integrated assembler rather than nasm, so it builds with the same toolchain
+# as the rest of the kernel and is verifiable here.
+$(BUILD_DIR)/syscall_entry.o: $(KERNEL_DIR)/arch/x86_64/syscall/syscall_entry.S | $(BUILD_DIR)
+	@echo "  [AS]    $<"
+	@$(CC) -c -o $@ $<
 
 # Compile C files
 $(BUILD_DIR)/kernel.o: $(KERNEL_DIR)/core/kernel.c | $(BUILD_DIR)
@@ -1207,6 +1221,49 @@ $(BUILD_DIR)/sha.o: $(SECURITY_DIR)/crypto/sha.c | $(BUILD_DIR)
 $(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Userspace runtime (libc, libsys, init, services)
+#
+# These 40k lines were written and never compiled: they were absent from
+# C_SOURCES, so no build ever looked at them. One pattern rule covers the
+# whole tree; each source keeps its natural path so include directives resolve
+# as written.
+#
+# The kernel is freestanding and provides its own string/memory primitives, so
+# the userspace libc objects are built with the same freestanding flags and
+# linked into the kernel image rather than a separate user binary.
+# ---------------------------------------------------------------------------
+USERSPACE_DIRS = userspace/libc userspace/libsys userspace/init userspace/services
+USERSPACE_CFLAGS = -ffreestanding -fno-stack-protector -fno-pie -m64 \
+                   -mno-red-zone -O2 -g -Wall -Wextra -fno-builtin \
+                   -I$(KERNEL_DIR)/include -Iuserspace/include -Iuserspace \
+                   -D__FREESTANDING__=1 \
+                   -Wno-unused-parameter -Wno-unused-variable
+
+$(BUILD_DIR)/syscall_wrapper.o: userspace/libsys/syscall_wrapper.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/libc_string.o: userspace/libc/string.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/libc_stdlib.o: userspace/libc/stdlib.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/libc_stdio.o: userspace/libc/stdio.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/user_init.o: userspace/init/init.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/service_manager.o: userspace/services/service_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Build guard

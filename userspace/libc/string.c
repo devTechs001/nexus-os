@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "../../userspace/include/stdlib.h"
 #include <stdbool.h>
 
 /*===========================================================================*/

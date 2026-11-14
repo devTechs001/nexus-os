@@ -593,6 +593,9 @@ void syscall_stats_print(void)
 /*                         SYSCALL INITIALIZATION                            */
 /*===========================================================================*/
 
+/* Defined below; called from syscall_init() before its definition. */
+void syscall_arch_init(void);
+
 /**
  * syscall_init - Initialize syscall subsystem
  *
@@ -620,6 +623,17 @@ void syscall_init(void)
     /* Initialize syscall table */
     syscall_table_init();
 
+    /*
+     * Program the CPU to support SYSCALL/SYSRET, and select the entry point.
+     *
+     * This step did not exist. syscall_init() zeroed some counters and built
+     * the dispatch table, and touched no register at all: EFER.SCE was never
+     * set, so the SYSCALL instruction was disabled and executing it raised
+     * #UD, and LSTAR/STAR/SFMASK were never programmed. The table was complete
+     * and unreachable from ring 3.
+     */
+    syscall_arch_init();
+
     pr_info("System Call Interface initialized.\n");
     pr_info("  Total syscalls: %d\n", NR_SYSCALLS);
 }
@@ -640,3 +654,33 @@ void syscall_init(void)
 
 extern void syscall_entry_asm(void);
 extern void syscall_exit_asm(void);
+
+/* Architecture side of the SYSCALL/SYSRET setup (syscall_entry.S) */
+extern void syscall_init_msrs(void);
+extern void syscall_set_kernel_stack(u64 top);
+
+/*
+ * Kernel stack used for the duration of a system call.
+ *
+ * SYSCALL does not change RSP, so the entry stub must load a trusted stack
+ * before it can push anything. Allocated once, here, rather than per call.
+ */
+static u8 syscall_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
+
+/**
+ * syscall_arch_init - Enable SYSCALL/SYSRET and install the entry stack
+ *
+ * Without this the syscall table is present but unusable from ring 3.
+ */
+void syscall_arch_init(void)
+{
+    syscall_set_kernel_stack((u64)(uintptr_t)
+                             (syscall_kernel_stack + sizeof(syscall_kernel_stack)));
+
+    syscall_init_msrs();
+
+    pr_info("  [SYSCALL] EFER.SCE set, STAR/LSTAR/SFMASK programmed\n");
+    pr_info("  [SYSCALL] kernel stack %p-%p\n",
+            (void *)(uintptr_t)syscall_kernel_stack,
+            (void *)(uintptr_t)(syscall_kernel_stack + sizeof(syscall_kernel_stack)));
+}

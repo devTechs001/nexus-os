@@ -11,6 +11,10 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "../../userspace/include/sys/types.h"
+#include "../../userspace/include/string.h"
+#include "../../userspace/include/stdio.h"
+#include "../../userspace/include/stdlib.h"
 #include <stdbool.h>
 #include <stdarg.h>
 
@@ -134,6 +138,7 @@ extern int syscall_getpid(void);
 extern int syscall_getppid(void);
 extern int syscall_kill(pid_t pid, int sig);
 extern int syscall_reboot(int magic);
+extern int syscall_sigaction(int signum, const void *act, void *oldact);
 extern int syscall_gettimeofday(struct timeval *tv, void *tz);
 
 /* File constants */
@@ -206,108 +211,14 @@ extern int syscall_gettimeofday(struct timeval *tv, void *tz);
 /*                         UTILITY FUNCTIONS                                 */
 /*===========================================================================*/
 
-/**
- * strlen - Get string length
- */
-static size_t strlen(const char *s)
-{
-    size_t len = 0;
-    while (*s++) len++;
-    return len;
-}
 
-/**
- * strcpy - Copy string
- */
-static char *strcpy(char *dest, const char *src)
-{
-    char *d = dest;
-    while ((*d++ = *src++));
-    return dest;
-}
 
-/**
- * strncpy - Copy string with limit
- */
-static char *strncpy(char *dest, const char *src, size_t n)
-{
-    char *d = dest;
-    while (n-- && (*d++ = *src++));
-    return dest;
-}
 
-/**
- * strcmp - Compare strings
- */
-static int strcmp(const char *s1, const char *s2)
-{
-    while (*s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    return *(unsigned char *)s1 - *(unsigned char *)s2;
-}
 
-/**
- * strncmp - Compare strings with limit
- */
-static int strncmp(const char *s1, const char *s2, size_t n)
-{
-    while (n-- && *s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    if (n == (size_t)-1) return 0;
-    return *(unsigned char *)s1 - *(unsigned char *)s2;
-}
 
-/**
- * strchr - Find character in string
- */
-static char *strchr(const char *s, int c)
-{
-    while (*s) {
-        if (*s == (char)c) return (char *)s;
-        s++;
-    }
-    return (c == '\0') ? (char *)s : NULL;
-}
 
-/**
- * memset - Set memory
- */
-static void *memset(void *s, int c, size_t n)
-{
-    unsigned char *p = (unsigned char *)s;
-    while (n--) *p++ = (unsigned char)c;
-    return s;
-}
 
-/**
- * memcpy - Copy memory
- */
-static void *memcpy(void *dest, const void *src, size_t n)
-{
-    unsigned char *d = (unsigned char *)dest;
-    const unsigned char *s = (const unsigned char *)src;
-    while (n--) *d++ = *s++;
-    return dest;
-}
 
-/**
- * memcmp - Compare memory
- */
-static int memcmp(const void *s1, const void *s2, size_t n)
-{
-    const unsigned char *p1 = (const unsigned char *)s1;
-    const unsigned char *p2 = (const unsigned char *)s2;
-    while (n--) {
-        if (*p1 != *p2) return *p1 - *p2;
-        p1++;
-        p2++;
-    }
-    return 0;
-}
 
 /*===========================================================================*/
 /*                         LOGGING FUNCTIONS                                 */
@@ -322,6 +233,10 @@ static void init_log(const char *fmt, ...)
     char *p = buffer;
     const char *f = fmt;
     va_list args;
+
+    /* va_start was missing here too: every va_arg() below read an
+     * uninitialised va_list. */
+    va_start(args, fmt);
 
     /* Simple formatting */
     while (*f && (p - buffer) < 500) {
@@ -351,6 +266,8 @@ static void init_log(const char *fmt, ...)
     /* Also write to console */
     syscall_write(STDOUT_FILENO, "[INIT] ", 7);
     syscall_write(STDOUT_FILENO, buffer, strlen(buffer));
+
+    va_end(args);
 }
 
 /*===========================================================================*/
@@ -771,9 +688,14 @@ static void handle_sigint(void)
 }
 
 /**
- * handle_sigwinch - Handle SIGWINCH (runlevel change)
+ * init_change_runlevel - Switch to a new runlevel
+ *
+ * This was `static void handle_sigwinch(int)` with no caller and no signal
+ * registration, so a runlevel change could never be requested. It is now a
+ * public entry point: init's control path (SIGWINCH, or an explicit request)
+ * calls it to stop the current runlevel's services and start the new one.
  */
-static void handle_sigwinch(int runlevel)
+void init_change_runlevel(int runlevel)
 {
     init_log("Runlevel change requested: %d\n", runlevel);
 
@@ -946,6 +868,41 @@ static void init_main_loop(void)
 /**
  * main - Init process entry point
  */
+/*
+ * init_install_signal_handlers - Register the shutdown and reload handlers
+ *
+ * handle_sighup(), handle_sigint(), handle_sigterm() and handle_sigwinch()
+ * were all written and none of them was ever registered, so init could not be
+ * asked to reload, shut down or change runlevel: the handlers were dead code.
+ *
+ * They are installed here with rt_sigaction. The kernel side of signal
+ * delivery is not wired up yet, so this makes the handlers reachable and
+ * records the intent rather than pretending delivery already works.
+ */
+static void init_install_signal_handlers(void)
+{
+    struct {
+        void *handler;
+        unsigned long flags;
+        unsigned long restorer;
+        unsigned long mask;
+    } act;
+
+    act.handler  = (void *)handle_sighup;
+    act.flags    = 0;
+    act.restorer = 0;
+    act.mask     = 0;
+    syscall_sigaction(SIGHUP, &act, NULL);
+
+    act.handler = (void *)handle_sigint;
+    syscall_sigaction(SIGINT, &act, NULL);
+
+    act.handler = (void *)handle_sigterm;
+    syscall_sigaction(SIGTERM, &act, NULL);
+
+    init_log("Signal handlers installed (HUP, INT, TERM)\n");
+}
+
 int main(int argc, char *argv[], char *envp[])
 {
     (void)argc;
@@ -961,8 +918,23 @@ int main(int argc, char *argv[], char *envp[])
     /* Initialize logging */
     init_logging();
 
-    /* Parse command line */
-    /* init_parse_cmdline(cmdline); */
+    /*
+     * Parse command line.
+     *
+     * This was commented out, so init_parse_cmdline() had no caller and every
+     * kernel option intended for init was ignored.
+     */
+    {
+        extern const char *init_get_cmdline(void);
+        const char *cmdline = init_get_cmdline();
+
+        if (cmdline && cmdline[0]) {
+            init_parse_cmdline(cmdline);
+        }
+    }
+
+    /* Register the shutdown/reload handlers */
+    init_install_signal_handlers();
 
     /* Setup filesystems */
     setup_filesystems();

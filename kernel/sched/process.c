@@ -772,6 +772,12 @@ int exec_process(struct task_struct *task, const char *path,
     strncpy(task->comm, path, sizeof(task->comm) - 1);
     task->comm[sizeof(task->comm) - 1] = '\0';
 
+    /*
+     * The image is resident and the entry point is recorded on the task
+     * (task->user_entry). Entering it is a separate, explicit step:
+     * arch_exec_user() drops to ring 3 and does not return, so it must be the
+     * last thing the calling task does.
+     */
     return 0;
 }
 
@@ -1355,15 +1361,58 @@ int arch_load_binary(struct task_struct *task, const char *path,
 
     /* Record what was loaded on the task for introspection. */
     task->start_time = get_time_ms();
+    task->user_entry = entry;
 
     pr_info("[EXEC] '%s' loaded: %llu bytes, %u segments, entry 0x%llX\n",
             path, (unsigned long long)size, segments,
             (unsigned long long)entry);
 
-    /*
-     * The image is resident but cannot be entered yet. Report ENOSYS so the
-     * distinction between "bad binary" and "no userspace hand-off" stays
-     * visible to whoever is debugging.
-     */
-    return -ENOSYS;
+    return 0;
+}
+
+/*
+ * enter_user_mode - Drop to ring 3 at an entry point
+ *
+ * Implemented in arch/x86_64/syscall/syscall_entry.S. Never returns.
+ */
+extern void enter_user_mode(u64 entry, u64 user_stack_top, u64 arg);
+
+/*
+ * arch_exec_user - Run a loaded image in ring 3
+ *
+ * Terminates the calling task by transferring control to user mode. The only
+ * way back into the kernel is a system call (see syscall_entry.S) or an
+ * interrupt.
+ *
+ * This is the hand-off arch_load_binary() used to stop short of. The old
+ * comment said it "needs per-process page tables and a non-trivial
+ * context_switch()". The context switch is now real; what remains is that the
+ * image is mapped in the kernel address space rather than its own, so a user
+ * program can read kernel memory. That is a correctness and provenance
+ * property this tree does not yet enforce anywhere.
+ */
+int arch_exec_user(struct task_struct *task, u64 entry)
+{
+    u64 stack_top;
+
+    if (!task || !entry) {
+        return -EINVAL;
+    }
+
+    stack_top = elf_alloc_user_stack();
+    if (!stack_top) {
+        pr_err("[EXEC] No user stack for pid %u\n", task->pid);
+        return -ENOMEM;
+    }
+
+    pr_info("[EXEC] Entering ring 3: pid=%u entry=0x%llX stack=0x%llX\n",
+            task->pid, (unsigned long long)entry,
+            (unsigned long long)stack_top);
+
+    /* Does not return. */
+    enter_user_mode(entry, stack_top, 0);
+
+    /* enter_user_mode() is not expected to return; if it does, stop. */
+    pr_err("[EXEC] enter_user_mode returned - fault\n");
+    return -EFAULT;
 }

@@ -12,7 +12,20 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <errno.h>
+
+/* Provided by userspace/libc/string.c. Declared here because this file is
+ * compiled freestanding, where no libc header is on the include path. */
+extern size_t strlen(const char *s);
+extern void *memcpy(void *dst, const void *src, size_t n);
+extern void *memset(void *dst, int c, size_t n);
+extern int strcmp(const char *a, const char *b);
+
+/* Standard stream descriptors, used by perror(). */
+#ifndef STDIN_FILENO
+#define STDIN_FILENO    0
+#define STDOUT_FILENO   1
+#define STDERR_FILENO   2
+#endif
 
 /*===========================================================================*/
 /*                         TYPE DEFINITIONS                                  */
@@ -20,6 +33,8 @@
 
 /* Basic types */
 typedef int64_t ssize_t;
+typedef int32_t key_t;     /* System V IPC key */
+typedef unsigned long nfds_t;  /* poll(2) descriptor count */
 typedef uint64_t size_t;
 typedef int32_t pid_t;
 typedef uint32_t uid_t;
@@ -157,194 +172,19 @@ struct shmid_ds {
 /*                         SYSCALL NUMBERS                                   */
 /*===========================================================================*/
 
-/* File operations */
-#define SYS_OPEN        1
-#define SYS_CLOSE       2
-#define SYS_READ        3
-#define SYS_WRITE       4
-#define SYS_LSEEK       5
-#define SYS_STAT        6
-#define SYS_FSTAT       7
-#define SYS_LSTAT       8
-#define SYS_POLL        9
-#define SYS_ACCESS      10
-#define SYS_PIPE        11
-#define SYS_DUP         12
-#define SYS_DUP2        13
-#define SYS_FCNTL       14
-#define SYS_FLOCK       15
-#define SYS_FSYNC       16
-#define SYS_FDATASYNC   17
-#define SYS_TRUNCATE    18
-#define SYS_FTRUNCATE   19
-#define SYS_GETDENTS    20
-#define SYS_GETCWD      21
-#define SYS_CHDIR       22
-#define SYS_FCHDIR      23
-#define SYS_RENAME      24
-#define SYS_MKDIR       25
-#define SYS_RMDIR       26
-#define SYS_CREAT       27
-#define SYS_LINK        28
-#define SYS_UNLINK      29
-#define SYS_SYMLINK     30
-#define SYS_READLINK    31
-#define SYS_CHMOD       32
-#define SYS_FCHMOD      33
-#define SYS_CHOWN       34
-#define SYS_FCHOWN      35
-#define SYS_LCHOWN      36
-#define SYS_UMASK       37
-#define SYS_READV       38
-#define SYS_WRITEV      39
-#define SYS_PREAD       40
-#define SYS_PWRITE      41
+/*
+ * Syscall numbering.
+ *
+ * This file used to carry its own copy of the numbers with Linux x86_64
+ * values (SYS_WRITE = 4). The kernel table uses a different numbering
+ * (SYS_EXIT = 4, SYS_WRITE = 104), so a userspace write() was invoking the
+ * kernel's exit handler. Both files compiled and nothing caught it, because
+ * neither user programs nor the syscall path had ever run.
+ *
+ * The numbers now come from the single header the kernel table is built from.
+ */
+#include "../../kernel/include/nexus_syscall_numbers.h"
 
-/* Process operations */
-#define SYS_EXIT        50
-#define SYS_EXIT_GROUP  51
-#define SYS_FORK        52
-#define SYS_VFORK       53
-#define SYS_CLONE       54
-#define SYS_EXECVE      55
-#define SYS_WAIT4       56
-#define SYS_KILL        57
-#define SYS_GETPID      58
-#define SYS_GETPPID     59
-#define SYS_GETUID      60
-#define SYS_GETEUID     61
-#define SYS_GETGID      62
-#define SYS_GETEGID     63
-#define SYS_SETUID      64
-#define SYS_SETEUID     65
-#define SYS_SETGID      66
-#define SYS_SETEGID     67
-#define SYS_SETREUID    68
-#define SYS_SETREGID    69
-#define SYS_GETGROUPS   70
-#define SYS_SETGROUPS   71
-#define SYS_SETRESUID   72
-#define SYS_GETRESUID   73
-#define SYS_SETRESGID   74
-#define SYS_GETRESGID   75
-#define SYS_GETPGID     76
-#define SYS_SETPGID     77
-#define SYS_GETSID      78
-#define SYS_SETSID      79
-#define SYS_SETPRIORITY 80
-#define SYS_GETPRIORITY 81
-#define SYS_GETRUSAGE   82
-#define SYS_TIMES       83
-#define SYS_PTRACE      84
-
-/* Memory operations */
-#define SYS_BRK         90
-#define SYS_MMAP        91
-#define SYS_MUNMAP      92
-#define SYS_MPROTECT    93
-#define SYS_MREMAP      94
-#define SYS_MADVISE     95
-#define SYS_MLOCK       96
-#define SYS_MUNLOCK     97
-#define SYS_MLOCKALL    98
-#define SYS_MUNLOCKALL  99
-
-/* IPC operations */
-#define SYS_SHMGET      100
-#define SYS_SHMAT       101
-#define SYS_SHMCTL      102
-#define SYS_SHMDT       103
-#define SYS_MSGGET      104
-#define SYS_MSGSND      105
-#define SYS_MSGRCV      106
-#define SYS_MSGCTL      107
-#define SYS_SEMGET      108
-#define SYS_SEMOP       109
-#define SYS_SEMCTL      110
-
-/* Socket operations */
-#define SYS_SOCKET      120
-#define SYS_BIND        121
-#define SYS_CONNECT     122
-#define SYS_LISTEN      123
-#define SYS_ACCEPT      124
-#define SYS_GETSOCKNAME 125
-#define SYS_GETPEERNAME 126
-#define SYS_SOCKETPAIR  127
-#define SYS_SEND        128
-#define SYS_RECV        129
-#define SYS_SENDTO      130
-#define SYS_RECVFROM    131
-#define SYS_SHUTDOWN    132
-#define SYS_SETSOCKOPT  133
-#define SYS_GETSOCKOPT  134
-#define SYS_SENDMSG     135
-#define SYS_RECVMSG     136
-#define SYS_SENDMMSG    137
-
-/* Time operations */
-#define SYS_GETTIMEOFDAY 140
-#define SYS_SETTIMEOFDAY 141
-#define SYS_GETTIME     142
-#define SYS_SETTIME     143
-#define SYS_NANOSLEEP   144
-#define SYS_CLOCK_GETTIME 145
-#define SYS_CLOCK_SETTIME 146
-#define SYS_CLOCK_GETRES 147
-#define SYS_CLOCK_NANOSLEEP 148
-#define SYS_ALARM       149
-#define SYS_PAUSE       150
-
-/* Signal operations */
-#define SYS_RT_SIGACTION 160
-#define SYS_RT_SIGPROCMASK 161
-#define SYS_RT_SIGRETURN 162
-#define SYS_RT_SIGPENDING 163
-#define SYS_RT_SIGTIMEDWAIT 164
-#define SYS_RT_SIGQUEUEINFO 165
-#define SYS_RT_SIGSUSPEND 166
-#define SYS_SIGALTSTACK 167
-#define SYS_TGKILL      168
-#define SYS_TKILL       169
-
-/* Misc operations */
-#define SYS_IOCTL       170
-#define SYS_GETXATTR    171
-#define SYS_SETXATTR    172
-#define SYS_LISTXATTR   173
-#define SYS_REMOVEXATTR 174
-#define SYS_GETTID      180
-#define SYS_YIELD       181
-#define SYS_SCHED_GETAFFINITY 182
-#define SYS_SCHED_SETAFFINITY 183
-#define SYS_SYSINFO     184
-#define SYS_UNAME       185
-#define SYS_GETRLIMIT   186
-#define SYS_SETRLIMIT   187
-#define SYS_PRCTL       188
-#define SYS_ARCH_PRCTL  189
-#define SYS_CAPGET      190
-#define SYS_CAPSET      191
-#define SYS_REBOOT      192
-#define SYS_MOUNT       193
-#define SYS_UMOUNT2     194
-#define SYS_SWAPON      195
-#define SYS_SWAPOFF     196
-#define SYS_INIT_MODULE 197
-#define SYS_DELETE_MODULE 198
-#define SYS_QUERY_MODULE 199
-
-/* NEXUS OS specific */
-#define SYS_NEXUS_CREATE_PROCESS 200
-#define SYS_NEXUS_DESTROY_PROCESS 201
-#define SYS_NEXUS_CREATE_THREAD 202
-#define SYS_NEXUS_DESTROY_THREAD 203
-#define SYS_NEXUS_SEND_MESSAGE 204
-#define SYS_NEXUS_RECV_MESSAGE 205
-#define SYS_NEXUS_CREATE_SERVICE 206
-#define SYS_NEXUS_START_SERVICE 207
-#define SYS_NEXUS_STOP_SERVICE 208
-#define SYS_NEXUS_QUERY_SERVICE 209
 
 /* Error codes */
 #define EPERM           1
@@ -661,8 +501,19 @@ struct sysinfo {
     unsigned int mem_unit;
 };
 
-/* errno - Thread-local error number */
-static __thread int errno = 0;
+/*
+ * errno - error number set by the syscall wrappers.
+ *
+ * This was `static __thread int errno`, which needs thread-local storage
+ * support from a C library the freestanding build does not have: gcc rejected
+ * it ("invalid storage class for function '__errno_location'") because
+ * __thread lowers to a call into whatever provides TLS. There is no TLS setup
+ * in this tree yet, so a plain file-scope variable is what actually works.
+ *
+ * It is not thread-safe by design: it becomes a per-thread value once the
+ * userspace runtime has a TLS block, which is a prerequisite for libc here.
+ */
+static int errno;
 
 /*===========================================================================*/
 /*                         SYSCALL MACRO                                     */
