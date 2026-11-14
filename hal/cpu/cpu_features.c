@@ -72,24 +72,6 @@ static inline void cpuid(u32 eax, u32 *ebx, u32 ecx, u32 *edx)
 #endif
 }
 
-/**
- * cpuid_count - Execute CPUID with count
- * @eax: Input EAX value
- * @count: Count value (ECX)
- * @regs: Output registers array [EAX, EBX, ECX, EDX]
- */
-static inline void cpuid_count(u32 eax, u32 count, u32 regs[4])
-{
-#if defined(ARCH_X86_64)
-    __asm__ __volatile__(
-        "cpuid\n\t"
-        : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
-        : "a"(eax), "c"(count)
-        : "memory"
-    );
-#endif
-}
-
 /*===========================================================================*/
 /*                         X86_64 FEATURE DETECTION                          */
 /*===========================================================================*/
@@ -281,7 +263,6 @@ static void x86_detect_topology(cpu_features_t *features)
 static void x86_detect_virtualization(cpu_features_t *features)
 {
     u32 regs[4];
-    u32 vendor_ecx;
 
     /* Check vendor for virtualization type */
     if (strcmp(features->vendor_string, "GenuineIntel") == 0) {
@@ -443,6 +424,14 @@ int cpu_features_detect(u32 cpu_id, cpu_features_t *features)
     if (!features) {
         return -EINVAL;
     }
+
+    /*
+     * cpu_id is not an input to CPUID: every leaf describes the CPU executing
+     * it, so on a multi-core system this must be called once per core to
+     * collect per-core differences. The parameter is kept so callers can be
+     * explicit about which core they mean if that ever becomes possible.
+     */
+    (void)cpu_id;
 
     /* Zero the structure */
     memset(features, 0, sizeof(cpu_features_t));

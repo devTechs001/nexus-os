@@ -168,6 +168,10 @@ static int x86_topology_detect_cache(u32 cpu_id, struct cache_info *cache_info)
 
     memset(cache_info, 0, sizeof(struct cache_info));
 
+    /* cpu_id is not an input to CPUID - leaf 4 describes the calling CPU - so
+     * there is nothing to pass it to. Keep the signature for the API's sake. */
+    (void)cpu_id;
+
     for (i = 0; i < 10; i++) {
         cpuid_count(4, i, regs);
 
@@ -185,9 +189,14 @@ static int x86_topology_detect_cache(u32 cpu_id, struct cache_info *cache_info)
         cache_info->caches[level].present = true;
         cache_info->caches[level].type = type;
         cache_info->caches[level].level = level;
-        cache_info->caches[level].size = ((regs[1] >> 22) + 1) *
+        /*
+         * `& 0xFFF + 1` binds as `& (0xFFF + 1)`, i.e. `& 0x1000`, which is
+         * zero for every real CPUID value - so the ways term contributed
+         * nothing and every reported cache size was 0.
+         */
+        cache_info->caches[level].size = (u64)((regs[1] >> 22) + 1) *
                                           ((regs[1] & 0x3FF) + 1) *
-                                          ((regs[0] >> 14) & 0xFFF + 1) * 64;
+                                          (((regs[0] >> 14) & 0xFFF) + 1) * 64;
         cache_info->caches[level].line_size = ((regs[1] >> 12) & 0x3FF) + 1;
         cache_info->caches[level].associativity = ((regs[1] >> 22) & 0x3FF) + 1;
         cache_info->caches[level].sets = ((regs[1] >> 22) + 1);
@@ -271,7 +280,6 @@ static void cpu_topology_init(void)
 static int cpu_topology_enumerate(void)
 {
     u32 i, cpu_id;
-    int ret;
 
     pr_info("CPU: Enumerating CPU topology...\n");
 
@@ -383,6 +391,34 @@ int cpu_topology_map_cpu(u32 cpu_id, u32 *package_id, u32 *core_id, u32 *thread_
     core = &topology_manager.cores[*core_id];
     *package_id = core->package_id;
 
+#if defined(ARCH_X86_64)
+    /*
+     * Prefer the hardware's own answer.
+     *
+     * The arithmetic above assumes CPUs are numbered contiguously as
+     * thread-major within core within package, which is a convention, not
+     * something the CPU promises: firmware is free to leave gaps in the APIC
+     * ID space, and on a multi-socket box it usually does. x2APIC leaf 0xB
+     * states the actual bit fields, and x86_topology_parse_x2apic() existed to
+     * read them - it was written, never called, and the legacy helper that
+     * reads the APIC ID had no caller either.
+     *
+     * Fall back to the arithmetic mapping if the leaf is unavailable.
+     */
+    {
+        u32 hw_pkg, hw_core, hw_thread;
+        u32 apic_id = x86_topology_get_apic_id();
+
+        if (x86_topology_parse_x2apic(apic_id, &hw_pkg, &hw_core, &hw_thread) == 0) {
+            if (hw_core < topology_manager.num_cores) {
+                *package_id = hw_pkg;
+                *core_id = hw_core;
+                *thread_id = hw_thread;
+            }
+        }
+    }
+#endif
+
     return 0;
 }
 
@@ -412,7 +448,7 @@ int cpu_topology_get_sibling(u32 cpu_id, u64 *sibling_mask)
 
     /* Find all threads in the same core */
     for (i = 0; i < topology_manager.num_threads; i++) {
-        u32 p, c, t;
+        u32 p = 0, c = 0, t = 0;
 
         ret = cpu_topology_map_cpu(i, &p, &c, &t);
         if (ret < 0) {

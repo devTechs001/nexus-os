@@ -566,4 +566,102 @@ s32 x86_cpu_get_tjmax(u32 cpu_id);
 int cpu_set_frequency(u32 cpu_id, u32 freq);
 int acpi_enter_sleep_state(u32 state);
 
+/*===========================================================================*/
+/*              CPU TOPOLOGY AND NUMA TYPES (cpu_topology.c, numa.c)         */
+/*===========================================================================*/
+
+/*
+ * Both of these types were referenced only through a `struct X *` that was
+ * never defined anywhere in the tree: cpu_topology_get_cache_info() and
+ * numa_get_stats() took pointers to incomplete structs, so neither could be
+ * filled in or even sized with sizeof. Neither file's API appeared in any
+ * header either.
+ */
+
+/* One level of the cache hierarchy */
+typedef struct cache_level {
+    bool present;               /* This level exists */
+    u32 type;                   /* CPUID type: 1=data, 2=instruction, 3=unified */
+    u32 level;                  /* 1..3 */
+    u64 size;                   /* Bytes */
+    u32 line_size;              /* Bytes per line */
+    u32 associativity;          /* Ways */
+    u32 sets;                   /* Number of sets */
+} cache_level_t;
+
+/* Full cache description for one CPU */
+struct cache_info {
+    cache_level_t caches[4];    /* Indexed by level, 0 = L1 */
+};
+
+/* Aggregate NUMA statistics */
+struct numa_stats {
+    u32 num_nodes;              /* Total nodes */
+    u32 num_online_nodes;       /* Online nodes */
+    bool numa_enabled;          /* NUMA active */
+    u64 total_memory;           /* Bytes across all nodes */
+    u64 free_memory;            /* Free bytes across all nodes */
+    u32 cpu_count;              /* CPUs across all nodes */
+};
+
+/* CPU topology (hal/cpu/cpu_topology.c). None of these were declared. */
+int cpu_topology_map_cpu(u32 cpu_id, u32 *package_id, u32 *core_id, u32 *thread_id);
+int cpu_topology_get_sibling(u32 cpu_id, u64 *sibling_mask);
+int cpu_topology_get_core_siblings(u32 cpu_id, u64 *sibling_mask);
+int cpu_topology_get_numa_node(u32 cpu_id);
+int cpu_topology_get_numa_cpus(u32 node_id, u64 *cpu_mask);
+int cpu_topology_get_cache_info(u32 cpu_id, struct cache_info *cache_info);
+u32 cpu_topology_get_package_count(void);
+u32 cpu_topology_get_core_count(void);
+u32 cpu_topology_get_thread_count(void);
+u32 cpu_topology_get_numa_node_count(void);
+u32 cpu_topology_get_threads_per_core(void);
+u32 cpu_topology_get_cores_per_package(void);
+void cpu_topology_early_init(void);
+int cpu_topology_initialize(void);
+void cpu_topology_dump(void);
+
+/* NUMA (hal/memory/numa.c) */
+void numa_early_init(void);
+int numa_initialize(void);
+int numa_get_node(void *addr);
+int numa_set_node(void *addr, int node);
+int numa_get_num_nodes(void);
+int numa_get_node_for_cpu(u32 cpu);
+int numa_set_cpu_node(u32 cpu, u32 node);
+u32 numa_get_node_cpu_count(u32 node);
+u32 numa_get_distance(u32 from, u32 to);
+int numa_set_distance(u32 from, u32 to, u32 distance);
+int numa_get_stats(struct numa_stats *stats);
+u32 x86_numa_detect_nodes(void);
+u32 arm_numa_detect_nodes(void);
+
+/*===========================================================================*/
+/*                      CPUID (x86_64) SHARED HELPER                          */
+/*===========================================================================*/
+
+/*
+ * This lived as a `static inline` inside cpu_features.c while cpu_topology.c
+ * called it too. Being static it was invisible outside its own translation
+ * unit, so the topology scan compiled against an implicit declaration that
+ * assumed `int cpuid_count()` and passed `u32 regs[4]` as a pointer through a
+ * varargs-style prototype - and would have failed to link. One definition, in
+ * the header both files include.
+ */
+static inline void cpuid_count(u32 eax, u32 count, u32 regs[4])
+{
+#if defined(ARCH_X86_64)
+    __asm__ __volatile__(
+        "cpuid\n\t"
+        : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(eax), "c"(count)
+        : "memory"
+    );
+#else
+    (void)eax;
+    (void)count;
+    regs[0] = regs[1] = regs[2] = regs[3] = 0;
+#endif
+}
+
 #endif /* _NEXUS_HAL_H */
