@@ -35,10 +35,21 @@ void arch_switch_mm(struct address_space *prev_mm, struct address_space *next_mm
     (void)next_mm;
 }
 
+/*
+ * arch_switch_to - Switch CPU context from one task to another
+ *
+ * This was an empty function. Without it the scheduler picked a "next" task,
+ * updated run queue bookkeeping, and then returned to the *same* stack - so
+ * nothing but the boot thread ever ran, no matter what the scheduler decided.
+ * The register and stack swap is implemented in process.c, where the per-task
+ * context structure lives.
+ */
+extern void arch_do_switch(struct task_struct *prev, struct task_struct *next);
+extern int arch_init_task(struct task_struct *task, void (*fn)(void *), void *arg);
+
 void arch_switch_to(struct task_struct *prev, struct task_struct *next)
 {
-    (void)prev;
-    (void)next;
+    arch_do_switch(prev, next);
 }
 
 int arch_task_kill(struct task_struct *task, int signal)
@@ -50,7 +61,16 @@ int arch_task_kill(struct task_struct *task, int signal)
 
 void arch_idle_cpu(void)
 {
-    /* Halt CPU until interrupt */
+    /*
+     * Halt until the next interrupt.
+     *
+     * This was empty, so the idle task spun at full speed. `sti; hlt` is the
+     * correct idle: interrupts are already enabled on entry from
+     * idle_thread(), hlt wakes on the next timer tick, and the interrupt then
+     * runs scheduler_tick() so the CPU does not stay parked when a task
+     * becomes runnable.
+     */
+    __asm__ __volatile__("sti; hlt" ::: "memory");
 }
 
 /*===========================================================================*/
@@ -308,6 +328,29 @@ static int create_idle_task(u32 cpu)
 
     /* Initialize reference count */
     atomic_set(&task->refcount, 1);
+
+    /*
+     * Give the idle task a real stack and CPU context.
+     *
+     * create_idle_task() built the structure with kzalloc and stopped there:
+     * no stack, no arch context. scheduler_start() then set rq->curr to this
+     * task, so the first context switch into idle would have loaded a null
+     * stack pointer and faulted.
+     */
+    task->stack = kzalloc(KERNEL_STACK_SIZE);
+    if (!task->stack) {
+        pr_err("Failed to allocate idle stack for CPU %u\n", cpu);
+        kfree(task);
+        return -ENOMEM;
+    }
+    task->thread_info = task->stack;
+
+    if (arch_init_task(task, idle_thread, task) != 0) {
+        pr_err("Failed to initialize idle context for CPU %u\n", cpu);
+        kfree(task->stack);
+        kfree(task);
+        return -ENOMEM;
+    }
 
     /* Set as idle task */
     rq->idle = task;
@@ -579,7 +622,6 @@ void context_switch(struct rq *rq, struct task_struct *prev,
  */
 void switch_to(struct task_struct *prev, struct task_struct *next)
 {
-    /* Architecture-specific implementation required */
     arch_switch_to(prev, next);
 }
 
@@ -705,8 +747,31 @@ static void __schedule(void)
         rq->prev = prev;
         rq->curr = next;
 
-        /* Perform context switch */
+        /*
+         * Release the run queue before switching.
+         *
+         * The switch must not happen while the queue is locked. A task that
+         * has never run is entered by the very first switch and never returns
+         * here at all, so it would never reach an unlock, and the queue would
+         * stay locked forever.
+         *
+         * Releasing first keeps this balanced in both directions: whoever
+         * resumes this stack re-acquires the queue at the bottom of this
+         * function and releases it again, so every acquire pairs with exactly
+         * one unlock, and no task ever runs with the queue held.
+         */
+        rq_unlock_irqrestore(rq, flags);
+        local_irq_enable();
+
+        /* Perform context switch - may not return on a task's first run */
         context_switch(rq, prev, next);
+
+        /*
+         * Resumed on this stack. Take the queue back so the accounting below
+         * is serialized like every other run queue update.
+         */
+        local_irq_disable();
+        rq_lock_irqsave(rq, &flags);
 
         /* Update statistics */
         scheduler_state.schedule_count++;
@@ -755,6 +820,125 @@ void preempt_schedule(void)
     if (preempt_count() == 0) {
         __schedule();
     }
+}
+
+/**
+ * scheduler_enter_from_boot - Hand the CPU from the boot thread to the scheduler
+ *
+ * The boot thread is not a task: it has no task_struct, no saved context and
+ * no stack of its own that we can return to. scheduler_start() therefore
+ * installed the *idle task* as rq->curr, which is wrong as a predecessor -
+ * scheduling away from idle would overwrite the initial frame that
+ * arch_init_task() built for it, and idle would never run its own entry point.
+ *
+ * This installs a throwaway stand-in for the boot thread (whose arch context
+ * is NULL, so arch_do_switch() simply discards the boot stack pointer) and
+ * performs the first switch. From then on the idle task is entered normally
+ * and idles with interrupts enabled.
+ */
+void scheduler_enter_from_boot(void)
+{
+    static struct task_struct boot_thread;
+    static bool boot_thread_ready = false;
+    struct rq *rq;
+
+    if (!scheduler_state.enabled || !scheduler_state.started) {
+        return;
+    }
+
+    rq = get_cpu_rq();
+
+    if (!boot_thread_ready) {
+        boot_thread_ready = true;
+        memset(&boot_thread, 0, sizeof(boot_thread));
+        boot_thread.state = TASK_RUNNING;
+        boot_thread.pid = 0;
+        boot_thread.tgid = 0;
+        boot_thread.cpu = get_cpu_id();
+        strncpy(boot_thread.comm, "boot", sizeof(boot_thread.comm) - 1);
+        INIT_LIST_HEAD(&boot_thread.run_list);
+        INIT_LIST_HEAD(&boot_thread.children);
+        INIT_LIST_HEAD(&boot_thread.sibling);
+        wait_queue_init(&boot_thread.wait_queue);
+        /* boot_thread.arch stays NULL: there is nowhere to resume to. */
+    }
+
+    /*
+     * Install the boot thread as the current task so the first schedule()
+     * switches away from it rather than from the idle task.
+     *
+     * This distinction matters. scheduler_start() set rq->curr to the idle
+     * task; scheduling away from idle would save the boot stack pointer into
+     * the idle task's context, overwriting the initial frame that
+     * arch_init_task() built for it, and idle would then resume in the middle
+     * of the boot thread instead of entering idle_thread().
+     */
+    rq->curr = &boot_thread;
+
+    pr_info("[SCHED] Boot thread handing off to the scheduler\n");
+    schedule();
+}
+
+/**
+ * scheduler_preempt_point - Act on need_resched when returning from an IRQ
+ *
+ * Called from the interrupt return path (see interrupts.asm). The timer IRQ
+ * runs scheduler_tick(), which raises need_resched when the running task has
+ * used its timeslice; before this existed nothing consumed that flag, so a
+ * task that never blocked voluntarily held the CPU forever.
+ *
+ * This runs on the interrupt frame, so it must NOT switch away from it: the
+ * interrupted task's registers live on this stack and iretq will not be
+ * reached. Instead it only clears the flag and re-arms, leaving the switch to
+ * a point where a real task stack is in use. The cooperative yield in the GUI
+ * loop and task_sleep() provide those points.
+ *
+ * Kept deliberately conservative: correctness over preemption latency.
+ */
+void scheduler_preempt_point(void)
+{
+    /*
+     * Nested interrupts and early boot both land here. Nothing to do until
+     * the scheduler owns a current task.
+     */
+    if (!scheduler_state.enabled || !scheduler_state.started) {
+        return;
+    }
+
+    if (!need_resched()) {
+        return;
+    }
+
+    /*
+     * Clear the flag so the tick does not keep re-raising it, and let the
+     * task reach a safe switch point. Switching from the IRQ frame would
+     * discard the interrupted context.
+     */
+    clear_need_resched();
+}
+
+/**
+ * scheduler_yield - Give the CPU to another runnable task
+ *
+ * Explicit cooperative yield. Safe to call before the scheduler has started
+ * or with interrupts disabled: it checks both and returns immediately rather
+ * than dereferencing a run queue that does not exist yet.
+ *
+ * The GUI event loop uses this once per frame. It previously busy-waited on
+ * `pause`, which meant the render thread held the CPU forever and no other
+ * task could ever run.
+ */
+void scheduler_yield(void)
+{
+    if (!scheduler_state.enabled || !scheduler_state.started) {
+        return;
+    }
+
+    /*
+     * schedule() itself guards on state and preempt_count, so the check above
+     * is belt-and-braces for callers that run before scheduler_start().
+     */
+    schedule();
 }
 
 /*===========================================================================*/
@@ -920,7 +1104,20 @@ int task_wake_up(struct task_struct *task)
     if (!task) {
         return -EINVAL;
     }
-    return try_to_wake_up(task, TASK_INTERRUPTIBLE | TASK_UNINTERRUPTIBLE, 0);
+
+    /*
+     * Include TASK_NEW.
+     *
+     * task_create() leaves a new task in TASK_NEW and does not put it on a run
+     * queue. try_to_wake_up() only acts when `task->state & state` is non-zero,
+     * so waking with just INTERRUPTIBLE|UNINTERRUPTIBLE silently did nothing
+     * for a freshly created task: it stayed off the run queue forever and its
+     * entry point was never called. Every task created in this tree was
+     * affected.
+     */
+    return try_to_wake_up(task,
+                          TASK_NEW | TASK_INTERRUPTIBLE | TASK_UNINTERRUPTIBLE,
+                          0);
 }
 
 /**

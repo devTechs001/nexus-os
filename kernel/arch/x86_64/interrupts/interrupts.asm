@@ -4,6 +4,7 @@
 [bits 64]
 
 extern interrupt_handler
+extern scheduler_preempt_point
 global isr_stub_table
 
 section .text
@@ -30,6 +31,17 @@ interrupt_common_stub:
     ; The interrupt_handler expects a pointer to the registers
     mov rdi, rsp
     call interrupt_handler
+
+    ; Preemption point.
+    ;
+    ; The timer IRQ calls scheduler_tick(), which sets need_resched when the
+    ; current task's timeslice is up. Nothing ever acted on that flag: this
+    ; stub went straight back to iretq, so a task that never voluntarily
+    ; called schedule() kept the CPU forever. This is the missing trigger.
+    ;
+    ; scheduler_preempt_point() returns without switching when the scheduler
+    ; is not running, so it is safe during early boot.
+    call scheduler_preempt_point
 
     ; Restore all registers (MUST mirror the pushes above exactly,
     ; in reverse order - rdi included)

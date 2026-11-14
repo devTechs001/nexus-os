@@ -607,11 +607,33 @@ void kernel_start_scheduler(void)
     /* Start the scheduler - this should never return for idle */
     scheduler_start();
 
-    /* If we get here, we're running on idle thread - halt */
-    printk("[WARN] Scheduler returned to idle (should not happen)\n");
+    /*
+     * scheduler_start() initializes the run queue and returns; the boot thread
+     * is not a task, so nothing would ever switch away from it. Enter the
+     * scheduler explicitly.
+     *
+     * This used to fall straight into `arch_halt_cpu()`, which is `cli; hlt` -
+     * it stopped the CPU with interrupts disabled, so the timer could not even
+     * fire, scheduler_tick() was never called, and no task ever ran. The GUI
+     * task, the init task and the service manager were all queued and none of
+     * them ever got a timeslice.
+     *
+     * scheduler_enter_from_boot() makes the boot thread the current task and
+     * switches into the idle task, which halts with interrupts enabled and
+     * picks up whatever is runnable.
+     */
+    printk("[INFO] Entering the scheduler\n");
+    extern void scheduler_enter_from_boot(void);
+    scheduler_enter_from_boot();
 
+    /*
+     * Reaching here means there was no runnable task and no valid context to
+     * resume. Idle with interrupts enabled so the system keeps ticking rather
+     * than locking up with interrupts off.
+     */
+    printk("[WARN] Scheduler returned to the boot thread\n");
     for (;;) {
-        arch_halt_cpu();
+        __asm__ __volatile__("sti; hlt");
     }
 }
 

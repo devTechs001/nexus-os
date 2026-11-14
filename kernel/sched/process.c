@@ -1124,15 +1124,175 @@ void arch_set_return_value(struct task_struct *task, int value)
     /* In real implementation: set return value in thread context */
 }
 
+/*
+ * Per-task saved CPU context.
+ *
+ * A context switch needs somewhere to stash the callee-saved registers and the
+ * stack pointer of the task being switched away from. This tree had none:
+ * arch_init_task() allocated 256 anonymous bytes and never wrote to them, and
+ * arch_switch_to() was an empty function. The scheduler therefore could not
+ * switch tasks even when it ran - which is why nothing but the boot thread
+ * ever executed.
+ *
+ * Only rsp is stored here. The callee-saved registers live on the task's own
+ * stack: arch_switch_context() pushes them before recording rsp and pops them
+ * after restoring it. Keeping a second copy in this structure would suggest
+ * they are read back from here, which they are not.
+ */
+struct arch_context {
+    u64 rsp;            /* kernel stack pointer while switched out */
+};
+
+/*
+ * switch_context - save the current context, load another, and return into it
+ *
+ * Saves rbx/rbp/r12-r15 onto the current stack, stores the resulting rsp in
+ * *old_sp, loads *new_sp, restores the same registers and returns. Written as
+ * a naked function because the compiler must not touch the stack around the
+ * swap.
+ */
+__attribute__((naked)) static void arch_switch_context(u64 *old_sp, u64 new_sp)
+{
+    __asm__ __volatile__(
+        "pushq %rbx\n\t"
+        "pushq %rbp\n\t"
+        "pushq %r12\n\t"
+        "pushq %r13\n\t"
+        "pushq %r14\n\t"
+        "pushq %r15\n\t"
+        "movq %rsp, (%rdi)\n\t"   /* *old_sp = rsp */
+        "movq %rsi, %rsp\n\t"     /* rsp = new_sp  */
+        "popq %r15\n\t"
+        "popq %r14\n\t"
+        "popq %r13\n\t"
+        "popq %r12\n\t"
+        "popq %rbp\n\t"
+        "popq %rbx\n\t"
+        "ret\n\t");
+}
+
+/*
+ * task_entry_trampoline - first code a brand-new task executes
+ *
+ * arch_init_task() lays out the task's initial stack so that a task which has
+ * never run is entered by the same `ret` that resumes a task which was
+ * switched out.
+ */
+__attribute__((naked)) static void task_entry_trampoline(void)
+{
+    /*
+     * Entered by the `ret` at the end of arch_switch_context(), with the
+     * stack laid out by arch_init_task():
+     *
+     *   0(%rsp)  = task entry function
+     *   8(%rsp)  = its argument
+     *
+     * This must be a naked function. Written as ordinary C, the compiler's
+     * prologue emitted `sub $0x8,%rsp` before reading the operands, which
+     * shifted both by eight bytes and made the task call the wrong address
+     * with the wrong argument.
+     *
+     * Popping both leaves rsp at the top of the frame (16-byte aligned), so
+     * the call into the entry point satisfies the SysV ABI.
+     */
+    __asm__ __volatile__(
+        "popq %rax\n\t"      /* entry function */
+        "popq %rdi\n\t"      /* argument       */
+        "call *%rax\n\t"
+        "call task_returned\n\t");
+}
+
+/*
+ * task_returned - A kernel task fell off the end of its entry point
+ *
+ * Reached only via task_entry_trampoline(). Prints and halts the CPU rather
+ * than returning into whatever follows in the text section.
+ */
+void task_returned(void)
+{
+    pr_err("[SCHED] Task returned from its entry point - halting\n");
+    for (;;) {
+        __asm__ __volatile__("cli; hlt");
+    }
+}
+
+/*
+ * arch_do_switch - Perform the actual register/stack swap between two tasks
+ *
+ * Called from arch_switch_to() in scheduler.c. Task contexts live in this
+ * file, so the swap is exposed here rather than duplicated.
+ */
+void arch_do_switch(struct task_struct *prev, struct task_struct *next)
+{
+    struct arch_context *pctx;
+    struct arch_context *nctx;
+
+    if (!prev || !next) {
+        return;
+    }
+
+    if (!next->arch) {
+        pr_err("[SCHED] next task %u has no arch context\n", next->pid);
+        return;
+    }
+
+    /*
+     * The boot thread has no task_struct and therefore no saved context. It
+     * can hand the CPU to a task, but it can never be resumed - which is
+     * correct, because after the first switch the idle task owns the CPU.
+     */
+    if (!prev->arch) {
+        static struct arch_context boot_ctx;
+        prev->arch = &boot_ctx;
+    }
+
+    pctx = (struct arch_context *)prev->arch;
+    nctx = (struct arch_context *)next->arch;
+
+    arch_switch_context(&pctx->rsp, nctx->rsp);
+}
+
+
 int arch_init_task(struct task_struct *task, void (*fn)(void *), void *arg)
 {
-    (void)fn;
-    (void)arg;
-    if (!task->arch) {
-        task->arch = kzalloc(256);
-        if (!task->arch)
-            return -ENOMEM;
+    struct arch_context *ctx;
+    u64 *sp;
+
+    if (!task || !task->stack) {
+        return -EINVAL;
     }
+
+    ctx = kzalloc(sizeof(struct arch_context));
+    if (!ctx) {
+        return -ENOMEM;
+    }
+
+    task->arch = ctx;
+
+    /*
+     * Build an initial stack frame so that the first switch into this task
+     * lands in task_entry_trampoline() with fn and arg available.
+     *
+     * The stack grows down, so lay the frame out from the top:
+     *   [arg][fn][trampoline address]  <- sp points at the trampoline address
+     * and arch_switch_context()'s final `ret` pops the trampoline address.
+     */
+    sp = (u64 *)((u8 *)task->stack + KERNEL_STACK_SIZE);
+
+    *(--sp) = (u64)(uintptr_t)arg;
+    *(--sp) = (u64)(uintptr_t)fn;
+    *(--sp) = (u64)(uintptr_t)task_entry_trampoline;
+
+    /*
+     * arch_switch_context() pops six callee-saved registers before `ret`, so
+     * reserve that much space. Zeroed by kzalloc on the stack? No - the stack
+     * is zeroed, so these six slots read as 0, which is a valid initial value
+     * for rbx/rbp/r12-r15.
+     */
+    sp -= 6;
+
+    ctx->rsp = (u64)(uintptr_t)sp;
+
     return 0;
 }
 
