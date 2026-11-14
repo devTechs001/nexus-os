@@ -487,6 +487,9 @@ int input_release_capture(void);
 
 /* Rendering */
 graphics_context_t *graphics_create_context(void *surface);
+
+/* Tell the software renderer the framebuffer depth (16/24/32bpp). */
+void graphics_set_target_depth(u32 bpp);
 void graphics_destroy_context(graphics_context_t *ctx);
 int graphics_clear(graphics_context_t *ctx, color_t color);
 int graphics_draw_pixel(graphics_context_t *ctx, s32 x, s32 y, color_t color);

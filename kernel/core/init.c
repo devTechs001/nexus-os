@@ -608,18 +608,39 @@ void kernel_init_userspace(void)
                  * (16bpp, 24bpp packed) would be drawn as scrambled colours at
                  * the wrong stride, so refuse rather than corrupt the screen.
                  */
+                /*
+                 * The renderer now writes 16, 24 and 32bpp. It used to accept
+                 * only 32bpp here and skip the whole frame otherwise - and
+                 * grub.cfg's bare "gfxmode=1024x768" lets GRUB choose its own
+                 * default depth, commonly 24bpp. That combination produced a
+                 * completely blank screen with a fully constructed GUI behind
+                 * it.
+                 */
                 bool gfx_ok = gfx && gfx->gfx_addr && gfx->gfx_width &&
                               gfx->gfx_height && (gfx->gfx_depth == 0 ||
+                                                  gfx->gfx_depth == 16 ||
+                                                  gfx->gfx_depth == 24 ||
                                                   gfx->gfx_depth == 32);
                 if (gfx && gfx->gfx_addr && gfx->gfx_depth &&
+                    gfx->gfx_depth != 16 && gfx->gfx_depth != 24 &&
                     gfx->gfx_depth != 32 && !gfx_reported) {
-                    pr_err("[GUI] Framebuffer is %u bpp; renderer needs 32\n",
+                    pr_err("[GUI] Framebuffer is %u bpp; unsupported depth\n",
                            gfx->gfx_depth);
                 }
 
                 if (gfx_ok) {
-                    u32 pitch = gfx->gfx_pitch ? (gfx->gfx_pitch / 4)
+                    u32 depth = gfx->gfx_depth ? gfx->gfx_depth : 32;
+                    u32 bytes = depth / 8;
+                    u32 pitch = gfx->gfx_pitch ? (gfx->gfx_pitch / bytes)
                                                : gfx->gfx_width;
+
+                    /*
+                     * Tell the software renderer which pixel format to emit
+                     * before it touches the surface.
+                     */
+                    extern void graphics_set_target_depth(u32 bpp);
+                    graphics_set_target_depth(depth);
+
                     window_manager_render((u32 *)(uintptr_t)gfx->gfx_addr,
                                           pitch,
                                           gfx->gfx_width,

@@ -1266,7 +1266,7 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@echo 'set timeout=10' > $@
 	@echo 'set default=0' >> $@
-	@echo 'set gfxmode=1024x768' >> $@
+	@echo 'set gfxmode=1024x768x32,1024x768,auto' >> $@
 	@echo 'set gfxpayload=keep' >> $@
 	@echo '' >> $@
 	@echo '# NEXUS OS Boot Menu' >> $@
@@ -1331,7 +1331,7 @@ run: $(KERNEL_ISO)
 	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
-		-serial file:qemu_run.log \
+		-serial stdio \
 		-display gtk \
 		-name "NEXUS OS" \
 		-no-reboot
@@ -1343,7 +1343,7 @@ run-vmware: $(KERNEL_ISO)
 	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
-		-serial file:qemu_vmware.log \
+		-serial stdio \
 		-machine vmport=on \
 		-device vmxnet3,netdev=net0 \
 		-netdev user,id=net0 \

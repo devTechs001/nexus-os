@@ -546,6 +546,16 @@ void detect_virtualization(void)
     } else if (strcmp(hypervisor_sig, "Microsoft Hv") == 0) {
         kernel_state.is_hyperv = true;
         strcpy(kernel_state.virt_mode, "hyperv");
+    } else if (strcmp(hypervisor_sig, "KVMKVMKVM") == 0 ||
+               strncmp(hypervisor_sig, "TCGTCGTCG", 9) == 0) {
+        /*
+         * QEMU reports "KVMKVMKVM" under KVM and "TCGTCGTCGTCG" without it
+         * (pure software emulation). The TCG case used to fall through to the
+         * CPUID-vendor fallback below and end up as "native", so is_qemu was
+         * never set in the configuration "make run" actually uses.
+         */
+        kernel_state.is_qemu = true;
+        strcpy(kernel_state.virt_mode, "qemu");
     } else {
         /* Check for QEMU by CPUID vendor string */
         __asm__ __volatile__(
