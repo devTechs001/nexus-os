@@ -666,6 +666,110 @@ int graphics_present(void *surface, rect_t *dirty_rects, u32 num_rects)
 /**
  * renderer_draw_pixel_sw - Software pixel drawing
  */
+/*
+ * Framebuffer depth.
+ *
+ * Every primitive below used to write through a u32* unconditionally, so the
+ * renderer only ever worked on a 32bpp surface. The GUI loop then refused to
+ * render at all unless gfx_depth was 0 or 32 - and set gfxmode=1024x768 in
+ * grub.cfg lets GRUB pick its own default depth, commonly 24bpp. The result was
+ * a completely blank screen with a working GUI underneath it.
+ *
+ * These helpers write the right pixel format for the active depth. Set once by
+ * graphics_set_target_depth() at the start of each composite.
+ */
+static u32 g_target_bpp = 32;
+
+void graphics_set_target_depth(u32 bpp)
+{
+    if (bpp == 0) {
+        bpp = 32;
+    }
+    if (bpp == 16 || bpp == 24 || bpp == 32) {
+        g_target_bpp = bpp;
+    }
+}
+
+static inline void renderer_store(void *surface, u32 stride_px,
+                                  s32 x, s32 y, u32 argb)
+{
+    switch (g_target_bpp) {
+    case 16: {
+        u8 *row = (u8 *)surface + (u32)y * stride_px * 2;
+        u16 *p = (u16 *)row;
+        p[x] = (u16)(((argb >> 19) & 0x1F) << 11 |
+                     ((argb >> 10) & 0x3F) << 5  |
+                     ((argb >> 3)  & 0x1F));
+        break;
+    }
+    case 24: {
+        u8 *row = (u8 *)surface + (u32)y * stride_px * 3;
+        u8 *p = row + (u32)x * 3;
+        p[0] = (u8)(argb);
+        p[1] = (u8)(argb >> 8);
+        p[2] = (u8)(argb >> 16);
+        break;
+    }
+    default: {
+        u32 *row = (u32 *)surface + (u32)y * stride_px;
+        row[x] = argb;
+        break;
+    }
+    }
+}
+
+static inline u32 renderer_load(void *surface, u32 stride_px, s32 x, s32 y)
+{
+    switch (g_target_bpp) {
+    case 16: {
+        u16 *row = (u16 *)((u8 *)surface + (u32)y * stride_px * 2);
+        u16 v = row[x];
+        u32 r = (v >> 11) & 0x1F, g = (v >> 5) & 0x3F, b = v & 0x1F;
+        return ((r << 3) | (r >> 2)) << 16 |
+               ((g << 2) | (g >> 4)) << 8  |
+               ((b << 3) | (b >> 2));
+    }
+    case 24: {
+        u8 *p = (u8 *)surface + (u32)y * stride_px * 3 + (u32)x * 3;
+        return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16);
+    }
+    default:
+        return ((u32 *)surface)[(u32)y * stride_px + (u32)x];
+    }
+}
+
+/* Blend a colour over a depth-appropriate destination pixel. */
+static void renderer_blend_at(void *surface, u32 stride_px, s32 x, s32 y,
+                              color_t color)
+{
+    if (g_target_bpp == 32) {
+        u32 *pixels = (u32 *)surface;
+        renderer_blend_pixel(&pixels[(u32)y * stride_px + (u32)x], color);
+        return;
+    }
+
+    u32 argb;
+    if (color.a == 255) {
+        renderer_store(surface, stride_px, x, y,
+                       (0xFFu << 24) | (color.r << 16) | (color.g << 8) | color.b);
+        return;
+    }
+    if (color.a == 0) {
+        return;
+    }
+
+    u32 dst = renderer_load(surface, stride_px, x, y);
+    u8 dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF, db = dst & 0xFF;
+    u8 a = color.a;
+
+    u8 r = (u8)((color.r * a + dr * (255 - a)) / 255);
+    u8 g = (u8)((color.g * a + dg * (255 - a)) / 255);
+    u8 b = (u8)((color.b * a + db * (255 - a)) / 255);
+
+    argb = (0xFFu << 24) | (r << 16) | (g << 8) | b;
+    renderer_store(surface, stride_px, x, y, argb);
+}
+
 static void renderer_draw_pixel_sw(void *surface, u32 width, u32 height,
                                     s32 x, s32 y, color_t color)
 {
@@ -673,8 +777,7 @@ static void renderer_draw_pixel_sw(void *surface, u32 width, u32 height,
         return;
     }
 
-    u32 *pixels = (u32 *)surface;
-    renderer_blend_pixel(&pixels[y * width + x], color);
+    renderer_blend_at(surface, width, x, y, color);
 }
 
 /**
@@ -730,12 +833,10 @@ static void renderer_draw_rect_sw(void *surface, u32 width, u32 height,
 static void renderer_fill_rect_sw(void *surface, u32 width, u32 height,
                                    rect_t *rect, color_t color)
 {
-    u32 *pixels = (u32 *)surface;
-
     for (s32 y = rect->y; y < rect->y + rect->height; y++) {
         for (s32 x = rect->x; x < rect->x + rect->width; x++) {
             if (x >= 0 && x < (s32)width && y >= 0 && y < (s32)height) {
-                renderer_blend_pixel(&pixels[y * width + x], color);
+                renderer_blend_at(surface, width, x, y, color);
             }
         }
     }

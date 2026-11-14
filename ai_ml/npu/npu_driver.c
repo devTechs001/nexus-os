@@ -429,6 +429,41 @@ int npu_free_memory(void *ptr)
 }
 
 /**
+ * npu_range_is_device - Check that [ptr, ptr+size) lies inside NPU memory
+ * @ptr: Start address
+ * @size: Length in bytes
+ *
+ * Returns: true if the whole range is inside the NPU's BAR
+ *
+ * The checks this replaces compared a pointer against an integer for the low
+ * bound (an error) and a pointer against a u8* for the high bound (a type
+ * mismatch, and only accepted because the base was void*). Neither of them
+ * tested that ptr+size stayed inside the window, so a copy could start inside
+ * NPU memory and run straight off the end of it.
+ */
+static bool npu_range_is_device(const void *ptr, size_t size)
+{
+    const u8 *base = (const u8 *)g_npu_driver.npu_memory_base;
+    const u8 *start = (const u8 *)ptr;
+    u64 window = (u64)g_npu_driver.npu_memory_size;
+
+    if (!base || window == 0) {
+        return false;
+    }
+
+    if (start < base || start >= base + window) {
+        return false;
+    }
+
+    /* Overflow-safe: compare the remaining room instead of start + size. */
+    if ((u64)size > window - (u64)(start - base)) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
  * npu_copy_to_device - Copy data to NPU device memory
  * @dst: Destination device pointer
  * @src: Source host pointer
@@ -446,9 +481,8 @@ int npu_copy_to_device(void *dst, const void *src, size_t size)
         return -1;
     }
 
-    /* Verify destination is in NPU memory range */
-    if (dst < g_npu_driver.npu_memory_base ||
-        dst >= (u8 *)g_npu_driver.npu_memory_base + g_npu_driver.npu_memory_size) {
+    /* Verify the whole destination range is in NPU memory */
+    if (!npu_range_is_device(dst, size)) {
         pr_err("Invalid NPU memory destination\n");
         return -1;
     }
@@ -478,9 +512,8 @@ int npu_copy_from_device(void *dst, const void *src, size_t size)
         return -1;
     }
 
-    /* Verify source is in NPU memory range */
-    if (src < g_npu_driver.npu_memory_base ||
-        src >= (u8 *)g_npu_driver.npu_memory_base + g_npu_driver.npu_memory_size) {
+    /* Verify the whole source range is in NPU memory */
+    if (!npu_range_is_device(src, size)) {
         pr_err("Invalid NPU memory source\n");
         return -1;
     }
@@ -533,6 +566,16 @@ static int npu_submit_command(u32 command, u32 data)
     /* In real hardware, this would trigger an interrupt */
     /* For simulation, we execute immediately */
     npu_write_register(NPU_REG_COMMAND, command);
+
+    /*
+     * The simulated NPU completes synchronously, so retire the entry we just
+     * posted. queue_tail was never advanced anywhere in this file, which meant
+     * the ring only ever filled: after queue_size commands the driver reported
+     * "NPU command queue full" forever and no further work could be submitted.
+     */
+    spin_lock(&g_npu_driver.lock);
+    g_npu_driver.queue_tail = (g_npu_driver.queue_tail + 1) % g_npu_driver.queue_size;
+    spin_unlock(&g_npu_driver.lock);
 
     return 0;
 }
@@ -599,6 +642,36 @@ static void npu_write_register(u32 offset, u32 value)
 /*===========================================================================*/
 /*                         UTILITY FUNCTIONS                                 */
 /*===========================================================================*/
+
+/**
+ * npu_execute - Queue a command for the NPU and wait for it
+ * @command: Command code
+ * @data: Command payload
+ *
+ * Returns: 0 on success, negative error code on failure
+ *
+ * npu_submit_command() is the only path that writes the command queue, and it
+ * had no caller and no public wrapper: a command queue that nothing could
+ * write to. This is the entry point.
+ */
+int npu_execute(u32 command, u32 data)
+{
+    int ret;
+
+    if (!g_npu_driver.initialized) {
+        return -ENODEV;
+    }
+
+    ret = npu_submit_command(command, data);
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* Kick the doorbell so the hardware notices the new head. */
+    npu_write_register(NPU_REG_COMMAND, command);
+
+    return npu_wait_idle(1000);
+}
 
 /**
  * npu_wait_idle - Wait for NPU to become idle

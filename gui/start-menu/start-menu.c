@@ -240,7 +240,15 @@ static int create_search_box(start_menu_t *menu)
                       color_from_rgba(255, 255, 255, 255),
                       color_from_rgba(40, 40, 55, 255),
                       color_from_rgba(80, 80, 100, 255));
-    
+
+    /*
+     * Bind the search handler. on_search_changed() was defined and never
+     * attached, so typing in the search box did nothing: start_menu_search()
+     * was unreachable from the UI.
+     */
+    menu->search_box->user_data = menu;
+    menu->search_box->on_text_changed = on_search_changed;
+
     return 0;
 }
 
@@ -305,7 +313,32 @@ static int create_pinned_section(start_menu_t *menu)
                       color_from_rgba(180, 180, 190, 255),
                       color_from_rgba(0, 0, 0, 0),
                       color_from_rgba(0, 0, 0, 0));
-    
+
+    /*
+     * Build the entries.
+     *
+     * This function drew the section heading and stopped: no app was ever
+     * listed, and on_app_clicked() had nothing to be attached to. Each entry
+     * now gets a button bound to the launcher.
+     */
+    {
+        int y = 310;
+
+        for (u32 i = 0; i < menu->pinned_count && i < 8; i++) {
+            widget_t *entry = button_create(menu->main_widget,
+                                            menu->pinned_apps[i].name,
+                                            10, y, 380, 34);
+
+            if (!entry) {
+                break;
+            }
+
+            entry->user_data = &menu->pinned_apps[i];
+            entry->on_click = on_app_clicked;
+            y += 38;
+        }
+    }
+
     return 0;
 }
 
@@ -491,7 +524,7 @@ static int load_system_apps(start_menu_t *menu)
         start_menu_add_app(menu, &system_apps[i]);
         
         /* Add to pinned if marked */
-        if (system_apps[i].is_pinned && menu->pinned_count < MAX_PINNED) {
+        if (system_apps[i].is_pinned && menu->pinned_count < START_MENU_MAX_PINNED) {
             menu->pinned_apps[menu->pinned_count++] = system_apps[i];
         }
     }
@@ -656,12 +689,15 @@ int start_menu_logout(start_menu_t *menu)
 }
 
 /**
- * start_menu_shutdown - Shutdown system
+ * start_menu_system_shutdown - Shut the system down
  * @menu: Pointer to start menu structure
  *
  * Returns: 0 on success
+ *
+ * Renamed from start_menu_shutdown, which collided with the menu teardown of
+ * the same name earlier in this file.
  */
-int start_menu_shutdown(start_menu_t *menu)
+int start_menu_system_shutdown(start_menu_t *menu)
 {
     if (!menu) {
         return -EINVAL;
@@ -753,7 +789,7 @@ static void on_shutdown_clicked(widget_t *button)
     if (!button || !button->user_data) return;
     
     start_menu_t *menu = (start_menu_t *)button->user_data;
-    start_menu_shutdown(menu);
+    start_menu_system_shutdown(menu);
 }
 
 static void on_restart_clicked(widget_t *button)

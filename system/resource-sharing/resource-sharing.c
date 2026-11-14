@@ -87,12 +87,38 @@ int resource_sharing_detect_mode(void)
         printk("[RESOURCE] QEMU/KVM detected - virtio-9p enabled\n");
         return MODE_QEMU;
     }
+    else if (strncmp(hypervisor, "TCGTCGTCG", 9) == 0) {
+        /*
+         * Plain QEMU without KVM (software emulation) reports "TCGTCGTCGTCG",
+         * not "KVMKVMKVM". It matched nothing here and fell through to
+         * MODE_NATIVE, so QEMU sharing never initialised in exactly the
+         * configuration the Makefile's "make run" uses.
+         */
+        g_resource_config.virtualization_mode = MODE_QEMU;
+        printk("[RESOURCE] QEMU (TCG, no KVM) detected - virtual devices enabled\n");
+        return MODE_QEMU;
+    }
+    else if (strncmp(hypervisor, "Bochs", 5) == 0) {
+        /* Bochs and QEMU's older BIOS both report this. */
+        g_resource_config.virtualization_mode = MODE_QEMU;
+        printk("[RESOURCE] Bochs/QEMU detected\n");
+        return MODE_QEMU;
+    }
     else if (strcmp(hypervisor, "Microsoft Hv") == 0) {
         g_resource_config.virtualization_mode = MODE_HYPERV;
         printk("[RESOURCE] Hyper-V detected - Enhanced Session enabled\n");
         return MODE_HYPERV;
     }
     
+    /*
+     * Something claimed a hypervisor present (CPUID.1:ECX[31] was set) but the
+     * vendor string is not one we know. Say which, rather than silently
+     * reporting native hardware - that made an unrecognised VM
+     * indistinguishable from a bare-metal boot.
+     */
+    printk("[RESOURCE] Unknown hypervisor signature '%s' - treating as native\n",
+           hypervisor);
+
     g_resource_config.virtualization_mode = MODE_NATIVE;
     return MODE_NATIVE;
 }
@@ -190,6 +216,20 @@ u64 vmware_backdoor_cmd(u32 cmd, u32 ebx, u32 ecx, u32 edx)
 {
     u32 eax = 0x564D5868; /* VMware Magic Number 'VMXh' */
     u32 port = 0x5658;    /* VMware Backdoor Port 'VX' */
+
+    /*
+     * Refuse to touch the backdoor port unless CPUID says we are on VMware.
+     *
+     * This used to issue `inl` on port 0x5658 unconditionally. On bare metal,
+     * or under VirtualBox/QEMU/Hyper-V, that port is not the VMware backdoor
+     * and reading it is undefined; it can raise #GP and take the machine down
+     * during boot. Everything here is guarded by the detect result instead.
+     */
+    if (g_resource_config.virtualization_mode != MODE_VMWARE) {
+        printk("[VMWARE] Backdoor command 0x%X skipped - not running on VMware "
+               "(mode=%d)\n", cmd, g_resource_config.virtualization_mode);
+        return 0;
+    }
 
     /*
      * VMware Backdoor I/O

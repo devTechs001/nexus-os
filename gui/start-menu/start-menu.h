@@ -137,11 +137,19 @@ int start_menu_collapse_section(start_menu_t *menu, u32 section_id);
 /* User info */
 int start_menu_set_user(start_menu_t *menu, const char *username, const char *icon);
 
-/* System actions */
+/*
+ * System actions.
+ *
+ * start_menu_shutdown() was declared twice in this header: once above as the
+ * teardown of the menu window, and again here as "shut the machine down". Two
+ * different operations with one name, so the second definition silently
+ * replaced the first and the menu teardown became unreachable. The system
+ * action is now named for what it does.
+ */
 int start_menu_lock(start_menu_t *menu);
 int start_menu_logout(start_menu_t *menu);
-int start_menu_shutdown(start_menu_t *menu);
-int start_menu_restart(start_menu_t *menu);
+int start_menu_system_shutdown(start_menu_t *menu);
+int start_menu_system_restart(start_menu_t *menu);
 int start_menu_open_settings(start_menu_t *menu);
 
 /* Utility functions */

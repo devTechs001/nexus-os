@@ -8,6 +8,7 @@
  */
 
 #include "../../kernel/include/kernel.h"
+#include "../../drivers/input/input_chars.h"
 
 /*===========================================================================*/
 /*                         BOOT MENU CONSTANTS                               */
@@ -194,10 +195,21 @@ static void fb_circle(boot_menu_t *menu, int cx, int cy, int r, u32 color)
  */
 static void boot_menu_draw_background(boot_menu_t *menu)
 {
-    /* Gradient background */
+    /*
+     * Gradient background.
+     *
+     * The loop computed `color = menu->bg_color` on every scanline, so it
+     * painted the same flat colour one row at a time - the "gradient" produced
+     * a uniform fill at menu->height times the drawing cost. Interpolate from
+     * the background colour toward a darker shade instead, and use fb_clear()
+     * for the base so that helper is not dead.
+     */
+    fb_clear(menu, menu->bg_color);
+
     for (int y = 0; y < menu->height; y++) {
-        u32 color = menu->bg_color;
-        /* Simple gradient effect */
+        u32 shade = (u32)((menu->bg_color * (u32)y) / (u32)menu->height);
+        u32 color = menu->bg_color - shade;
+
         fb_rect(menu, 0, y, menu->width, 1, color);
     }
     
@@ -494,7 +506,8 @@ static int boot_menu_run(boot_menu_t *menu)
 {
     u64 last_tick = get_time_ms();
     u64 timeout_tick = last_tick + (BOOT_MENU_TIMEOUT_SEC * 1000);
-    
+    int key;
+
     while (1) {
         /* Render */
         boot_menu_render(menu);
@@ -511,10 +524,21 @@ static int boot_menu_run(boot_menu_t *menu)
             menu->timeout = (timeout_tick - current_tick) / 1000;
         }
         
-        /* Handle input (in real implementation, read from keyboard) */
-        /* u32 key = keyboard_read(); */
-        /* int result = boot_menu_handle_key(menu, key); */
-        /* if (result != 0) return result; */
+        /*
+         * Handle input.
+         *
+         * This was three commented-out lines. The menu drew itself, ran its
+         * countdown and ignored every keypress: boot_menu_handle_key() had no
+         * caller at all, so Up/Down/Enter did nothing and the user could not
+         * pick an entry - only wait for the timeout.
+         */
+        while ((key = input_poll_char()) != INPUT_KEY_NONE) {
+            int result = boot_menu_handle_key(menu, key);
+
+            if (result != 0) {
+                return result;
+            }
+        }
         
         /* Small delay */
         delay_ms(16);  /* ~60 FPS */

@@ -27,7 +27,9 @@ static int update_dock_position(dock_t *dock);
 
 static void on_item_clicked(widget_t *widget);
 static void on_item_right_clicked(widget_t *widget, s32 x, s32 y);
-static void on_item_hover(widget_t *widget, bool hover);
+static void on_item_mouse_enter(widget_t *widget);
+static void on_item_mouse_leave(widget_t *widget);
+static void on_item_mouse_up(widget_t *widget, s32 x, s32 y);
 
 static dock_item_t *create_default_items(void);
 
@@ -270,6 +272,9 @@ static int render_dock_items(dock_t *dock)
             
             item_widget->user_data = item;
             item_widget->on_click = on_item_clicked;
+            item_widget->on_mouse_enter = on_item_mouse_enter;
+            item_widget->on_mouse_leave = on_item_mouse_leave;
+            item_widget->on_mouse_up = on_item_mouse_up;
             
             /* In real implementation, would load and set icon */
         }
@@ -793,16 +798,51 @@ static void on_item_right_clicked(widget_t *widget, s32 x, s32 y)
     }
 }
 
-static void on_item_hover(widget_t *widget, bool hover)
+/*
+ * The dock's hover state.
+ *
+ * This was written as one handler taking a bool, which is not a shape the
+ * widget toolkit ever calls: it delivers on_mouse_enter and on_mouse_leave,
+ * each with a single argument. So the dock never knew which item the pointer
+ * was over, and hover magnification and the hover_item the context menu reads
+ * were both permanently dead.
+ */
+static void on_item_mouse_enter(widget_t *widget)
 {
     if (!widget || !widget->user_data) return;
-    
-    dock_t *dock = &g_dock;
-    
-    if (hover) {
-        dock->hover_item = (dock_item_t *)widget->user_data;
-    } else {
-        dock->hover_item = NULL;
+
+    g_dock.hover_item = (dock_item_t *)widget->user_data;
+}
+
+static void on_item_mouse_leave(widget_t *widget)
+{
+    if (!widget || !widget->user_data) return;
+
+    if (g_dock.hover_item == (dock_item_t *)widget->user_data) {
+        g_dock.hover_item = NULL;
+    }
+}
+
+/*
+ * on_item_right_clicked keeps its (x, y) signature because that is what
+ * dock_t.on_item_right_clicked is declared with, but the toolkit's
+ * on_mouse_up only supplies a widget. Take the position from the last mouse
+ * event instead of passing coordinates the caller cannot provide.
+ */
+static void on_item_mouse_up(widget_t *widget, s32 x, s32 y)
+{
+    u32 buttons = 0;
+
+    if (!widget || !widget->user_data) {
+        return;
+    }
+
+    if (input_get_mouse_buttons(&buttons) != 0) {
+        return;
+    }
+
+    if (buttons & MOUSE_BUTTON_RIGHT) {
+        on_item_right_clicked(widget, x, y);
     }
 }
 

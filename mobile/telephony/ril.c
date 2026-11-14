@@ -838,3 +838,43 @@ int ril_get_meid(char *meid, size_t len)
 
     return 0;
 }
+
+/**
+ * calculate_signal_level - Calculate signal level from dBm
+ *
+ * Moved here from mobile/power/battery_manager.c, where it was a static
+ * function in the wrong subsystem and invisible to this caller.
+ * @signal_dbm: Signal strength in dBm
+ * @network_type: Network type
+ *
+ * Returns: Signal level (0-4)
+ */
+s32 calculate_signal_level(s32 signal_dbm, u32 network_type)
+{
+    /* Different thresholds for different network types */
+    switch (network_type) {
+        case NETWORK_TYPE_LTE:
+        case NETWORK_TYPE_5G:
+            if (signal_dbm >= -80) return 4;
+            if (signal_dbm >= -90) return 3;
+            if (signal_dbm >= -100) return 2;
+            if (signal_dbm >= -110) return 1;
+            return 0;
+        
+        case NETWORK_TYPE_UMTS:
+        case NETWORK_TYPE_HSDPA:
+        case NETWORK_TYPE_HSPA:
+            if (signal_dbm >= -75) return 4;
+            if (signal_dbm >= -85) return 3;
+            if (signal_dbm >= -95) return 2;
+            if (signal_dbm >= -105) return 1;
+            return 0;
+        
+        default:
+            if (signal_dbm >= -70) return 4;
+            if (signal_dbm >= -80) return 3;
+            if (signal_dbm >= -90) return 2;
+            if (signal_dbm >= -100) return 1;
+            return 0;
+    }
+}

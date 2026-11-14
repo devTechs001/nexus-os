@@ -12,17 +12,34 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <efi.h>
 #include <efilib.h>
+
+/*
+ * UEFI applications run before any kernel header exists, so this file cannot
+ * include kernel/include/types.h. It used u8/u16/u32/u64 throughout without
+ * defining them -- 45 of its errors were that one omission.
+ */
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 
 /*===========================================================================*/
 /*                         UEFI BOOTLOADER CONFIGURATION                     */
 /*===========================================================================*/
 
 #define NEXUS_BOOTLOADER_VERSION    "1.0.0"
-#define NEXUS_BOOTLOADER_NAME       L"NEXUS OS UEFI Bootloader"
-#define KERNEL_PATH                 L"\\NEXUS\\KERNEL.ELF"
-#define INITRD_PATH                 L"\\NEXUS\\INITRD.IMG"
+/*
+ * u"..." is UTF-16, which is what UEFI expects. These were L"..." literals:
+ * a wide literal in C is wchar_t, which is 32 bits wide on this target, so
+ * passing one as char16_t* reinterpreted every second code unit and UEFI
+ * opened a path of interleaved zero bytes rather than \NEXUS\KERNEL.ELF.
+ */
+#define NEXUS_BOOTLOADER_NAME       u"NEXUS OS UEFI Bootloader"
+#define KERNEL_PATH                 u"\\NEXUS\\KERNEL.ELF"
+#define INITRD_PATH                 u"\\NEXUS\\INITRD.IMG"
 
 #define MAX_MEMORY_MAP_SIZE         (1024 * 1024)
 #define MAX_KERNEL_SIZE             (64 * 1024 * 1024)
@@ -90,7 +107,18 @@ typedef struct {
 /*                         GLOBAL VARIABLES                                  */
 /*===========================================================================*/
 
+/* Local memory/string helpers, defined at the bottom. A UEFI application has
+ * no libc, so it needs these; they must be declared before first use. */
+static void *efi_memset(void *s, int c, size_t n);
+static void efi_print_memory_map(void);
+static void efi_print_hex(u64 value, u32 digits);
+static char *efi_strcpy(char *dest, const char *src);
+static void *efi_memcpy(void *dest, const void *src, size_t n);
+
 static EFI_SYSTEM_TABLE *gST = NULL;
+/* EFI_SYSTEM_TABLE has no ImageHandle member; the handle is passed to
+ * efi_main and has to be kept, which is what ExitBootServices requires. */
+static EFI_HANDLE gImageHandle = NULL;
 static EFI_BOOT_SERVICES *gBS = NULL;
 static EFI_RUNTIME_SERVICES *gRT = NULL;
 
@@ -98,6 +126,9 @@ static boot_params_t boot_params;
 static void *memory_map = NULL;
 static u64 memory_map_size = 0;
 static u64 mmap_desc_size = 0;
+/* GetMemoryMap's MapKey is an output; ExitBootServices must be handed the same
+ * value back. */
+static u64 memory_map_key = 0;
 static u32 mmap_desc_version = 0;
 
 static void *kernel_image = NULL;
@@ -110,18 +141,15 @@ static u64 initrd_size = 0;
 /*                         UTILITY FUNCTIONS                                 */
 /*===========================================================================*/
 
-/**
- * efi_print - Print formatted string to UEFI console
+/*
+ * efi_print() was here. It was declared variadic and then printed `fmt`
+ * verbatim, ignoring the arguments entirely, so any call would have displayed
+ * its conversion specifiers literally. It also had no callers: every console
+ * write in this file goes through efi_print_ascii(). Removed rather than
+ * implemented, because a formatting routine with no users is dead weight in a
+ * bootloader -- if one is needed, efi_print_ascii plus efi_print_hex cover the
+ * same ground without a printf engine.
  */
-static void efi_print(const char16_t *fmt, ...)
-{
-    if (gST && gST->ConOut) {
-        va_list args;
-        va_start(args, fmt);
-        gST->ConOut->OutputString(gST->ConOut, (char16_t *)fmt);
-        va_end(args);
-    }
-}
 
 /**
  * efi_print_ascii - Print ASCII string to UEFI console
@@ -239,8 +267,8 @@ static EFI_STATUS efi_get_memory_map(void)
 
     /* Initial attempt to get size */
     status = gBS->GetMemoryMap(&memory_map_size, NULL,
-                                &mmap_desc_version, &mmap_desc_size,
-                                NULL);
+                                &memory_map_key, &mmap_desc_size,
+                                &mmap_desc_version);
 
     if (status != EFI_BUFFER_TOO_SMALL) {
         return status;
@@ -258,8 +286,8 @@ static EFI_STATUS efi_get_memory_map(void)
 
     /* Get actual memory map */
     status = gBS->GetMemoryMap(&memory_map_size, memory_map,
-                                &mmap_desc_version, &mmap_desc_size,
-                                NULL);
+                                &memory_map_key, &mmap_desc_size,
+                                &mmap_desc_version);
     if (EFI_ERROR(status)) {
         efi_print_ascii("[ERROR] Failed to get memory map\r\n");
         efi_free_pool(memory_map);
@@ -268,10 +296,48 @@ static EFI_STATUS efi_get_memory_map(void)
     }
 
     efi_print_ascii("[INFO] Memory map acquired (");
-    /* Would print size here */
+    efi_print_hex(memory_map_size, 8);
     efi_print_ascii(" bytes)\r\n");
 
+    /*
+     * Print the map now that it exists. efi_print_memory_map() was written,
+     * its per-entry type table was written, and it had no caller: the entry
+     * loop even carried "would convert numbers to strings" in place of
+     * printing anything, so the bootloader reported "memory map acquired"
+     * and no detail was ever visible on screen.
+     */
+    if (mmap_desc_size > 0) {
+        efi_print_memory_map();
+    }
+
     return EFI_SUCCESS;
+}
+
+/**
+ * efi_print_hex - Print an integer in hex to the UEFI console
+ * @value: number to print
+ * @digits: how many hex digits to emit
+ *
+ * The memory-map printer below built a type_str per entry and then said
+ * "would convert numbers to strings", so the map was never printed at all.
+ */
+static void efi_print_hex(u64 value, u32 digits)
+{
+    static const char hex[] = "0123456789abcdef";
+    char buf[17];
+    u32 i;
+
+    if (digits > 16) {
+        digits = 16;
+    }
+
+    for (i = 0; i < digits; i++) {
+        buf[digits - 1 - i] = hex[value & 0xF];
+        value >>= 4;
+    }
+
+    buf[digits] = '\0';
+    efi_print_ascii(buf);
 }
 
 /**
@@ -308,8 +374,16 @@ static void efi_print_memory_map(void)
             case EfiPersistentMemory:     type_str = "Persistent"; break;
         }
 
-        /* Print entry info */
-        /* In real implementation, would convert numbers to strings */
+        /* Print the entry: type, base, page count, attributes. */
+        efi_print_ascii("  ");
+        efi_print_ascii(type_str);
+        efi_print_ascii("  ");
+        efi_print_hex(entry->physical_start, 12);
+        efi_print_ascii("   ");
+        efi_print_hex(entry->number_of_pages, 8);
+        efi_print_ascii("   ");
+        efi_print_hex(entry->attribute, 8);
+        efi_print_ascii("\r\n");
 
         entry = (memory_map_entry_t *)((u64)entry + mmap_desc_size);
     }
@@ -385,9 +459,22 @@ static EFI_STATUS efi_load_kernel(EFI_FILE_HANDLE root)
     EFI_STATUS status;
 
     efi_print_ascii("[INFO] Loading kernel: ");
-    efi_print_ascii((const char *)KERNEL_PATH);
+    efi_print_ascii("\\NEXUS\\KERNEL.ELF");
     efi_print_ascii("\r\n");
 
+    /*
+     * Load the kernel AT the address it will be executed from.
+     *
+     * efi_load_file() allocated the image with AllocatePool, which returns
+     * memory wherever the firmware likes, and efi_jump_to_kernel() then jumped
+     * to the fixed KERNEL_ENTRY_ADDRESS (0x100000) -- an address that nothing
+     * had ever written the kernel to. On real firmware that is a jump into
+     * either free memory or firmware-owned memory, and the difference is
+     * whichever happened to be there.
+     *
+     * Load into a pool buffer, then claim the fixed region with AllocatePages
+     * and copy the image there, so the jump lands on the kernel.
+     */
     status = efi_load_file(root, KERNEL_PATH, &kernel_image, &kernel_size);
     if (EFI_ERROR(status)) {
         efi_print_ascii("[ERROR] Failed to load kernel: ");
@@ -396,8 +483,38 @@ static EFI_STATUS efi_load_kernel(EFI_FILE_HANDLE root)
         return status;
     }
 
+    {
+        u64 pages = (kernel_size + 0xFFF) / 0x1000;
+        u64 load_addr = KERNEL_LOAD_ADDRESS;
+        EFI_PHYSICAL_ADDRESS target = KERNEL_LOAD_ADDRESS;
+
+        if (kernel_size == 0 || kernel_size > MAX_KERNEL_SIZE) {
+            efi_print_ascii("[ERROR] Kernel image has an implausible size\r\n");
+            return EFI_LOAD_ERROR;
+        }
+
+        status = efi_allocate_pages(&load_addr, pages);
+        target = (EFI_PHYSICAL_ADDRESS)load_addr;
+        if (EFI_ERROR(status)) {
+            efi_print_ascii("[ERROR] Cannot reserve kernel load address: ");
+            efi_print_ascii(efi_status_str(status));
+            efi_print_ascii("\r\n");
+            return status;
+        }
+
+        efi_memcpy((void *)(uintptr_t)target, kernel_image, (size_t)kernel_size);
+
+        gBS->FreePool(kernel_image);
+        kernel_image = (void *)(uintptr_t)target;
+        load_addr = (u64)target;
+
+        efi_print_ascii("[INFO] Kernel placed at ");
+        efi_print_hex(load_addr, 8);
+        efi_print_ascii("\r\n");
+    }
+
     efi_print_ascii("[INFO] Kernel loaded: ");
-    /* Would print size */
+    efi_print_hex(kernel_size, 8);
     efi_print_ascii(" bytes\r\n");
 
     return EFI_SUCCESS;
@@ -411,7 +528,7 @@ static EFI_STATUS efi_load_initrd(EFI_FILE_HANDLE root)
     EFI_STATUS status;
 
     efi_print_ascii("[INFO] Loading initrd: ");
-    efi_print_ascii((const char *)INITRD_PATH);
+    efi_print_ascii("\\NEXUS\\INITRD.IMG");
     efi_print_ascii("\r\n");
 
     status = efi_load_file(root, INITRD_PATH, &initrd_image, &initrd_size);
@@ -498,8 +615,6 @@ static EFI_STATUS efi_init_graphics(void)
  */
 static EFI_STATUS efi_find_rsdp(void)
 {
-    EFI_STATUS status;
-
     boot_params.rsdp_address = 0;
 
     /* Try to get ACPI table from configuration table */
@@ -531,7 +646,7 @@ static EFI_STATUS efi_find_rsdp(void)
 static void efi_setup_boot_params(void)
 {
     /* Zero out boot params */
-    memset(&boot_params, 0, sizeof(boot_params_t));
+    efi_memset(&boot_params, 0, sizeof(boot_params_t));
 
     /* Set magic */
     boot_params.magic = BOOT_PARAMS_MAGIC;
@@ -553,7 +668,7 @@ static void efi_setup_boot_params(void)
 
     /* Command line */
     /* Would copy from NVRAM or config */
-    strcpy(boot_params.cmdline, "root=/dev/nvme0n1p2 quiet splash");
+    efi_strcpy(boot_params.cmdline, "root=/dev/nvme0n1p2 quiet splash");
 }
 
 /*===========================================================================*/
@@ -573,8 +688,8 @@ static EFI_STATUS efi_exit_boot_services(void)
     void *new_map = NULL;
 
     status = gBS->GetMemoryMap(&new_map_size, NULL,
-                                &mmap_desc_version, &mmap_desc_size,
-                                &map_key);
+                                &map_key, &mmap_desc_size,
+                                &mmap_desc_version);
 
     if (new_map_size > memory_map_size) {
         status = efi_allocate_pool(new_map_size, &new_map);
@@ -583,22 +698,29 @@ static EFI_STATUS efi_exit_boot_services(void)
         }
 
         status = gBS->GetMemoryMap(&new_map_size, new_map,
-                                    &mmap_desc_version, &mmap_desc_size,
-                                    &map_key);
+                                    &map_key, &mmap_desc_size,
+                                    &mmap_desc_version);
         if (EFI_ERROR(status)) {
             efi_free_pool(new_map);
             return status;
         }
 
-        if (memory_map) {
-            efi_free_pool(memory_map);
-        }
+        /*
+         * Do NOT free the old map before ExitBootServices.
+         *
+         * AllocatePool() itself changes the memory map, which is why the UEFI
+         * specification requires GetMemoryMap -> ExitBootServices with no
+         * intervening allocation. Freeing the previous buffer here would have
+         * invalidated `map_key` again and ExitBootServices would return
+         * EFI_INVALID_PARAMETER for ever. The old buffer is simply abandoned;
+         * the kernel owns memory after this point anyway.
+         */
         memory_map = new_map;
         memory_map_size = new_map_size;
     }
 
     /* Exit boot services */
-    status = gBS->ExitBootServices(gST->ImageHandle, map_key);
+    status = gBS->ExitBootServices(gImageHandle, map_key);
     if (EFI_ERROR(status)) {
         efi_print_ascii("[ERROR] Failed to exit boot services: ");
         efi_print_ascii(efi_status_str(status));
@@ -614,7 +736,7 @@ static EFI_STATUS efi_exit_boot_services(void)
 /**
  * efi_jump_to_kernel - Jump to kernel entry point
  */
-static void __noreturn efi_jump_to_kernel(void)
+static void efi_jump_to_kernel(void)
 {
     typedef void (*kernel_entry_t)(boot_params_t *);
 
@@ -644,14 +766,22 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
     EFI_STATUS status;
     EFI_LOADED_IMAGE *loaded_image;
     EFI_FILE_HANDLE root;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
 
     /* Initialize globals */
     gST = system_table;
+    gImageHandle = image_handle;
     gBS = system_table->BootServices;
     gRT = system_table->RuntimeServices;
 
-    /* Initialize EFI library */
-    InitializeLib(image_handle, system_table);
+    /*
+     * There was an InitializeLib(image_handle, system_table) call here. That
+     * is a GNU-EFI function, and this file does not link against GNU-EFI:
+     * every service call below goes straight through gBS/gST. Resolving it
+     * would have failed at link time, and had it linked it would have set up
+     * GNU-EFI's own gST, which nothing here reads. The globals just above are
+     * the whole of the initialisation this file needs.
+     */
 
     /* Display boot banner */
     efi_clear_screen();
@@ -674,8 +804,21 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
     }
 
     /* Open root directory */
-    status = loaded_image->DeviceHandle->OpenVolume(loaded_image->DeviceHandle,
-                                                     &root);
+    /*
+     * DeviceHandle is an opaque EFI_HANDLE, not a protocol pointer. This used
+     * to call DeviceHandle->OpenVolume(), i.e. dereference a handle as if it
+     * were the simple-file-system interface -- a fault on real firmware.
+     * The volume interface has to be fetched from the handle first.
+     */
+    status = gBS->HandleProtocol(loaded_image->DeviceHandle,
+                                 (EFI_GUID *)&gEfiSimpleFileSystemProtocolGuid,
+                                 (VOID **)&fs);
+    if (EFI_ERROR(status)) {
+        efi_print_ascii("[ERROR] No simple file system on device\r\n");
+        return status;
+    }
+
+    status = fs->OpenVolume(fs, &root);
     if (EFI_ERROR(status)) {
         efi_print_ascii("[ERROR] Failed to open volume\r\n");
         return status;
@@ -691,8 +834,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         return status;
     }
 
-    /* Print memory map (debug) */
-    /* efi_print_memory_map(); */
+    /* The map is already printed by efi_get_memory_map() once it is filled. */
 
     /* Find ACPI RSDP */
     efi_find_rsdp();
@@ -704,7 +846,23 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
     }
 
     /* Load initrd */
-    efi_load_initrd(root);
+    status = efi_load_initrd(root);
+    if (EFI_ERROR(status)) {
+        /*
+         * Nothing will consume the kernel pages now. Release them rather than
+         * leaving the fixed region reserved for a boot that is not going to
+         * happen -- efi_free_pages() exists for exactly this and had no
+         * callers, so a failed initrd load leaked the whole kernel image.
+         */
+        if (kernel_image && kernel_size) {
+            efi_free_pages((u64)(uintptr_t)kernel_image,
+                           (kernel_size + 0xFFF) / 0x1000);
+            kernel_image = NULL;
+            kernel_size = 0;
+        }
+
+        return status;
+    }
 
     /* Setup boot parameters */
     efi_setup_boot_params();
@@ -726,10 +884,19 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
 /*                         STRING FUNCTIONS                                  */
 /*===========================================================================*/
 
-/**
- * memset - Set memory to value
+/*
+ * Local memory/string helpers.
+ *
+ * These were named memset() and strcpy(), which stddef.h/string.h already
+ * declare with the same signatures; defining them again is a hard error. A
+ * UEFI application has no libc, so the implementations are needed -- they just
+ * cannot take the reserved names. Namespaced, and used below.
  */
-static void *memset(void *s, int c, size_t n)
+
+/**
+ * efi_memset - Set memory to value
+ */
+static void *efi_memset(void *s, int c, size_t n)
 {
     u8 *p = (u8 *)s;
     while (n--) {
@@ -739,9 +906,26 @@ static void *memset(void *s, int c, size_t n)
 }
 
 /**
- * strcpy - Copy string
+ * efi_memcpy - Copy memory
+ *
+ * No libc in a UEFI application, so this is local; see the note on efi_memset.
  */
-static char *strcpy(char *dest, const char *src)
+static void *efi_memcpy(void *dest, const void *src, size_t n)
+{
+    u8 *d = (u8 *)dest;
+    const u8 *s = (const u8 *)src;
+
+    while (n--) {
+        *d++ = *s++;
+    }
+
+    return dest;
+}
+
+/**
+ * efi_strcpy - Copy string
+ */
+static char *efi_strcpy(char *dest, const char *src)
 {
     char *d = dest;
     while ((*d++ = *src++));

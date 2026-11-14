@@ -152,6 +152,10 @@ void splash_draw_progress_text(u32 x, u32 y, const char *message, u32 percent)
 /*===========================================================================*/
 /*                         BOOT STAGES                                       */
 /*===========================================================================*/
+/* Defined below; called from the splash timer path above. */
+void splash_hide(void);
+
+
 
 /* Initialize Boot Progress Items */
 void splash_init_items(void)

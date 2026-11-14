@@ -141,9 +141,25 @@ static void clocksource_init(void)
 
     /* Get frequency from architecture */
 #if defined(ARCH_X86_64)
-    timer_manager.clocksource.frequency = 0; /* Will be calibrated */
+    /*
+     * The TSC's frequency is not known until it has been calibrated against
+     * the PIT, so the PIT - whose rate is fixed at 1.193182 MHz - is the
+     * clocksource until calibration gives the TSC a rating. Without this the
+     * TSC was selected with frequency 0, and every ns/us/ms conversion that
+     * divides by it would have divided by zero. clocksource_pit_read() was
+     * written for exactly this and never referenced.
+     */
+    /*
+     * The PIT's input clock is a fixed 1193182 Hz regardless of the programmed
+     * divisor, so its counter rate is known before any calibration runs -
+     * unlike the TSC. This is NOT get_ticks(): that returns the tick count
+     * since boot, which is a quantity, not a rate.
+     */
+    timer_manager.clocksource.frequency = 1193182ULL;  /* PIT input clock */
+    timer_manager.clocksource.read = clocksource_pit_read;
+    strcpy(timer_manager.clocksource.name, "pit");
     timer_manager.clocksource.mask = 0xFFFFFFFFFFFFFFFFULL;
-    timer_manager.clocksource.rating = 300;
+    timer_manager.clocksource.rating = 110;   /* Below a calibrated TSC */
 #elif defined(ARCH_ARM64)
     /* Read counter frequency */
     u32 freq;
@@ -233,7 +249,26 @@ int clockevent_set_next_event(u64 delta_ns)
 
     /* Default: use architecture timer */
 #if defined(ARCH_X86_64)
-    return apic_timer_set_oneshot(delta_ns / 1000000);
+    /*
+     * apic_timer_set_oneshot returns void and programs the LAPIC directly; it
+     * has no failure mode to propagate. This was `return
+     * apic_timer_set_oneshot(...)`, which only compiled because the function
+     * had no declaration in scope and the compiler assumed int.
+     *
+     * Round up so a sub-millisecond delta arms for one tick rather than zero,
+     * which would disarm the timer entirely.
+     */
+    {
+        u32 ms = (u32)((delta_ns + 999999) / 1000000);
+
+        if (ms == 0) {
+            ms = 1;
+        }
+
+        apic_timer_set_oneshot(ms);
+    }
+
+    return 0;
 #elif defined(ARCH_ARM64)
     /* ARM generic timer */
     u64 current, target;
@@ -318,7 +353,13 @@ void hrtimer_init_timer(hrtimer_t *timer, timer_handler_t handler, void *data)
 
     memset(timer, 0, sizeof(hrtimer_t));
 
-    timer->node = (struct rb_node){ NULL, NULL };
+    /*
+     * timer->node needs no explicit clear: the memset above already zeroed the
+     * whole struct. The compound literal that used to be here supplied only
+     * two of rb_node's five fields and assigned a NULL pointer to
+     * rb_parent_color (an unsigned long), which is a non-portable conversion
+     * from void * - benign here only because NULL happens to be 0.
+     */
     timer->expires = 0;
     timer->period = 0;
     timer->type = TIMER_TYPE_ONESHOT;

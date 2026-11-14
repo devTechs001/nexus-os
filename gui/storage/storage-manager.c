@@ -146,6 +146,29 @@ int storage_manager_init(storage_manager_t *manager)
         return -1;
     }
     
+    /*
+     * The three analysis panels.
+     *
+     * create_smart_panel(), create_stats_panel() and create_partition_panel()
+     * were all written and none of them was ever called: the storage manager
+     * showed a device list and an info panel and had no SMART data, statistics
+     * or partition view at all.
+     */
+    if (create_smart_panel(manager) != 0) {
+        printk("[STORAGE] Failed to create SMART panel\n");
+        return -1;
+    }
+
+    if (create_stats_panel(manager) != 0) {
+        printk("[STORAGE] Failed to create statistics panel\n");
+        return -1;
+    }
+
+    if (create_partition_panel(manager) != 0) {
+        printk("[STORAGE] Failed to create partition panel\n");
+        return -1;
+    }
+
     if (create_toolbar(manager) != 0) {
         printk("[STORAGE] Failed to create toolbar\n");
         return -1;
@@ -766,6 +789,14 @@ static int create_content_area(storage_manager_t *manager)
 static int create_device_list(storage_manager_t *manager)
 {
     manager->device_list = panel_create(manager->sidebar, 0, 0, 250, 670);
+    if (manager->device_list) {
+        /*
+         * The list panel was created with no callbacks at all, so clicks on a
+         * device went nowhere even before on_device_selected() was finished.
+         */
+        manager->device_list->user_data = manager;
+        manager->device_list->on_click = on_device_selected;
+    }
     if (!manager->device_list) {
         return -1;
     }
@@ -792,6 +823,48 @@ static int create_device_info_panel(storage_manager_t *manager)
     
     /* Device info labels would be created here */
     
+    return 0;
+}
+
+/**
+ * update_device_info - Show the selected device's details
+ * @manager: Pointer to storage manager
+ * @device_id: Device to describe
+ *
+ * Returns: 0 on success, negative if the id is out of range
+ *
+ * This was declared at the top of the file and never defined anywhere. The
+ * declaration alone is enough to satisfy a caller at compile time, so an
+ * eventual call would have become an unresolved symbol at link - which no
+ * build reported, because this file was not in one.
+ */
+static int update_device_info(storage_manager_t *manager, u32 device_id)
+{
+    widget_t *label;
+    char text[128];
+
+    if (!manager) {
+        return -EINVAL;
+    }
+
+    if (device_id >= manager->device_count) {
+        return -EINVAL;
+    }
+
+    manager->selected_device = device_id;
+
+    snprintf(text, sizeof(text), "%s  %lu MB  %s",
+             manager->devices[device_id].name,
+             (unsigned long)manager->devices[device_id].total_capacity,
+             manager->devices[device_id].is_active ? "active" : "idle");
+
+    label = label_create(manager->device_info_panel, text, 10, 10, 360, 140);
+    if (!label) {
+        return -ENOMEM;
+    }
+
+    widget_set_font(label, 0, 12);
+
     return 0;
 }
 
@@ -1055,8 +1128,24 @@ int storage_manager_update_graphs(storage_manager_t *manager)
 
 static void on_device_selected(widget_t *widget)
 {
-    if (!widget || !widget->user_data) return;
-    /* Handle device selection */
+    storage_manager_t *manager;
+    u32 device_id;
+
+    if (!widget || !widget->user_data) {
+        return;
+    }
+
+    /*
+     * This handler had an empty body, so selecting a device in the list did
+     * nothing - update_device_info() existed for exactly this purpose and was
+     * never called. The device id travels in the widget's tag.
+     */
+    manager = (storage_manager_t *)widget->user_data;
+    device_id = widget->tag;
+
+    if (update_device_info(manager, device_id) != 0) {
+        pr_debug("STORAGE: could not show info for device %u\n", device_id);
+    }
 }
 
 static void on_refresh_clicked(widget_t *button)

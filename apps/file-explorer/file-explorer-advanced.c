@@ -187,7 +187,9 @@ int file_explorer_copy_to_pane(file_explorer_window_t *win)
     
     /* Copy selected files to paired window's path */
     for (u32 i = 0; i < win->selected_count; i++) {
-        file_explorer_copy_file(win, win->selected[i], win->paired_window->current_path);
+        /* selected[] holds directory entries; the copy API takes the file inside. */
+        file_explorer_copy_file(win, &win->selected[i]->file,
+                                win->paired_window->current_path);
     }
     
     return 0;
@@ -207,7 +209,8 @@ int file_explorer_move_to_pane(file_explorer_window_t *win)
     
     /* Move selected files to paired window's path */
     for (u32 i = 0; i < win->selected_count; i++) {
-        file_explorer_move_file(win, win->selected[i], win->paired_window->current_path);
+                file_explorer_move_file(win, &win->selected[i]->file,
+                                win->paired_window->current_path);
     }
     
     return 0;
@@ -469,51 +472,51 @@ int file_explorer_show_context_menu(file_explorer_window_t *win, s32 x, s32 y, f
     if (file) {
         /* File context menu */
         /* Open/Open With */
-        menu_item_t *open_item = create_menu_item("Open", "/usr/share/icons/open.png", "Enter");
+        menu_item_t *open_item = menu_item_create("Open", "/usr/share/icons/open.png", "Enter");
         open_item->on_click = NULL; /* Would set callback */
         desktop_add_menu_item(menu, open_item);
         
         /* Open With submenu */
-        menu_item_t *open_with = create_menu_item("Open With", "/usr/share/icons/apps.png", "");
+        menu_item_t *open_with = menu_item_create("Open With", "/usr/share/icons/apps.png", "");
         open_with->item_type = 2; /* Submenu */
         open_with->submenu = NULL; /* Would create submenu */
         desktop_add_menu_item(menu, open_with);
         
-        desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+        desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
         
         /* File operations */
-        desktop_add_menu_item(menu, create_menu_item("Cut", "/usr/share/icons/cut.png", "Ctrl+X"));
-        desktop_add_menu_item(menu, create_menu_item("Copy", "/usr/share/icons/copy.png", "Ctrl+C"));
-        desktop_add_menu_item(menu, create_menu_item("Paste", "/usr/share/icons/paste.png", "Ctrl+V"));
+        desktop_add_menu_item(menu, menu_item_create("Cut", "/usr/share/icons/cut.png", "Ctrl+X"));
+        desktop_add_menu_item(menu, menu_item_create("Copy", "/usr/share/icons/copy.png", "Ctrl+C"));
+        desktop_add_menu_item(menu, menu_item_create("Paste", "/usr/share/icons/paste.png", "Ctrl+V"));
         
-        desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+        desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
         
         /* More operations */
-        desktop_add_menu_item(menu, create_menu_item("Rename", "/usr/share/icons/rename.png", "F2"));
-        desktop_add_menu_item(menu, create_menu_item("Delete", "/usr/share/icons/delete.png", "Del"));
+        desktop_add_menu_item(menu, menu_item_create("Rename", "/usr/share/icons/rename.png", "F2"));
+        desktop_add_menu_item(menu, menu_item_create("Delete", "/usr/share/icons/delete.png", "Del"));
         
-        desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+        desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
         
         /* Properties */
-        desktop_add_menu_item(menu, create_menu_item("Properties", "/usr/share/icons/properties.png", "Alt+Enter"));
+        desktop_add_menu_item(menu, menu_item_create("Properties", "/usr/share/icons/properties.png", "Alt+Enter"));
         
     } else {
         /* Empty area context menu */
-        desktop_add_menu_item(menu, create_menu_item("New Folder", "/usr/share/icons/folder-new.png", "Ctrl+Shift+N"));
-        desktop_add_menu_item(menu, create_menu_item("New File", "/usr/share/icons/file-new.png", "Ctrl+N"));
+        desktop_add_menu_item(menu, menu_item_create("New Folder", "/usr/share/icons/folder-new.png", "Ctrl+Shift+N"));
+        desktop_add_menu_item(menu, menu_item_create("New File", "/usr/share/icons/file-new.png", "Ctrl+N"));
         
-        desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+        desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
         
-        desktop_add_menu_item(menu, create_menu_item("Paste", "/usr/share/icons/paste.png", "Ctrl+V"));
+        desktop_add_menu_item(menu, menu_item_create("Paste", "/usr/share/icons/paste.png", "Ctrl+V"));
         
-        desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+        desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
         
-        desktop_add_menu_item(menu, create_menu_item("Select All", "/usr/share/icons/select-all.png", "Ctrl+A"));
+        desktop_add_menu_item(menu, menu_item_create("Select All", "/usr/share/icons/select-all.png", "Ctrl+A"));
         
-        desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+        desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
         
-        desktop_add_menu_item(menu, create_menu_item("Refresh", "/usr/share/icons/refresh.png", "F5"));
-        desktop_add_menu_item(menu, create_menu_item("Properties", "/usr/share/icons/properties.png", ""));
+        desktop_add_menu_item(menu, menu_item_create("Refresh", "/usr/share/icons/refresh.png", "F5"));
+        desktop_add_menu_item(menu, menu_item_create("Properties", "/usr/share/icons/properties.png", ""));
     }
     
     win->active_context_menu = menu;
@@ -549,32 +552,32 @@ int file_explorer_show_desktop_context_menu(desktop_environment_t *env, s32 x, s
     menu->visible = true;
     
     /* Desktop context menu items */
-    desktop_add_menu_item(menu, create_menu_item("New Folder", "/usr/share/icons/folder-new.png", ""));
-    desktop_add_menu_item(menu, create_menu_item("New Document", "/usr/share/icons/file-new.png", ""));
+    desktop_add_menu_item(menu, menu_item_create("New Folder", "/usr/share/icons/folder-new.png", ""));
+    desktop_add_menu_item(menu, menu_item_create("New Document", "/usr/share/icons/file-new.png", ""));
     
-    desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+    desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
     
     /* View submenu */
-    menu_item_t *view_menu = create_menu_item("View", "/usr/share/icons/view.png", "");
+    menu_item_t *view_menu = menu_item_create("View", "/usr/share/icons/view.png", "");
     view_menu->item_type = 2; /* Submenu */
     /* Would add view options submenu */
     desktop_add_menu_item(menu, view_menu);
     
     /* Sort by submenu */
-    menu_item_t *sort_menu = create_menu_item("Sort By", "/usr/share/icons/sort.png", "");
+    menu_item_t *sort_menu = menu_item_create("Sort By", "/usr/share/icons/sort.png", "");
     sort_menu->item_type = 2; /* Submenu */
     /* Would add sort options submenu */
     desktop_add_menu_item(menu, sort_menu);
     
-    desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+    desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
     
     /* Desktop actions */
-    desktop_add_menu_item(menu, create_menu_item("Show Desktop Icons", "", ""));
-    desktop_add_menu_item(menu, create_menu_item("Change Background", "/usr/share/icons/background.png", ""));
+    desktop_add_menu_item(menu, menu_item_create("Show Desktop Icons", "", ""));
+    desktop_add_menu_item(menu, menu_item_create("Change Background", "/usr/share/icons/background.png", ""));
     
-    desktop_add_menu_item(menu, create_menu_item("", "", "")); /* Separator */
+    desktop_add_menu_item(menu, menu_item_create("", "", "")); /* Separator */
     
-    desktop_add_menu_item(menu, create_menu_item("Properties", "/usr/share/icons/properties.png", ""));
+    desktop_add_menu_item(menu, menu_item_create("Properties", "/usr/share/icons/properties.png", ""));
     
     env->active_menu = menu;
     

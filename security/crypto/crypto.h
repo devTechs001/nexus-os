@@ -97,6 +97,9 @@
 #define CRYPTO_ERR_SIGN             (-10)
 #define CRYPTO_ERR_VERIFY           (-11)
 #define CRYPTO_ERR_NO_MEMORY        (-12)
+/* No usable entropy source. crypto_random_bytes() reports this rather than
+ * substituting a predictable value. */
+#define CRYPTO_ERR_NOT_SUPPORTED    (-13)
 
 /* Magic Numbers */
 #define CRYPTO_CTX_MAGIC            0x43525950544F0001ULL  /* CRYPTO01 */

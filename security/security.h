@@ -440,10 +440,137 @@ extern s32 auth_init(void);
 extern s32 auth_user_verify(u32 uid, const char *password);
 extern s32 auth_session_create(u32 uid);
 
+/*===========================================================================*/
+/*                    SANDBOX DATA STRUCTURES (sandbox.c)                    */
+/*===========================================================================*/
+
+#define SANDBOX_MAX_PATH_LEN    512
+#define SANDBOX_MAX_RULES       512
+
+/* Sandbox States */
+#define SANDBOX_STATE_NONE      0
+#define SANDBOX_STATE_CREATING  1
+#define SANDBOX_STATE_ACTIVE    2
+#define SANDBOX_STATE_SUSPENDED 3
+#define SANDBOX_STATE_DESTROYED 4
+
+/* Sandbox Flags */
+#define SANDBOX_FLAG_NONE           0x00000000
+#define SANDBOX_FLAG_NETWORK        0x00000001
+#define SANDBOX_FLAG_FILESYSTEM     0x00000002
+#define SANDBOX_FLAG_PROCESS        0x00000004
+#define SANDBOX_FLAG_INTERPROCESS   0x00000008
+#define SANDBOX_FLAG_DEVICE         0x00000010
+#define SANDBOX_FLAG_CAPABILITIES   0x00000020
+#define SANDBOX_FLAG_SECCOMP        0x00000040
+#define SANDBOX_FLAG_NAMESPACES     0x00000080
+#define SANDBOX_FLAG_RESTRICTED     0x00000100
+
+/* Access Control */
+#define SANDBOX_ACCESS_NONE     0
+#define SANDBOX_ACCESS_READ     1
+#define SANDBOX_ACCESS_WRITE    2
+#define SANDBOX_ACCESS_EXECUTE  3
+#define SANDBOX_ACCESS_FULL     4
+
+/* Magic Numbers */
+#define SANDBOX_MAGIC           0x53414E44424F5801ULL  /* SANDBOX1 */
+#define SANDBOX_RULE_MAGIC      0x53414E4452554C01ULL  /* SANDRUL1 */
+
+/**
+ * sandbox_path_rule_t - Filesystem path rule
+ */
+typedef struct {
+    u64 magic;                  /* Magic number */
+    char path[SANDBOX_MAX_PATH_LEN];  /* Path pattern */
+    u32 access;                 /* Access level */
+    bool recursive;             /* Apply recursively */
+    u64 created;                /* Creation time */
+} sandbox_path_rule_t;
+
+/**
+ * sandbox_config_t - Sandbox configuration
+ */
+typedef struct {
+    u32 flags;                  /* Sandbox flags */
+    u32 max_memory;             /* Maximum memory (KB) */
+    u32 max_cpu;                /* Maximum CPU percentage */
+    u32 max_processes;          /* Maximum processes */
+    u32 max_open_files;         /* Maximum open files */
+    u32 max_network_conn;       /* Maximum network connections */
+    u64 capabilities;           /* Allowed capabilities */
+    sandbox_path_rule_t *path_rules;  /* Path rules */
+    u32 path_rule_count;        /* Number of path rules */
+    char *allowed_syscalls;     /* Allowed syscalls bitmap */
+    u32 allowed_syscalls_len;   /* Syscall bitmap length */
+} sandbox_config_t;
+
+/**
+ * sandbox_stats_t - Sandbox statistics
+ */
+typedef struct {
+    u64 syscalls;               /* Syscall count */
+    u64 blocked_syscalls;       /* Blocked syscalls */
+    u64 file_access;            /* File access count */
+    u64 blocked_file_access;    /* Blocked file access */
+    u64 network_access;         /* Network access count */
+    u64 blocked_network;        /* Blocked network access */
+    u64 memory_used;            /* Memory used (bytes) */
+    u64 cpu_time;               /* CPU time (ms) */
+    u64 violations;             /* Policy violations */
+} sandbox_stats_t;
+
+typedef struct {
+    u64 magic;                  /* Magic number */
+    spinlock_t lock;            /* Protection lock */
+    u32 id;                     /* Sandbox ID */
+    u32 pid;                    /* Process ID */
+    u32 uid;                    /* User ID */
+    u32 state;                  /* Sandbox state */
+    u32 flags;                  /* Sandbox flags */
+    char name[64];              /* Sandbox name */
+    sandbox_config_t config;    /* Configuration */
+    sandbox_stats_t stats;      /* Statistics */
+    u64 created;                /* Creation time */
+    u64 last_activity;          /* Last activity time */
+    u32 violation_count;        /* Violation count */
+    void *seccomp_filter;       /* Seccomp filter */
+    void *namespace_info;       /* Namespace info */
+    void *private;              /* Private data */
+} sandbox_t;
+
 /* Sandbox API (from sandbox subsystem) */
 extern s32 sandbox_init(void);
 extern s32 sandbox_create(u32 pid, u32 flags);
 extern s32 sandbox_destroy(u32 pid);
+
+/*
+ * The rest of the sandbox enforcement API. Only the three functions above were
+ * declared, so every actual check - the syscall filter, the capability mask,
+ * the network policy, the resource limits and the path confinement - was
+ * reachable only from inside sandbox.c itself. Path confinement in particular
+ * was `static`, which made it unreachable by construction.
+ *
+ * The types above live here rather than in sandbox.c because this header is
+ * the only one sandbox.c includes: a second definition of sandbox_t in the
+ * header would simply not compile.
+ */
+extern sandbox_t *sandbox_get(u32 id);
+extern sandbox_t *sandbox_get_by_pid(u32 pid);
+
+extern s32 sandbox_add_path_rule(u32 id, const char *path, u32 access,
+                                 bool recursive);
+extern s32 sandbox_check_path_access(sandbox_t *sb, const char *path,
+                                     u32 access);
+extern s32 sandbox_check_syscall(sandbox_t *sb, u32 syscall_nr);
+extern s32 sandbox_check_capability(sandbox_t *sb, u64 cap);
+extern s32 sandbox_check_network(sandbox_t *sb, u32 port, bool is_outbound);
+extern s32 sandbox_check_resource(sandbox_t *sb, u32 resource, u64 value);
+
+extern s32 sandbox_suspend(u32 id);
+extern s32 sandbox_resume(u32 id);
+extern s32 sandbox_terminate(u32 id);
+extern s32 sandbox_get_stats(u32 id, sandbox_stats_t *stats);
 
 /* TPM API (from TPM subsystem) */
 extern s32 tpm_init(void);

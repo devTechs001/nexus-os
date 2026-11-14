@@ -11,6 +11,10 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "../../userspace/include/sys/types.h"
+#include "../../userspace/include/stdio.h"
+#include "../../userspace/include/string.h"
+#include "../../userspace/include/stdlib.h"
 #include <stdbool.h>
 #include <stdarg.h>
 
@@ -127,11 +131,18 @@ typedef enum {
     SERVICE_EVENT_STATUS      = 3,
     SERVICE_EVENT_RELOAD      = 4,
     SERVICE_EVENT_DEPENDENCY  = 5,
-} service_event_t;
+} service_event_type_t;
 
-/* Service event */
+/*
+ * Service event.
+ *
+ * This struct and the enum above were both typedef'd as `service_event_t`.
+ * The second definition silently replaced the first, so `type` - which is
+ * meant to be one of SERVICE_EVENT_* - was declared with the type of the
+ * struct being defined. Nothing compiled this file, so nothing noticed.
+ */
 typedef struct {
-    service_event_t type;
+    service_event_type_t type;
     char service_name[MAX_SERVICE_NAME];
     service_state_t state;
     pid_t pid;
@@ -250,128 +261,37 @@ extern int syscall_nanosleep(const struct timespec *req, struct timespec *rem);
 #define EXIT_SUCCESS    0
 #define EXIT_FAILURE    1
 
+/* Control operations accepted by service_manager_control(). */
+#define SM_OP_LIST          0
+#define SM_OP_START         1
+#define SM_OP_STOP          2
+#define SM_OP_RESTART       3
+#define SM_OP_RELOAD        4
+#define SM_OP_STATUS        5
+#define SM_OP_UNREGISTER    6
+#define SM_OP_LOAD_CONFIG   7
+
 /*===========================================================================*/
 /*                         UTILITY FUNCTIONS                                 */
 /*===========================================================================*/
 
-/**
- * strlen - Get string length
+/*
+ * The string and memory helpers that used to live here were private `static`
+ * reimplementations of strlen, strcpy, strncpy, strcmp, strncmp, strchr,
+ * strrchr, strcat, strstr, memcpy, memset, memcmp, memmove and strdup. They
+ * are now taken from userspace/libc/string.c via userspace/include/string.h,
+ * which the include block at the top of this file pulls in.
  */
-static size_t strlen(const char *s)
-{
-    size_t len = 0;
-    while (*s++) len++;
-    return len;
-}
 
-/**
- * strcpy - Copy string
- */
-static char *strcpy(char *dest, const char *src)
-{
-    char *d = dest;
-    while ((*d++ = *src++));
-    return dest;
-}
 
-/**
- * strncpy - Copy string with limit
- */
-static char *strncpy(char *dest, const char *src, size_t n)
-{
-    char *d = dest;
-    while (n-- && (*d++ = *src++));
-    return dest;
-}
 
-/**
- * strcmp - Compare strings
- */
-static int strcmp(const char *s1, const char *s2)
-{
-    while (*s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    return *(unsigned char *)s1 - *(unsigned char *)s2;
-}
 
-/**
- * strncmp - Compare strings with limit
- */
-static int strncmp(const char *s1, const char *s2, size_t n)
-{
-    while (n-- && *s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    if (n == (size_t)-1) return 0;
-    return *(unsigned char *)s1 - *(unsigned char *)s2;
-}
 
-/**
- * strchr - Find character in string
- */
-static char *strchr(const char *s, int c)
-{
-    while (*s) {
-        if (*s == (char)c) return (char *)s;
-        s++;
-    }
-    return (c == '\0') ? (char *)s : NULL;
-}
 
-/**
- * strstr - Find substring
- */
-static char *strstr(const char *haystack, const char *needle)
-{
-    size_t needle_len = strlen(needle);
-    while (*haystack) {
-        if (*haystack == *needle &&
-            strncmp(haystack, needle, needle_len) == 0) {
-            return (char *)haystack;
-        }
-        haystack++;
-    }
-    return NULL;
-}
 
-/**
- * memset - Set memory
- */
-static void *memset(void *s, int c, size_t n)
-{
-    unsigned char *p = (unsigned char *)s;
-    while (n--) *p++ = (unsigned char)c;
-    return s;
-}
 
-/**
- * memcpy - Copy memory
- */
-static void *memcpy(void *dest, const void *src, size_t n)
-{
-    unsigned char *d = (unsigned char *)dest;
-    const unsigned char *s = (const unsigned char *)src;
-    while (n--) *d++ = *s++;
-    return dest;
-}
 
-/**
- * memcmp - Compare memory
- */
-static int memcmp(const void *s1, const void *s2, size_t n)
-{
-    const unsigned char *p1 = (const unsigned char *)s1;
-    const unsigned char *p2 = (const unsigned char *)s2;
-    while (n--) {
-        if (*p1 != *p2) return *p1 - *p2;
-        p1++;
-        p2++;
-    }
-    return 0;
-}
+
 
 /**
  * get_time_ms - Get current time in milliseconds
@@ -410,6 +330,14 @@ static void sm_log(const char *fmt, ...)
     const char *f = fmt;
     va_list args;
 
+    /*
+     * va_start was missing, so every va_arg() below read an uninitialised
+     * va_list and formatted whatever happened to be on the stack. The compiler
+     * was right to warn: this is the only formatter the service manager uses
+     * for its log, so nothing it wrote was trustworthy.
+     */
+    va_start(args, fmt);
+
     /* Simple formatting */
     while (*f && (p - buffer) < 500) {
         if (*f != '%') {
@@ -437,6 +365,8 @@ static void sm_log(const char *fmt, ...)
     /* Also write to stderr */
     syscall_write(STDERR_FILENO, "[service-manager] ", 18);
     syscall_write(STDERR_FILENO, buffer, strlen(buffer));
+
+    va_end(args);
 }
 
 /*===========================================================================*/
@@ -1228,17 +1158,15 @@ static void sm_main_loop(void)
 /*                         HELPER FUNCTIONS                                  */
 /*===========================================================================*/
 
-/**
- * snprintf - Format string
+/*
+ * snprintf() is no longer stubbed here.
+ *
+ * This file defined its own `static int snprintf(...)` that ignored every
+ * argument and returned 0, leaving the caller's buffer untouched. Every
+ * service name, status line and log message the manager formatted came out
+ * empty. userspace/libc/stdio.c now supplies a real implementation and
+ * userspace/include/stdio.h declares it, so the stub is gone.
  */
-static int snprintf(char *str, size_t size, const char *fmt, ...)
-{
-    /* Simplified implementation */
-    (void)str;
-    (void)size;
-    (void)fmt;
-    return 0;
-}
 
 /*===========================================================================*/
 /*                         ENTRY POINT                                       */
@@ -1247,6 +1175,42 @@ static int snprintf(char *str, size_t size, const char *fmt, ...)
 /**
  * main - Service manager entry point
  */
+/*
+ * service_manager_control - Dispatch a control request against the manager
+ *
+ * The individual handlers (sm_list_services, sm_start_service, sm_stop_service,
+ * sm_restart_service, sm_reload_service, sm_get_status, service_unregister,
+ * service_parse_config) were all written and none of them had a caller: the
+ * main loop reaps children and sleeps, and nothing could ask the manager to do
+ * anything. That made them dead code and drew 'defined but not used' warnings.
+ *
+ * This is the entry point a control socket or CLI would talk to, so the
+ * handlers are reachable instead of removed.
+ */
+int service_manager_control(int op, const char *name, void *out)
+{
+    switch (op) {
+    case SM_OP_LIST:
+        return sm_list_services((service_list_t *)out);
+    case SM_OP_START:
+        return sm_start_service(name);
+    case SM_OP_STOP:
+        return sm_stop_service(name);
+    case SM_OP_RESTART:
+        return sm_restart_service(name);
+    case SM_OP_RELOAD:
+        return sm_reload_service(name);
+    case SM_OP_STATUS:
+        return sm_get_status(name, (service_info_t *)out);
+    case SM_OP_UNREGISTER:
+        return service_unregister(name);
+    case SM_OP_LOAD_CONFIG:
+        return service_parse_config(name);
+    default:
+        return -1;
+    }
+}
+
 int main(int argc, char *argv[])
 {
     (void)argc;

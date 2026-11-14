@@ -15,6 +15,7 @@
 #include "../kernel/include/kernel.h"
 #include "virtualization/virt_manager_gui.h"
 #include "apps_nexus.h"
+#include "../apps/terminal/terminal.h"
 
 /* Tracks which application currently owns the screen. */
 static nexus_app_t g_active_app = NEXUS_APP_NONE;
@@ -23,6 +24,7 @@ const char *nexus_app_name(nexus_app_t app)
 {
     switch (app) {
     case NEXUS_APP_VM_MANAGER:  return "Virtualization Manager";
+    case NEXUS_APP_TERMINAL:    return "Terminal";
     case NEXUS_APP_FILE_MANAGER: return "File Manager";
     case NEXUS_APP_TASK_MANAGER: return "Task Manager";
     case NEXUS_APP_SETTINGS:    return "Settings";
@@ -48,6 +50,18 @@ int nexus_app_launch(nexus_app_t app)
          */
         if (virt_gui_init() != 0) {
             printk("[APPS] ERROR: Virtualization Manager failed to start\n");
+            return -1;
+        }
+        break;
+
+    case NEXUS_APP_TERMINAL:
+        /*
+         * Starts the real terminal: application init, a window, the in-kernel
+         * shell bound as the child process, and the first render. All of that
+         * already existed and had no caller.
+         */
+        if (terminal_gui_start() != 0) {
+            printk("[APPS] ERROR: Terminal failed to start\n");
             return -1;
         }
         break;
@@ -87,6 +101,10 @@ void nexus_app_redraw(void)
         virt_manager_poll_input();
         virt_manager_refresh_vm_list();
         virt_manager_gui_render();
+        break;
+
+    case NEXUS_APP_TERMINAL:
+        terminal_gui_render();
         break;
     default:
         break;

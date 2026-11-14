@@ -40,7 +40,9 @@ static int create_menubar(desktop_environment_t *env);
 
 /* Menu operations */
 static int create_start_menu(desktop_environment_t *env);
-static menu_item_t *create_menu_item(const char *label, const char *icon, const char *shortcut);
+static menu_item_t *create_menu_item(menu_item_t *item, u32 id,
+                                     const char *label, const char *icon,
+                                     const char *shortcut);
 
 /* Search */
 static int update_search_suggestions(desktop_environment_t *env);
@@ -447,7 +449,7 @@ int desktop_render_background(desktop_environment_t *env)
  */
 color_t gradient_sample(gradient_t *gradient, float t)
 {
-    color_t result = {0, 0, 0, 255};
+    color_t result = COLOR_BLACK;
     
     if (!gradient || gradient->stop_count == 0) {
         return result;
@@ -1067,32 +1069,60 @@ static int create_start_menu(desktop_environment_t *env)
     menu->hover = color_from_rgba(0, 120, 215, 255);
     menu->font_size = 14;
     
-    /* Add default menu items */
-    /* Applications, Settings, Power, etc. */
-    
+    /*
+     * Add default menu items. This was a comment where the calls belong, so the
+     * start menu opened with an empty body: item_count stayed 0 and NOTHING was
+     * ever drawn, however many times the user opened it.
+     */
+    menu->items = env->start_menu_items;
+    menu->item_count = 0;
+
+    create_menu_item(&menu->items[menu->item_count++], 1, "Applications",
+                     "apps", NULL);
+    create_menu_item(&menu->items[menu->item_count++], 2, "Files",
+                     "folder", NULL);
+    create_menu_item(&menu->items[menu->item_count++], 3, "Terminal",
+                     "terminal", "Ctrl+Alt+T");
+    create_menu_item(&menu->items[menu->item_count++], 4, "Settings",
+                     "settings", NULL);
+    create_menu_item(&menu->items[menu->item_count++], 5, "Power Off",
+                     "power", NULL);
+
     return 0;
 }
 
 /**
- * create_menu_item - Create menu item
+ * create_menu_item - Fill in one menu item
+ * @item: Storage for the item
+ * @id: Item id
  * @label: Item label
- * @icon: Icon path
- * @shortcut: Keyboard shortcut
+ * @icon: Icon path (may be NULL)
+ * @shortcut: Keyboard shortcut (may be NULL)
  *
- * Returns: Pointer to created menu item
+ * Returns: Pointer to the filled item, or NULL if arguments are bad
+ *
+ * This used to return a pointer to a function-local `static menu_item_t`, so
+ * every item produced by it aliased the same storage: a menu built with N
+ * calls would have ended up with N copies of the last label. It also had no
+ * caller, so no menu was ever built at all.
  */
-static menu_item_t *create_menu_item(const char *label, const char *icon, const char *shortcut)
+static menu_item_t *create_menu_item(menu_item_t *item, u32 id,
+                                     const char *label, const char *icon,
+                                     const char *shortcut)
 {
-    static menu_item_t item;
-    
-    memset(&item, 0, sizeof(menu_item_t));
-    strncpy(item.label, label, sizeof(item.label) - 1);
-    if (icon) strncpy(item.icon_path, icon, sizeof(item.icon_path) - 1);
-    if (shortcut) strncpy(item.shortcut, shortcut, sizeof(item.shortcut) - 1);
-    item.item_type = 0;  /* Normal item */
-    item.enabled = true;
-    
-    return &item;
+    if (!item || !label) {
+        return NULL;
+    }
+
+    memset(item, 0, sizeof(*item));
+    item->item_id = id;
+    strncpy(item->label, label, sizeof(item->label) - 1);
+    if (icon) strncpy(item->icon_path, icon, sizeof(item->icon_path) - 1);
+    if (shortcut) strncpy(item->shortcut, shortcut, sizeof(item->shortcut) - 1);
+    item->item_type = 0;  /* Normal item */
+    item->enabled = true;
+
+    return item;
 }
 
 /**
@@ -1207,14 +1237,79 @@ int desktop_hide_context_menu(desktop_environment_t *env)
  */
 int desktop_add_menu_item(desktop_menu_t *menu, menu_item_t *item)
 {
+    menu_item_t *tail;
+
     if (!menu || !item) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would add to menu's item list */
+
+    /*
+     * This incremented item_count and stored nothing. The item the caller had
+     * just built -- label, icon, shortcut, click handler -- was dropped on the
+     * floor, so every context menu and start menu in the GUI had a non-zero
+     * item count and an empty item list, and rendering them produced nothing.
+     *
+     * Items are chained through menu_item_t.next so the menu has no fixed
+     * capacity.
+     */
+    item->next = NULL;
+
+    if (!menu->items) {
+        menu->items = item;
+    } else {
+        for (tail = menu->items; tail->next; tail = tail->next) {
+            /* find end */
+        }
+        tail->next = item;
+    }
+
     menu->item_count++;
-    
+
     return 0;
+}
+
+/**
+ * menu_item_create - Allocate and initialise a menu item
+ * @label: Item label (empty string for a separator)
+ * @icon: Icon path, or NULL
+ * @shortcut: Shortcut text, or NULL
+ *
+ * Returns: new item, or NULL on failure
+ *
+ * See desktop-env.h: the GUI called a three-argument create_menu_item() that
+ * did not exist anywhere in the tree.
+ */
+menu_item_t *menu_item_create(const char *label, const char *icon,
+                             const char *shortcut)
+{
+    menu_item_t *item = kmalloc(sizeof(menu_item_t));
+
+    if (!item) {
+        return NULL;
+    }
+
+    memset(item, 0, sizeof(*item));
+
+    if (label) {
+        strncpy(item->label, label, sizeof(item->label) - 1);
+    }
+
+    if (icon) {
+        strncpy(item->icon_path, icon, sizeof(item->icon_path) - 1);
+    }
+
+    if (shortcut) {
+        strncpy(item->shortcut, shortcut, sizeof(item->shortcut) - 1);
+    }
+
+    item->enabled = true;
+
+    /* An empty label with no icon is the conventional separator. */
+    if (item->label[0] == '\0') {
+        item->item_type = 1;
+    }
+
+    return item;
 }
 
 /**
@@ -1818,8 +1913,16 @@ int desktop_handle_mouse(desktop_environment_t *env, s32 x, s32 y, u32 buttons)
     env->hover_icon = NULL;
     for (u32 i = 0; i < env->icon_count; i++) {
         desktop_icon_t *icon = &env->icons[i];
-        if (x >= icon->x && x < icon->x + icon->width &&
-            y >= icon->y && y < icon->y + icon->height) {
+        /*
+         * x/y are s32 and width/height are u32. Comparing them directly
+         * promotes the sum to unsigned, so an icon at a negative coordinate
+         * would have wrapped to a huge bound and swallowed every later hit
+         * test. Widen both sides to s64 so a negative origin stays negative.
+         */
+        if ((s64)x >= (s64)icon->x &&
+            (s64)x < (s64)icon->x + (s64)icon->width &&
+            (s64)y >= (s64)icon->y &&
+            (s64)y < (s64)icon->y + (s64)icon->height) {
             env->hover_icon = icon;
             break;
         }

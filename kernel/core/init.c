@@ -136,7 +136,10 @@ typedef struct onboarding_wizard onboarding_wizard_t;
 extern int gui_framework_init(void);
 extern int desktop_init_global(void);
 extern int nexus_app_launch(int app);   /* gui/apps_nexus.c */
+extern int nexus_app_active(void);
 #define NEXUS_APP_VM_MANAGER 1         /* matches nexus_app_t */
+#define NEXUS_APP_TERMINAL   5         /* matches nexus_app_t */
+extern void terminal_gui_feed_chars(void);
 extern login_screen_t *login_screen_get_instance(void);
 extern int login_screen_init(login_screen_t *screen);
 extern int login_screen_run(login_screen_t *screen);
@@ -148,6 +151,11 @@ extern int onboarding_wizard_run(onboarding_wizard_t *wizard);
 extern int onboarding_wizard_update(onboarding_wizard_t *wizard);
 /* gui/compositor/window_manager.c - draws the window list to a framebuffer. */
 extern int window_manager_render(u32 *fb, u32 pitch, u32 fb_w, u32 fb_h);
+
+/* resource_sharing MODE_VMWARE; defined here because init.c does not include
+ * resource-sharing.h (it declares the interface locally to avoid pulling the
+ * whole subsystem header into core init). */
+#define MODE_RESOURCE_VMWARE 0
 
 /* Initcall sections */
 extern initcall_t __initcall_start[], __initcall_end[];
@@ -374,7 +382,55 @@ void kernel_init_drivers(void)
     if (resource_sharing_init(resource_sharing_get_global_config()) != 0) {
         pr_warn("  Failed to initialize resource sharing.\n");
     }
+
+    /*
+     * "virt=vmware" used to be parsed into g_boot_params.vmware_mode, printed
+     * once, and then ignored - the flag changed no behaviour at all. Honour it
+     * here: it forces the VMware guest configuration even when CPUID detection
+     * disagrees, which is what the flag is for (an operator who knows the
+     * platform better than a vendor string does).
+     */
+    {
+        boot_params_t *bp = get_boot_params();
+        if (bp && bp->vmware_mode) {
+            extern int resource_sharing_quick_setup(resource_sharing_config_t *cfg,
+                                                    int mode);
+            if (resource_sharing_quick_setup(resource_sharing_get_global_config(),
+                                             MODE_RESOURCE_VMWARE) == 0) {
+                pr_info("  [VM] VMware mode forced by boot parameter.\n");
+            } else {
+                pr_warn("  [VM] Forcing VMware mode failed.\n");
+            }
+        }
+    }
     
+    /*
+     * Nested virtualization, only when asked for.
+     *
+     * nested_virt_init() had no caller anywhere in the tree - the whole module
+     * was unreachable, which is why its VMXON/VMCLEAR/VMLAUNCH gaps never
+     * showed up in testing.
+     */
+    {
+        boot_params_t *bp = get_boot_params();
+        if (bp && bp->nested_virt) {
+            extern int nested_virt_init(void);
+            extern int nested_virt_enable(u32 level);
+
+            pr_info("  [VIRT] Probing nested virtualization...\n");
+            if (nested_virt_init() == 0) {
+                if (nested_virt_enable(1) == 0) {
+                    pr_info("  [VIRT] Nested virtualization level 1 enabled.\n");
+                } else {
+                    pr_warn("  [VIRT] Nested virtualization unavailable on "
+                            "this CPU/firmware.\n");
+                }
+            } else {
+                pr_warn("  [VIRT] Nested virtualization init failed.\n");
+            }
+        }
+    }
+
     /* Late driver initialization */
     driver_late_init();
     
@@ -434,6 +490,230 @@ void kernel_init_late(void)
     current_init_level = INIT_LEVEL_USERSPACE;
 }
 
+/*
+ * gui_event_loop_task - the desktop event loop, as a schedulable task
+ *
+ * This loop used to run inline at the end of kernel_init_userspace(). Since
+ * nothing ever clears its running flag, kernel_main_init() never returned and
+ * kernel_start_scheduler() in kernel_main() was never reached: the system
+ * stayed a single kernel thread that rendered a GUI and nothing else ever
+ * executed.
+ *
+ * Running it as a task lets initialization finish, the scheduler start, and
+ * this loop share the CPU with every other task - notably the init task and
+ * the service manager, which previously never got a timeslice.
+ */
+static void gui_event_loop_task(void *arg)
+{
+    (void)arg;
+
+    /* Re-fetch rather than capture: the task may start after the caller's
+     * stack frame is gone. */
+    onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
+    login_screen_t *login = login_screen_get_instance();
+
+    bool gui_running = true;
+    u64 last_frame_time = get_time_ms();
+    u32 frame_count = 0;
+
+    while (gui_running) {
+    /* Calculate delta time */
+    u64 current_time = get_time_ms();
+    u64 delta_ms = current_time - last_frame_time;
+
+    /* Limit to ~60 FPS (16ms per frame) */
+    if (delta_ms < 16) {
+        /*
+         * Yield instead of spinning.
+         *
+         * This was a `pause` loop: the CPU stayed in this thread
+         * busy-waiting, and since nothing ever calls schedule()
+         * from the interrupt path, no other task could ever run.
+         * scheduler_yield() hands the CPU to any runnable task and
+         * returns here when this thread is picked again.
+         *
+         * Do NOT use arch_halt_cpu(): it does cli; hlt, which stops
+         * the CPU with interrupts disabled and never returns.
+         */
+        extern void scheduler_yield(void);
+        scheduler_yield();
+        continue;
+    }
+
+    last_frame_time = current_time;
+    frame_count++;
+
+    /* Update GUI state.
+     *
+     * login_screen_poll_input() is what makes the login screen
+     * usable at all: it had no input handling, so the password
+     * field could never be filled and Enter could never be
+     * pressed, even though the whole authentication path was
+     * implemented and waiting.
+     */
+    login_screen_poll_input(login);
+    login_screen_update(login);
+
+    /*
+     * If the Terminal owns the screen it needs the keyboard.
+     * login_screen_poll_input() leaves characters it could not
+     * consume queued, so this reads what is left rather than
+     * competing with the login screen for the same keys.
+     */
+    if (nexus_app_active() == NEXUS_APP_TERMINAL) {
+        extern void terminal_gui_feed_chars(void);
+        terminal_gui_feed_chars();
+    }
+    onboarding_wizard_update(wizard);
+
+    /*
+     * Draw the windows, then copy the result to the framebuffer.
+     *
+     * This used to call compositor_present() alone, which only
+     * swaps buffers and memcpy's a framebuffer that nothing had
+     * rendered into - so the GUI reported a steady 60 FPS while
+     * the screen stayed black. The compositor renders its own
+     * layer stack, and no window was ever registered there; the
+     * window manager owns the actual window list, so it produces
+     * the pixels and we blit them straight to the physical
+     * framebuffer.
+     */
+    boot_params_t *gfx = get_boot_params();
+
+    /*
+     * Report the target framebuffer once, on the first frame.
+     *
+     * "The screen is black" is impossible to diagnose from a
+     * screenshot: the address may be wrong, unmapped, the depth may
+     * not be 32bpp, or the pitch may not be what we assume. Printing
+     * exactly what the renderer is writing to, and proving the write
+     * landed by reading a pixel back, turns that into a fact.
+     */
+    static bool gfx_reported = false;
+    if (!gfx_reported) {
+        gfx_reported = true;
+        if (gfx) {
+            pr_info("[GUI] Framebuffer: addr=%p %ux%u pitch=%u depth=%u "
+                    "type=%u\n",
+                    (void *)(uintptr_t)gfx->gfx_addr,
+                    gfx->gfx_width, gfx->gfx_height,
+                    gfx->gfx_pitch, gfx->gfx_depth, gfx->gfx_type);
+            pr_info("[GUI] Boot graphics_mode=%u text_mode=%u "
+                    "vmware=%u native=%u\n",
+                    gfx->graphics_mode, gfx->text_mode,
+                    gfx->vmware_mode, gfx->native_mode);
+        } else {
+            pr_err("[GUI] No boot params - cannot get a framebuffer\n");
+        }
+    }
+
+    /*
+     * The renderer writes 32-bit 0xAARRGGBB pixels. Anything else
+     * (16bpp, 24bpp packed) would be drawn as scrambled colours at
+     * the wrong stride, so refuse rather than corrupt the screen.
+     */
+    /*
+     * The renderer now writes 16, 24 and 32bpp. It used to accept
+     * only 32bpp here and skip the whole frame otherwise - and
+     * grub.cfg's bare "gfxmode=1024x768" lets GRUB choose its own
+     * default depth, commonly 24bpp. That combination produced a
+     * completely blank screen with a fully constructed GUI behind
+     * it.
+     */
+    bool gfx_ok = gfx && gfx->gfx_addr && gfx->gfx_width &&
+                  gfx->gfx_height && (gfx->gfx_depth == 0 ||
+                                      gfx->gfx_depth == 16 ||
+                                      gfx->gfx_depth == 24 ||
+                                      gfx->gfx_depth == 32);
+    if (gfx && gfx->gfx_addr && gfx->gfx_depth &&
+        gfx->gfx_depth != 16 && gfx->gfx_depth != 24 &&
+        gfx->gfx_depth != 32 && !gfx_reported) {
+        pr_err("[GUI] Framebuffer is %u bpp; unsupported depth\n",
+               gfx->gfx_depth);
+    }
+
+    if (gfx_ok) {
+        u32 depth = gfx->gfx_depth ? gfx->gfx_depth : 32;
+        u32 bytes = depth / 8;
+        u32 pitch = gfx->gfx_pitch ? (gfx->gfx_pitch / bytes)
+                                   : gfx->gfx_width;
+
+        /*
+         * Tell the software renderer which pixel format to emit
+         * before it touches the surface.
+         */
+        extern void graphics_set_target_depth(u32 bpp);
+        graphics_set_target_depth(depth);
+
+        window_manager_render((u32 *)(uintptr_t)gfx->gfx_addr,
+                              pitch,
+                              gfx->gfx_width,
+                              gfx->gfx_height);
+
+        /*
+         * Read one pixel back to prove the write reached the
+         * framebuffer. If this reads back as the value we wrote,
+         * the address, mapping and pitch are all correct and any
+         * remaining blackness is a drawing bug. If it reads back
+         * unchanged, the scanout buffer is somewhere else.
+         */
+        static bool probed = false;
+        if (!probed) {
+            probed = true;
+            volatile u32 *probe = (volatile u32 *)(uintptr_t)gfx->gfx_addr;
+            u32 sentinel = 0x00FF00FFu;   /* opaque magenta */
+            u32 saved = probe[0];
+            probe[0] = sentinel;
+            u32 readback = probe[0];
+            probe[0] = saved;
+            pr_info("[GUI] Framebuffer probe: wrote 0x%08X, read 0x%08X (%s)\n",
+                    sentinel, readback,
+                    (readback == sentinel) ? "WRITABLE" : "WRITE LOST");
+        }
+    } else {
+        /*
+         * The framebuffer is unusable - usually a depth the
+         * renderer cannot write (16 or 24bpp) or no address at
+         * all.
+         *
+         * This used to call compositor_present(), which swaps and
+         * blits a buffer nothing had rendered into: a guaranteed
+         * black screen, once per frame, forever. Painting the boot
+         * log into whatever surface we do have at least tells the
+         * user why the GUI is not appearing instead of leaving
+         * them staring at nothing.
+         */
+        extern void fbcon_set_framebuffer(void *, u32, u32, u32, u32);
+        extern void fbcon_render(u32, u32);
+
+        static bool explained = false;
+        if (!explained && gfx && gfx->gfx_addr &&
+            gfx->gfx_width && gfx->gfx_height) {
+            explained = true;
+            fbcon_set_framebuffer((void *)(uintptr_t)gfx->gfx_addr,
+                                  gfx->gfx_width, gfx->gfx_height,
+                                  gfx->gfx_pitch,
+                                  gfx->gfx_depth ? gfx->gfx_depth : 32);
+            fbcon_render(0x00000000, 0x00E8F0F2);
+
+            pr_err("[GUI] Framebuffer unusable (depth=%u); showing "
+                   "boot log on screen instead of a black frame\n",
+                   gfx->gfx_depth);
+        }
+    }
+
+    /* Frame rate limiting */
+    if (frame_count >= 60) {
+        pr_debug("[GUI] Running at %u FPS\n", frame_count);
+        frame_count = 0;
+    }
+    }
+
+    pr_info("  [GUI] GUI event loop exited.\n");
+}
+
+
+
 /**
  * kernel_init_userspace - Initialize userspace
  */
@@ -477,6 +757,18 @@ void kernel_init_userspace(void)
                 }
             }
 
+            /*
+             * The Terminal is reachable with the "terminal" boot parameter.
+             * Its window, shell binding and cell renderer were all finished
+             * and nothing ever started them.
+             */
+            if (params->terminal) {
+                pr_info("  [GUI] Starting Terminal...\n");
+                if (nexus_app_launch(NEXUS_APP_TERMINAL) != 0) {
+                    pr_err("  [GUI] Terminal failed to start\n");
+                }
+            }
+
             /* Check if onboarding is needed (first boot) */
             onboarding_wizard_t *wizard = onboarding_wizard_get_instance();
             if (wizard) {
@@ -498,167 +790,50 @@ void kernel_init_userspace(void)
                 login_screen_run(login);
             }
 
-            /* 4. GUI Main Event Loop - Keep GUI running */
+            /*
+             * 4. GUI Main Event Loop.
+             *
+             * This loop never terminates: nothing in the tree sets
+             * gui_running to false. Because it is the last phase of
+             * kernel_main_init(), queuing behind it meant kernel_start_scheduler()
+             * in kernel_main() was never reached, so the scheduler never ran and
+             * the whole system stayed a single kernel thread.
+             *
+             * The loop now yields the CPU once per frame instead, so any other
+             * runnable task gets scheduled.
+             */
             pr_info("  [GUI] Entering GUI event loop...\n");
-            bool gui_running = true;
-            u64 last_frame_time = get_time_ms();
-            u32 frame_count = 0;
+            /*
+             * Hand the event loop to the scheduler instead of running it here.
+             *
+             * Running it inline made this function - the last phase of
+             * kernel_main_init() - never return, so kernel_start_scheduler()
+             * was unreachable and no task ever ran. Spawning it means the
+             * desktop and the rest of the system share the CPU.
+             */
+            {
+                struct task_struct *gui_task =
+                    task_create("gui", gui_event_loop_task, NULL);
 
-            while (gui_running) {
-                /* Calculate delta time */
-                u64 current_time = get_time_ms();
-                u64 delta_ms = current_time - last_frame_time;
-
-                /* Limit to ~60 FPS (16ms per frame) */
-                if (delta_ms < 16) {
+                if (gui_task) {
                     /*
-                     * Small pause to prevent busy-waiting. Do NOT use
-                     * arch_halt_cpu() here: it executes cli; hlt, which
-                     * stops the CPU with interrupts disabled and can never
-                     * return, freezing the GUI on the first frame.
+                     * task_create() leaves the task in TASK_NEW, off every run
+                     * queue. Without this the desktop task would never be
+                     * picked and the screen would stay blank while the system
+                     * looked healthy.
                      */
-                    __asm__ __volatile__("pause" ::: "memory");
-                    continue;
-                }
-
-                last_frame_time = current_time;
-                frame_count++;
-
-                /* Update GUI state.
-                 *
-                 * login_screen_poll_input() is what makes the login screen
-                 * usable at all: it had no input handling, so the password
-                 * field could never be filled and Enter could never be
-                 * pressed, even though the whole authentication path was
-                 * implemented and waiting.
-                 */
-                login_screen_poll_input(login);
-                login_screen_update(login);
-                onboarding_wizard_update(wizard);
-
-                /*
-                 * Draw the windows, then copy the result to the framebuffer.
-                 *
-                 * This used to call compositor_present() alone, which only
-                 * swaps buffers and memcpy's a framebuffer that nothing had
-                 * rendered into - so the GUI reported a steady 60 FPS while
-                 * the screen stayed black. The compositor renders its own
-                 * layer stack, and no window was ever registered there; the
-                 * window manager owns the actual window list, so it produces
-                 * the pixels and we blit them straight to the physical
-                 * framebuffer.
-                 */
-                boot_params_t *gfx = get_boot_params();
-
-                /*
-                 * Report the target framebuffer once, on the first frame.
-                 *
-                 * "The screen is black" is impossible to diagnose from a
-                 * screenshot: the address may be wrong, unmapped, the depth may
-                 * not be 32bpp, or the pitch may not be what we assume. Printing
-                 * exactly what the renderer is writing to, and proving the write
-                 * landed by reading a pixel back, turns that into a fact.
-                 */
-                static bool gfx_reported = false;
-                if (!gfx_reported) {
-                    gfx_reported = true;
-                    if (gfx) {
-                        pr_info("[GUI] Framebuffer: addr=%p %ux%u pitch=%u depth=%u "
-                                "type=%u\n",
-                                (void *)(uintptr_t)gfx->gfx_addr,
-                                gfx->gfx_width, gfx->gfx_height,
-                                gfx->gfx_pitch, gfx->gfx_depth, gfx->gfx_type);
-                        pr_info("[GUI] Boot graphics_mode=%u text_mode=%u "
-                                "vmware=%u native=%u\n",
-                                gfx->graphics_mode, gfx->text_mode,
-                                gfx->vmware_mode, gfx->native_mode);
-                    } else {
-                        pr_err("[GUI] No boot params - cannot get a framebuffer\n");
-                    }
-                }
-
-                /*
-                 * The renderer writes 32-bit 0xAARRGGBB pixels. Anything else
-                 * (16bpp, 24bpp packed) would be drawn as scrambled colours at
-                 * the wrong stride, so refuse rather than corrupt the screen.
-                 */
-                bool gfx_ok = gfx && gfx->gfx_addr && gfx->gfx_width &&
-                              gfx->gfx_height && (gfx->gfx_depth == 0 ||
-                                                  gfx->gfx_depth == 32);
-                if (gfx && gfx->gfx_addr && gfx->gfx_depth &&
-                    gfx->gfx_depth != 32 && !gfx_reported) {
-                    pr_err("[GUI] Framebuffer is %u bpp; renderer needs 32\n",
-                           gfx->gfx_depth);
-                }
-
-                if (gfx_ok) {
-                    u32 pitch = gfx->gfx_pitch ? (gfx->gfx_pitch / 4)
-                                               : gfx->gfx_width;
-                    window_manager_render((u32 *)(uintptr_t)gfx->gfx_addr,
-                                          pitch,
-                                          gfx->gfx_width,
-                                          gfx->gfx_height);
-
-                    /*
-                     * Read one pixel back to prove the write reached the
-                     * framebuffer. If this reads back as the value we wrote,
-                     * the address, mapping and pitch are all correct and any
-                     * remaining blackness is a drawing bug. If it reads back
-                     * unchanged, the scanout buffer is somewhere else.
-                     */
-                    static bool probed = false;
-                    if (!probed) {
-                        probed = true;
-                        volatile u32 *probe = (volatile u32 *)(uintptr_t)gfx->gfx_addr;
-                        u32 sentinel = 0x00FF00FFu;   /* opaque magenta */
-                        u32 saved = probe[0];
-                        probe[0] = sentinel;
-                        u32 readback = probe[0];
-                        probe[0] = saved;
-                        pr_info("[GUI] Framebuffer probe: wrote 0x%08X, read 0x%08X (%s)\n",
-                                sentinel, readback,
-                                (readback == sentinel) ? "WRITABLE" : "WRITE LOST");
-                    }
+                    task_wake_up(gui_task);
+                    pr_info("  [GUI] Event loop now running as a task\n");
                 } else {
                     /*
-                     * The framebuffer is unusable - usually a depth the
-                     * renderer cannot write (16 or 24bpp) or no address at
-                     * all.
-                     *
-                     * This used to call compositor_present(), which swaps and
-                     * blits a buffer nothing had rendered into: a guaranteed
-                     * black screen, once per frame, forever. Painting the boot
-                     * log into whatever surface we do have at least tells the
-                     * user why the GUI is not appearing instead of leaving
-                     * them staring at nothing.
+                     * No scheduler resource for a task: fall back to running
+                     * the loop inline. The desktop still appears; it simply
+                     * will not share the CPU.
                      */
-                    extern void fbcon_set_framebuffer(void *, u32, u32, u32, u32);
-                    extern void fbcon_render(u32, u32);
-
-                    static bool explained = false;
-                    if (!explained && gfx && gfx->gfx_addr &&
-                        gfx->gfx_width && gfx->gfx_height) {
-                        explained = true;
-                        fbcon_set_framebuffer((void *)(uintptr_t)gfx->gfx_addr,
-                                              gfx->gfx_width, gfx->gfx_height,
-                                              gfx->gfx_pitch,
-                                              gfx->gfx_depth ? gfx->gfx_depth : 32);
-                        fbcon_render(0x00000000, 0x00E8F0F2);
-
-                        pr_err("[GUI] Framebuffer unusable (depth=%u); showing "
-                               "boot log on screen instead of a black frame\n",
-                               gfx->gfx_depth);
-                    }
-                }
-
-                /* Frame rate limiting */
-                if (frame_count >= 60) {
-                    pr_debug("[GUI] Running at %u FPS\n", frame_count);
-                    frame_count = 0;
+                    pr_warn("  [GUI] Could not spawn GUI task; running inline\n");
+                    gui_event_loop_task(NULL);
                 }
             }
-
-            pr_info("  [GUI] GUI event loop exited.\n");
         } else {
             pr_err("  [GUI] Failed to initialize GUI Framework! Falling back to console.\n");
         }

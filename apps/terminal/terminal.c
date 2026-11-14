@@ -44,7 +44,11 @@ static int render_screen(terminal_window_t *win);
 static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *cell);
 static u32 terminal_ansi_color(u8 index);
 static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y, u32 w, u32 h, u32 color);
+static void terminal_draw_glyph(display_framebuffer_t *fb, u32 x, u32 y, char c, u32 color);
+static void terminal_store_px(display_framebuffer_t *fb, u32 x, u32 y, u32 color);
 static int update_cursor(terminal_window_t *win);
+static int terminal_putchar(terminal_window_t *win, char c);
+int terminal_render_window(terminal_window_t *win);
 
 /* PTY operations */
 static int pty_spawn(terminal_window_t *win, const char *shell, const char *dir);
@@ -291,8 +295,26 @@ static int create_terminal_window(terminal_app_t *app, terminal_window_t *win, t
         return -ENOMEM;
     }
     
-    win->screen->width = 120;  /* 120 columns */
-    win->screen->height = 40;  /* 40 rows */
+    /*
+     * Size the grid to the window, not to a fixed 120x40.
+     *
+     * At 8x16 per cell, 120x40 is 960x640 - larger than the 900x600 window
+     * and, at the window's (100,100) origin, 60px wider than a 1024px screen.
+     * The renderer would paint outside the window and off the edge of the
+     * display.
+     */
+    {
+        u32 win_w = win->wm_window ? (u32)win->wm_window->geometry.width : 900;
+        u32 win_h = win->wm_window ? (u32)win->wm_window->geometry.height : 600;
+
+        win->screen->width = win_w / 8;
+        win->screen->height = win_h / 16;
+
+        if (win->screen->width < 20)  win->screen->width = 20;
+        if (win->screen->height < 5)  win->screen->height = 5;
+        if (win->screen->width > 200) win->screen->width = 200;
+        if (win->screen->height > 80) win->screen->height = 80;
+    }
     win->screen->scrollback_size = win->scrollback_lines;
     win->screen->cursor_visible = true;
     win->screen->cursor_blink = true;
@@ -879,9 +901,15 @@ static void terminal_shell_sink(void *ctx, const char *data, u32 len)
         return;
     }
 
-    /* Route through the window's writer so escape handling and wrapping
-     * stay in one place. */
-    terminal_write(win, data, len);
+    /*
+     * Shell output is display text, not input: it must land in the cell grid
+     * directly. Routing it through terminal_write() sent it back into
+     * pty_write(), which treats bytes as keystrokes - typing shell output
+     * into the line buffer and recursing on every newline.
+     */
+    for (u32 i = 0; i < len; i++) {
+        terminal_putchar(win, data[i]);
+    }
 }
 
 static int pty_spawn(terminal_window_t *win, const char *shell_path, const char *dir)
@@ -972,36 +1000,42 @@ static int pty_write(terminal_window_t *win, const char *data, u32 length)
             continue;               /* CRLF input: ignore the CR. */
         }
 
+        /*
+         * Echo goes through terminal_putchar(), which only touches the cell
+         * grid. It must NEVER call terminal_write() again: that routes back
+         * into pty_write(), and the newline case below would then recurse
+         * forever until the stack was exhausted.
+         */
         if (c == '\n') {
-            terminal_write(win, "\n", 1);
+            terminal_putchar(win, '\n');
             line_buf[line_len] = '\0';
             if (line_len > 0) {
                 shell_submit_line(line_buf);
             }
             line_len = 0;
-            terminal_write(win, "\n", 1);
-            shell_print_prompt();
+            /* The shell prints its own prompt and trailing newline. */
             continue;
         }
 
         if (c == 0x7F || c == '\b') {
             if (line_len > 0) {
                 line_len--;
-                terminal_write(win, "\b \b", 3);
+                terminal_putchar(win, '\b');
             }
             continue;
         }
 
         if (c == 0x03) {            /* ^C */
             line_len = 0;
-            terminal_write(win, "^C\n", 3);
-            shell_print_prompt();
+            terminal_putchar(win, '^');
+            terminal_putchar(win, 'C');
+            terminal_putchar(win, '\n');
             continue;
         }
 
         if (line_len + 1 < sizeof(line_buf)) {
             line_buf[line_len++] = c;
-            terminal_write(win, &c, 1);
+            terminal_putchar(win, c);
         }
     }
 
@@ -1158,6 +1192,108 @@ int terminal_resize_screen(terminal_window_t *win, u32 width, u32 height)
 }
 
 /**
+ * terminal_putchar - Write one character into the cell grid
+ * @win: Terminal window
+ * @c: Character to write
+ *
+ * Returns: 0 on success, negative error code on failure
+ *
+ * This was the missing primitive. There was no function anywhere that wrote a
+ * character into the cell buffer: pty_write() echoed by calling
+ * terminal_write(), which called pty_write() again - so a newline recursed
+ * until the stack was gone, and nothing ever reached the screen. Both the
+ * echo path and the shell's output sink now come through here, which touches
+ * cells only and cannot recurse.
+ */
+static int terminal_putchar(terminal_window_t *win, char c)
+{
+    terminal_screen_t *scr;
+
+    if (!win || !win->screen) {
+        return -EINVAL;
+    }
+
+    scr = win->screen;
+    if (!scr->cells || scr->width == 0 || scr->height == 0) {
+        return -EINVAL;
+    }
+
+    /* Keep the cursor inside the grid before using it as an index. */
+    if (scr->cursor_x >= scr->width)  scr->cursor_x = 0;
+    if (scr->cursor_y >= scr->height) scr->cursor_y = scr->height - 1;
+
+    switch (c) {
+    case '\n':
+        scr->cursor_x = 0;
+        scr->cursor_y++;
+        break;
+
+    case '\r':
+        scr->cursor_x = 0;
+        break;
+
+    case '\b':
+        if (scr->cursor_x > 0) {
+            scr->cursor_x--;
+            terminal_cell_t *cell =
+                &scr->cells[scr->cursor_y * scr->width + scr->cursor_x];
+            cell->character = ' ';
+        }
+        break;
+
+    case '\t': {
+        u32 next = (scr->cursor_x + 8) & ~7u;
+        while (scr->cursor_x < next && scr->cursor_x < scr->width) {
+            terminal_cell_t *cell =
+                &scr->cells[scr->cursor_y * scr->width + scr->cursor_x];
+            cell->character = ' ';
+            scr->cursor_x++;
+        }
+        break;
+    }
+
+    default: {
+        terminal_cell_t *cell =
+            &scr->cells[scr->cursor_y * scr->width + scr->cursor_x];
+        cell->character = c;
+        if (cell->fg_color == 0) {
+            cell->fg_color = scr->fg_color;
+        }
+        if (cell->bg_color == 0) {
+            cell->bg_color = scr->bg_color;
+        }
+        scr->cursor_x++;
+        if (scr->cursor_x >= scr->width) {
+            scr->cursor_x = 0;
+            scr->cursor_y++;
+        }
+        break;
+    }
+    }
+
+    /* Scroll when the cursor runs off the bottom. */
+    if (scr->cursor_y >= scr->height) {
+        for (u32 i = 0; i < (scr->height - 1) * scr->width; i++) {
+            scr->cells[i] = scr->cells[i + scr->width];
+        }
+        for (u32 i = (scr->height - 1) * scr->width; i < scr->height * scr->width; i++) {
+            terminal_cell_t *cell = &scr->cells[i];
+            cell->character = ' ';
+            cell->fg_color = scr->fg_color;
+            cell->bg_color = scr->bg_color;
+            cell->bold = false;
+            cell->underline = false;
+            cell->italic = false;
+            cell->reverse = false;
+            cell->blink = false;
+        }
+        scr->cursor_y = scr->height - 1;
+    }
+
+    return 0;
+}
+
+/**
  * render_screen - Render terminal screen
  * @win: Terminal window
  *
@@ -1168,11 +1304,18 @@ static int render_screen(terminal_window_t *win)
     if (!win || !win->screen) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would render screen to widget */
-    
+
+    /*
+     * This was a stub: it moved the cursor and drew nothing, with the comment
+     * "would render screen to widget". The real per-cell renderer exists
+     * (terminal_render_window) but nothing called it either, so the terminal
+     * could be fully driven - shell running, cells filled - and still show an
+     * empty rectangle.
+     */
+    terminal_render_window(win);
+
     update_cursor(win);
-    
+
     return 0;
 }
 
@@ -1196,7 +1339,11 @@ static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *ce
     }
 
     fb = display_get_primary_framebuffer();
-    if (!fb || !fb->base || fb->bpp != 32) {
+    if (!fb || !fb->base) {
+        return -ENODEV;
+    }
+    /* 16, 24 and 32bpp are all drawn correctly now. */
+    if (fb->bpp != 16 && fb->bpp != 24 && fb->bpp != 32) {
         return -ENODEV;
     }
 
@@ -1225,8 +1372,7 @@ static int render_cell(terminal_window_t *win, u32 x, u32 y, terminal_cell_t *ce
     terminal_fill_cell(fb, px, py, win->cell_width, win->cell_height, bg);
 
     if (cell->character && cell->character != ' ') {
-        font8x16_draw_char((u32 *)fb->base, fb->width, fb->height, fb->stride,
-                           (s32)px, (s32)py, cell->character, fg, 1, 255);
+        terminal_draw_glyph(fb, px, py, cell->character, fg);
     }
 
     return 0;
@@ -1253,12 +1399,70 @@ static u32 terminal_ansi_color(u8 index)
 /**
  * terminal_fill_cell - Fill one cell rectangle
  */
+/*
+ * Store one pixel at the framebuffer's real depth.
+ *
+ * The terminal refused anything but 32bpp, so on a 16- or 24bpp mode - which
+ * is what GRUB falls back to on plenty of hardware - it rendered nothing at
+ * all. Same failure the boot splash had.
+ */
+static void terminal_store_px(display_framebuffer_t *fb, u32 x, u32 y, u32 color)
+{
+    u8 *row = (u8 *)fb->base + (u32)y * fb->stride;
+
+    switch (fb->bpp) {
+    case 16:
+        ((u16 *)row)[x] = (u16)(((color >> 19) & 0x1F) << 11 |
+                                ((color >> 10) & 0x3F) << 5  |
+                                ((color >> 3)  & 0x1F));
+        break;
+    case 24: {
+        u8 *p = row + (u32)x * 3;
+        p[0] = (u8)(color);
+        p[1] = (u8)(color >> 8);
+        p[2] = (u8)(color >> 16);
+        break;
+    }
+    default:
+        ((u32 *)row)[x] = color;
+        break;
+    }
+}
+
+/*
+ * Draw one glyph at the framebuffer's depth.
+ *
+ * font8x16_draw_char() writes 32-bit words unconditionally, so using it on a
+ * 16/24bpp surface paints garbage across the row. The glyph bitmap comes from
+ * the same public font8x16_glyph() table, so the shapes are identical.
+ */
+static void terminal_draw_glyph(display_framebuffer_t *fb, u32 x, u32 y,
+                                char c, u32 color)
+{
+    const u8 *glyph = font8x16_glyph(c);
+
+    for (u32 row = 0; row < FONT8X16_HEIGHT; row++) {
+        u8 bits = glyph[row];
+        if (!bits) {
+            continue;
+        }
+        for (u32 col = 0; col < FONT8X16_WIDTH; col++) {
+            if (!(bits & (0x80 >> col))) {
+                continue;
+            }
+            u32 dx = x + col;
+            u32 dy = y + row;
+            if (dx >= fb->width || dy >= fb->height) {
+                continue;
+            }
+            terminal_store_px(fb, dx, dy, color);
+        }
+    }
+}
+
 static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y,
                                u32 w, u32 h, u32 color)
 {
-    u32 *pixels = (u32 *)fb->base;
-    u32 stride = fb->stride / 4;
-
     for (u32 row = 0; row < h; row++) {
         u32 dy = y + row;
         if (dy >= fb->height) {
@@ -1269,7 +1473,7 @@ static void terminal_fill_cell(display_framebuffer_t *fb, u32 x, u32 y,
             if (dx >= fb->width) {
                 break;
             }
-            pixels[dy * stride + dx] = color;
+            terminal_store_px(fb, dx, dy, color);
         }
     }
 }
@@ -2485,6 +2689,99 @@ int terminal_open_bookmark(terminal_window_t *win, u32 index)
  * render loop and no event path at all. These entry points give the window
  * manager something to call.
  */
+
+/*===========================================================================*/
+/*                        GUI ENTRY POINTS                                   */
+/*===========================================================================*/
+
+/*
+ * The application, the shell binding and the cell renderer were all complete,
+ * and there was no way in. These wrap the three steps the desktop needs so the
+ * call sites stay in one place.
+ */
+
+static terminal_window_t *g_gui_window;
+
+int terminal_gui_start(void)
+{
+    terminal_window_t *win;
+
+    if (g_gui_window) {
+        return 0;               /* already running */
+    }
+
+    if (terminal_app_init(&g_terminal_app) != 0) {
+        return -1;
+    }
+
+    win = terminal_create_window(&g_terminal_app, &g_terminal_app.default_profile);
+    if (!win) {
+        printk("[TERMINAL] Could not create a window\n");
+        return -1;
+    }
+
+    g_gui_window = win;
+    g_terminal_app.running = true;
+
+    /* Bind the shell so keystrokes have somewhere to go. */
+    pty_spawn(win, "/bin/nexsh", "/");
+
+    terminal_render_window(win);
+    return 0;
+}
+
+/**
+ * terminal_gui_feed_chars - Drain the keyboard into the terminal
+ *
+ * Called once per GUI frame. Nothing ever put a keystroke into the terminal:
+ * the input driver filled a queue, the terminal had terminal_send_key() and
+ * on_key_press(), and no code joined the two, so the shell prompt could be
+ * rendered and then never receive a command.
+ */
+void terminal_gui_feed_chars(void)
+{
+    extern int input_poll_char(void);
+
+    if (!g_gui_window) {
+        return;
+    }
+
+    for (u32 guard = 0; guard < 64; guard++) {
+        int c = input_poll_char();
+        if (c == 0) {
+            break;
+        }
+
+        char ch;
+        if (c == 27) {                  /* Escape */
+            continue;
+        }
+        ch = (char)c;
+
+        terminal_write(g_gui_window, &ch, 1);
+    }
+}
+
+int terminal_gui_render(void)
+{
+    if (!g_gui_window) {
+        return -1;
+    }
+
+    return terminal_render_window(g_gui_window);
+}
+
+int terminal_gui_input(const char *text, u32 length)
+{
+    if (!g_gui_window || !text || !length) {
+        return -1;
+    }
+
+    /* Route typed bytes through the same path as a real key event. */
+    terminal_write(g_gui_window, text, length);
+    terminal_render_window(g_gui_window);
+    return 0;
+}
 
 /**
  * terminal_render_window - Draw a window's visible screen

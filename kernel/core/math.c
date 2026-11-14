@@ -180,3 +180,214 @@ float tanhf(float x)
 
     return (e2x - 1.0f) / (e2x + 1.0f);
 }
+
+/**
+ * sinf - Sine
+ * @x: Angle in radians
+ *
+ * Returns: sin(x)
+ *
+ * Taylor series about 0, after range reduction to [-pi, pi]. The kernel links
+ * with -nodefaultlibs and there is no libm, so this is the only definition.
+ * These functions (with atan2f, asinf and copysignf below) were called by
+ * mobile/sensors/sensor_hub.c's orientation code with no definition anywhere
+ * in the tree - an unresolved symbol at link time, invisible in a per-file
+ * compile.
+ */
+float sinf(float x)
+{
+    float x2;
+    float term;
+    float sum;
+    int i;
+
+    /* Range reduce into [-pi, pi] */
+    x = x - 6.28318530718f * (float)(long)(x / 6.28318530718f);
+    if (x > 3.14159265359f) {
+        x -= 6.28318530718f;
+    } else if (x < -3.14159265359f) {
+        x += 6.28318530718f;
+    }
+
+    x2 = x * x;
+    term = x;
+    sum = x;
+
+    /* x - x^3/3! + x^5/5! - ... ; 9 terms is well inside fp32 for |x|<=pi */
+    for (i = 1; i < 9; i++) {
+        term = -term * x2 / (float)((2 * i) * (2 * i + 1));
+        sum += term;
+    }
+
+    return sum;
+}
+
+/**
+ * tanf - Tangent
+ * @x: Angle in radians
+ *
+ * Returns: tan(x)
+ *
+ * Declared in kernel/include/math.h and never defined anywhere in the tree, so
+ * every caller was an unresolved symbol at link time -- which a per-file
+ * compile cannot detect. sinf() and cosf() below already exist.
+ *
+ * Evaluated as sin(x)/cos(x). cos(x) is zero at pi/2, so a guard returns a
+ * saturated value rather than dividing by zero and producing an infinity or a
+ * NaN that would propagate silently through a caller's arithmetic.
+ */
+float tanf(float x)
+{
+    float s = sinf(x);
+    float c = cosf(x);
+
+    /* |cos| < 1e-6 around the poles. */
+    if (c < 0.000001f && c > -0.000001f) {
+        return (s < 0.0f) ? -3.4e38f : 3.4e38f;
+    }
+
+    return s / c;
+}
+
+/**
+ * cosf - Cosine
+ * @x: Angle in radians
+ *
+ * Returns: cos(x) = sin(x + pi/2)
+ */
+float cosf(float x)
+{
+    return sinf(x + 1.57079632679f);
+}
+
+/**
+ * atanf - Arctangent
+ * @x: Value
+ *
+ * Returns: atan(x) in radians
+ *
+ * Two range reductions: |x|>1 uses atan(x) = pi/2 - atan(1/x), and |x|>0.4142
+ * uses the half-angle identity atan(x) = 2*atan(x/(1+sqrt(1+x^2))), which puts
+ * the series argument inside its fast-converging region.
+ */
+float atanf(float x)
+{
+    float sign = 1.0f;
+    float sum, term, x2;
+    int i;
+
+    if (x < 0.0f) {
+        x = -x;
+        sign = -1.0f;
+    }
+
+    if (x > 1.0f) {
+        return sign * (1.57079632679f - atanf(1.0f / x));
+    }
+
+    if (x > 0.41421356f) {
+        return sign * 2.0f * atanf(x / (1.0f + sqrtf(1.0f + x * x)));
+    }
+
+    x2 = x * x;
+    term = x;
+    sum = x;
+
+    /* atan(x) = x - x^3/3 + x^5/5 - ... */
+    for (i = 1; i < 12; i++) {
+        term = -term * x2;
+        sum += term / (float)(2 * i + 1);
+    }
+
+    return sign * sum;
+}
+
+/**
+ * atan2f - Two-argument arctangent
+ * @y: Numerator
+ * @x: Denominator
+ *
+ * Returns: Angle in radians in [-pi, pi]
+ *
+ * Four-quadrant result; atanf alone only covers [-pi/2, pi/2].
+ */
+float atan2f(float y, float x)
+{
+    if (x > 0.0f) {
+        return atanf(y / x);
+    }
+
+    if (x < 0.0f) {
+        return (y >= 0.0f) ? (atanf(y / x) + 3.14159265359f)
+                           : (atanf(y / x) - 3.14159265359f);
+    }
+
+    /* x == 0 */
+    if (y > 0.0f) {
+        return 1.57079632679f;
+    }
+    if (y < 0.0f) {
+        return -1.57079632679f;
+    }
+
+    return 0.0f;    /* both zero: undefined, choose 0 */
+}
+
+/**
+ * asinf - Arcsine
+ * @x: Value in [-1, 1]
+ *
+ * Returns: asin(x) in radians, or 0 if out of range
+ *
+ * asin(x) = atan2(x, sqrt(1 - x^2)), which inherits atan2f's quadrant
+ * handling and needs no series of its own.
+ */
+float asinf(float x)
+{
+    if (x > 1.0f) {
+        x = 1.0f;
+    } else if (x < -1.0f) {
+        x = -1.0f;
+    }
+
+    return atan2f(x, sqrtf(1.0f - x * x));
+}
+
+/**
+ * acosf - Arccosine
+ * @x: Value in [-1, 1]
+ *
+ * Returns: acos(x) in radians, or 0 if out of range
+ *
+ * Declared in kernel/include/math.h and never defined, like tanf() above;
+ * asinf() has existed all along. Supplied identity:
+ *
+ *   acos(x) = pi/2 - asin(x)
+ *
+ * which shares asinf's clamping and quadrant behaviour instead of introducing
+ * a second series with its own edge cases.
+ */
+float acosf(float x)
+{
+    return 1.57079632679f - asinf(x);
+}
+
+/**
+ * copysignf - Magnitude of x with the sign of y
+ * @x: Value supplying the magnitude
+ * @y: Value supplying the sign
+ *
+ * Returns: |x| with y's sign
+ */
+float copysignf(float x, float y)
+{
+    float ax = (x < 0.0f) ? -x : x;
+
+    /* Treat -0.0f as negative too: its sign bit is set even though it compares
+     * equal to 0.0f, which is what IEEE copysign does. */
+    if (y < 0.0f) {
+        return -ax;
+    }
+
+    return ax;
+}

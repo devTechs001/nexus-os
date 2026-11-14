@@ -12,6 +12,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <limits.h>
+#include "../../userspace/include/stdlib.h"
+#include "../../userspace/include/stdio.h"
+#include "../../userspace/include/string.h"
+#include "../../userspace/include/math.h"
 
 /*===========================================================================*/
 /*                         TYPE DEFINITIONS                                  */
@@ -1048,7 +1052,6 @@ double strtod(const char *nptr, char **endptr)
     double result = 0.0;
     double fraction = 1.0;
     bool negative = false;
-    bool in_fraction = false;
     int exponent = 0;
     bool exp_negative = false;
 
@@ -1074,7 +1077,6 @@ double strtod(const char *nptr, char **endptr)
     /* Convert fraction part */
     if (*p == '.') {
         p++;
-        in_fraction = true;
 
         while (*p >= '0' && *p <= '9') {
             fraction /= 10.0;

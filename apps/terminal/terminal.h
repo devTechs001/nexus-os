@@ -339,6 +339,17 @@ int terminal_app_run(terminal_app_t *app);
 int terminal_app_shutdown(terminal_app_t *app);
 bool terminal_app_is_running(terminal_app_t *app);
 
+/*
+ * GUI entry points.
+ *
+ * The terminal was fully implemented and completely unreachable: no caller,
+ * no render loop and no input path from the window manager. These three give
+ * the desktop a way to start it, paint it and type into it.
+ */
+int  terminal_gui_start(void);
+int  terminal_gui_render(void);
+int  terminal_gui_input(const char *text, u32 length);
+
 /* Window management */
 terminal_window_t *terminal_create_window(terminal_app_t *app, terminal_profile_t *profile);
 int terminal_close_window(terminal_app_t *app, terminal_window_t *win);

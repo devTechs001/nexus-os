@@ -163,6 +163,11 @@ typedef struct encrypted_device {
     u64 decrypt_operations;       /* Decrypt Operations */
     u64 encrypt_bytes;            /* Encrypted Bytes */
     u64 decrypt_bytes;            /* Decrypted Bytes */
+    /* Failed operations. A disk-encryption layer that cannot report a failed
+     * write as failed is worse than one that does not encrypt at all, because
+     * the caller has no way to tell the two apart. */
+    u64 encrypt_failures;         /* Failed encrypt operations */
+    u64 decrypt_failures;         /* Failed decrypt operations */
     u64 failed_attempts;          /* Failed Attempts */
     
     /* Timing */
@@ -192,6 +197,13 @@ typedef struct {
     /* Devices */
     encrypted_device_t *devices;  /* Device List */
     u32 device_count;             /* Device Count */
+
+    /*
+     * Protection lock. Seven call sites take this around walks of the device
+     * list, but the field did not exist - so the file did not compile, and
+     * until it does the list is unguarded against concurrent add/remove.
+     */
+    spinlock_t lock;
     
     /* Default Settings */
     u32 default_cipher;           /* Default Cipher */

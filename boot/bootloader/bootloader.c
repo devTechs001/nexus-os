@@ -6,11 +6,45 @@
  *
  * This is the second-stage bootloader for NEXUS OS.
  * It runs in 32-bit protected mode and loads the kernel.
+ *
+ * STATUS: partial. The descriptor-table setup, the memory-map handoff and the
+ * control flow are here and correct, but two pieces are missing and cannot be
+ * written in this translation unit:
+ *
+ *   1. A 16-bit real-mode entry stub. INT 13h (disk) and INT 15h (memory) are
+ *      real-mode BIOS interfaces; this file is compiled into a 64-bit object
+ *      where %bx/%es do not exist and no `int $0x13` can be issued. The
+ *      corresponding functions now report failure instead of pretending to
+ *      have done the work.
+ *   2. The paging setup that a 64-bit kernel requires before it is entered.
+ *
+ * It does not currently assert the kernel is loadable, so treat it as a
+ * scaffold: bootloader_main() will halt with "Kernel load failed" rather than
+ * jumping into an unread buffer.
  */
 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+
+/*
+ * Stage 2 runs before the kernel exists and must not pull in kernel/include,
+ * so it declares its own fixed-width names. The file used u8/u16/u32/u64
+ * throughout (and kfree/kmalloc/snprintf at the call sites) without ever
+ * defining them or including anything that does -- every one of the 94 errors
+ * in this file was a consequence of that single omission.
+ *
+ * stdint.h's exact-width types are the right basis; these are aliases only so
+ * the existing code reads unchanged.
+ */
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t   s8;
+typedef int16_t  s16;
+typedef int32_t  s32;
+typedef int64_t  s64;
 
 /*===========================================================================*/
 /*                         BOOTLOADER CONFIGURATION                          */
@@ -72,10 +106,16 @@ typedef struct {
     u8  base_high;
 } __attribute__((packed)) gdt_entry_t;
 
-/* GDT Pointer */
+/* GDT Pointer
+ *
+ * The base is a linear address. Declaring it u32 truncated a 64-bit pointer
+ * and was the source of every "cast from pointer to integer of different size"
+ * warning in this file; uintptr_t is the type that is actually wide enough for
+ * whatever mode the descriptor table lives in.
+ */
 typedef struct {
     u16 limit;
-    u32 base;
+    uintptr_t base;
 } __attribute__((packed)) gdt_ptr_t;
 
 /* IDT Entry */
@@ -90,7 +130,7 @@ typedef struct {
 /* IDT Pointer */
 typedef struct {
     u16 limit;
-    u32 base;
+    uintptr_t base;
 } __attribute__((packed)) idt_ptr_t;
 
 /*===========================================================================*/
@@ -108,8 +148,10 @@ static u32 initrd_size = 0;
 /*                         EXTERNAL ASSEMBLY FUNCTIONS                       */
 /*===========================================================================*/
 
-extern void gdt_flush(u32 gdt_ptr);
-extern void idt_flush(u32 idt_ptr);
+/* The flush stubs take the address of the descriptor-table pointer. That
+ * address is pointer-sized, not u32. */
+extern void gdt_flush(uintptr_t gdt_ptr);
+extern void idt_flush(uintptr_t idt_ptr);
 extern void enable_paging(u32 page_directory);
 extern void disable_interrupts(void);
 extern void enable_interrupts(void);
@@ -306,7 +348,7 @@ static void gdt_set_gate(u32 num, u32 base, u32 limit, u8 access, u8 gran)
 static void gdt_init(void)
 {
     gdt_ptr.limit = sizeof(gdt) - 1;
-    gdt_ptr.base = (u32)&gdt;
+    gdt_ptr.base = (uintptr_t)&gdt;
 
     /* Null segment */
     gdt_set_gate(0, 0, 0, 0, 0);
@@ -324,7 +366,7 @@ static void gdt_init(void)
     gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF);
 
     /* Load GDT */
-    gdt_flush((u32)&gdt_ptr);
+    gdt_flush((uintptr_t)&gdt_ptr);
 }
 
 /*===========================================================================*/
@@ -353,7 +395,7 @@ static void idt_set_gate(u8 num, u32 base, u16 selector, u8 type_attr)
 static void idt_init(void)
 {
     idt_ptr.limit = sizeof(idt) - 1;
-    idt_ptr.base = (u32)&idt;
+    idt_ptr.base = (uintptr_t)&idt;
 
     /* Clear IDT */
     for (u32 i = 0; i < 256; i++) {
@@ -361,7 +403,7 @@ static void idt_init(void)
     }
 
     /* Load IDT */
-    idt_flush((u32)&idt_ptr);
+    idt_flush((uintptr_t)&idt_ptr);
 }
 
 /*===========================================================================*/
@@ -369,59 +411,64 @@ static void idt_init(void)
 /*===========================================================================*/
 
 /**
- * disk_read_sectors - Read sectors using BIOS INT 13h
+ * disk_read_sectors - Read sectors from the boot disk
+ * @lba: Starting logical block address
+ * @count: Number of 512-byte sectors
+ * @buffer: Destination
+ *
+ * Returns: true on success, false on failure
+ *
+ * The body of this function was a single inline-asm block that could not be
+ * correct. It referenced %7 with only six operands supplied ("operand number
+ * out of range", the only error GCC still reported in this file), it pushed
+ * %ebx and then clobbered it in the same block, and it programmed %es:bx for
+ * the transfer buffer without ever setting %es from `buf` -- so even had it
+ * assembled, INT 13h would have read into segment 0x1000 at whatever offset
+ * %bx happened to hold. It is also a real-mode BIOS interface emitted into a
+ * 64-bit object, where %bx and %es are not general-purpose registers.
+ *
+ * INT 13h cannot be issued from here. It has to come from a 16-bit real-mode
+ * stub, which is the missing piece of this bootloader. Until that stub exists,
+ * this reports failure: a boot loader that claims to have read a sector it
+ * never read will happily load the stale contents of the buffer as a kernel.
  */
 static bool disk_read_sectors(u32 lba, u32 count, void *buffer)
 {
-    u8 *buf = (u8 *)buffer;
-    u32 sector = lba;
-    u32 remaining = count;
+    (void)buffer;
 
-    while (remaining > 0) {
-        u32 to_read = (remaining > 128) ? 128 : remaining;
-        u32 cylinder, head, sector_num;
+    /*
+     * LBA-to-CHS conversion is retained because it is correct and the stub
+     * will need it; it is not dead code, it is the part of the interface that
+     * was right.
+     */
+    {
+        u32 sector = lba;
+        u32 remaining = count;
 
-        /* Convert LBA to CHS */
-        cylinder = sector / (255 * 63);
-        head = (sector % (255 * 63)) / 63;
-        sector_num = (sector % 63) + 1;
+        while (remaining > 0) {
+            u32 to_read = (remaining > 128) ? 128 : remaining;
+            u32 cylinder;
+            u32 head;
+            u32 sector_num;
 
-        /* BIOS call */
-        __asm__ volatile(
-            "push %%ebx\n"
-            "push %%edi\n"
-            "mov $0x02, %%ah\n"       /* AH = 02h - Read sectors */
-            "mov %3, %%al\n"          /* AL = sectors to read */
-            "mov %4, %%ch\n"          /* CH = cylinder low */
-            "mov %5, %%dh\n"          /* DH = head */
-            "mov %6, %%cl\n"          /* CL = sector */
-            "mov $0x80, %%dl\n"       /* DL = drive 0x80 */
-            "mov %7, %%bx\n"          /* BX = buffer offset */
-            "mov $0x1000, %%es\n"     /* ES = buffer segment */
-            "int $0x13\n"
-            "jc 1f\n"
-            "mov $0, %%eax\n"
-            "jmp 2f\n"
-            "1: mov $1, %%eax\n"
-            "2: pop %%edi\n"
-            "pop %%ebx\n"
-            : "=a"(remaining)
-            : "m"(to_read), "m"(cylinder), "m"(head), "m"(sector_num),
-              "m"(buf), "m"(remaining)
-            : "ecx", "edx", "esi", "edi", "ebx"
-        );
+            cylinder   = sector / (255 * 63);
+            head       = (sector % (255 * 63)) / 63;
+            sector_num = (sector % 63) + 1;
 
-        /* Check for error */
-        __asm__ volatile("jc 1f" ::: "memory");
+            if (cylinder > 1023) {
+                /* Beyond the CHS limit; the stub must use LBA extensions. */
+                return false;
+            }
 
-        buf += to_read * SECTOR_SIZE;
-        sector += to_read;
-        remaining -= to_read;
+            (void)cylinder;
+            (void)head;
+            (void)sector_num;
+
+            sector += to_read;
+            remaining -= to_read;
+        }
     }
 
-    return true;
-
-error:
     return false;
 }
 
@@ -434,6 +481,11 @@ error:
  */
 static void detect_memory_e820(void)
 {
+    /*
+     * E820 entry layout, and the buffer the real-mode stub will fill in.
+     * Referenced here so the handoff contract is visible from this side; it is
+     * written by the stub, not by this function.
+     */
     struct {
         u32 base_low;
         u32 base_high;
@@ -442,52 +494,33 @@ static void detect_memory_e820(void)
         u32 type;
     } __attribute__((packed)) entry;
 
+    (void)entry;
+
     u32 signature = 0x534D4150;  /* "SMAP" */
     u32 continuation = 0;
     u32 entries = 0;
 
     vga_print("  Detecting memory (E820)...\n");
 
-    do {
-        __asm__ volatile(
-            "push %%ebx\n"
-            "push %%ecx\n"
-            "push %%edx\n"
-            "push %%esi\n"
-            "push %%edi\n"
-            "mov $0xE820, %%eax\n"
-            "mov $0x534D4150, %%edx\n"
-            "mov $24, %%ecx\n"
-            "mov %3, %%ebx\n"
-            "lea %1, %%edi\n"
-            "int $0x15\n"
-            "jc 1f\n"
-            "cmp $0x534D4150, %%edx\n"
-            "jne 1f\n"
-            "mov $0, %%eax\n"
-            "jmp 2f\n"
-            "1: mov $1, %%eax\n"
-            "2: pop %%edi\n"
-            "pop %%esi\n"
-            "pop %%edx\n"
-            "pop %%ecx\n"
-            "pop %%ebx\n"
-            : "=a"(continuation), "=m"(entry)
-            : "m"(signature), "m"(continuation)
-            : "ebx", "ecx", "edx", "esi", "edi"
-        );
+    /*
+     * INT 15h E820 cannot be issued from here.
+     *
+     * The block that used to sit in this loop pushed %ebx/%ecx/%edx/%esi/%edi
+     * and programmed %edi with a linear address -- real-mode register usage,
+     * emitted into a 64-bit object where those pushes are operand-size
+     * mismatches and `int $0x15` is not a callable interface. The assembler
+     * rejected every one of them ("operand size mismatch for push"), which is
+     * why this file produced no object at all despite compiling cleanly.
+     *
+     * E820 has to be queried from the 16-bit real-mode entry stub and the
+     * results handed over; see the STATUS note at the top of the file. The
+     * loop is retained so the handoff point is obvious, and it records nothing
+     * rather than recording invented memory.
+     */
+    (void)signature;
+    (void)continuation;
 
-        if (continuation == 0 && entry.type != 0) {
-            if (entries < 64) {
-                memory_map[entries].base_low = entry.base_low;
-                memory_map[entries].base_high = entry.base_high;
-                memory_map[entries].length_low = entry.length_low;
-                memory_map[entries].length_high = entry.length_high;
-                memory_map[entries].type = entry.type;
-                entries++;
-            }
-        }
-    } while (continuation != 0);
+    entries = 0;
 
     memory_map_count = entries;
     boot_params.memory_map_entries = entries;
@@ -504,19 +537,18 @@ static u32 detect_memory_simple(void)
 {
     u32 ext_mem = 0;
 
-    /* Get extended memory size (INT 15h AX=E801h) */
-    __asm__ volatile(
-        "mov $0xE801, %%ax\n"
-        "int $0x15\n"
-        "jc 1f\n"
-        "mov %%ax, %0\n"
-        "1:\n"
-        : "=r"(ext_mem)
-        :
-        : "eax", "ebx", "ecx", "edx"
-    );
+    /*
+     * INT 15h AX=E801h, for the same reason as E820 above: it is a real-mode
+     * BIOS call and cannot be made from a 64-bit translation unit. The inline
+     * asm that used to be here also used %ax (no such register) and `jc 1f`
+     * with no reachable label 1.
+     *
+     * Report zero so the caller's fallback chain can tell that detection did
+     * not happen; do not invent a size.
+     */
+    (void)ext_mem;
 
-    return ext_mem * 1024;  /* Convert to bytes */
+    return 0;
 }
 
 /*===========================================================================*/
@@ -613,7 +645,11 @@ static void setup_boot_params(void)
     for (u32 i = 0; cmdline[i] && i < 511; i++) {
         boot_params.cmdline[i] = cmdline[i];
     }
-    boot_params.cmdline_offset = (u32)boot_params.cmdline;
+    /* cmdline_offset is an offset, but the field was being loaded with a
+     * 64-bit address. The kernel receives a flat physical address for the
+     * boot_params structure and adds the offset, so this has to be the
+     * pointer-sized value. */
+    boot_params.cmdline_offset = (u32)(uintptr_t)boot_params.cmdline;
 }
 
 /*===========================================================================*/
@@ -625,38 +661,56 @@ static void setup_boot_params(void)
  */
 static void enter_protected_mode(void)
 {
-    vga_print("Entering protected mode...\n");
+    u32 cr0;
 
-    /* Disable interrupts */
+    vga_print("Preparing protected-mode entry...\n");
+
     disable_interrupts();
 
-    /* Initialize GDT */
     gdt_init();
 
-    /* Enable protected mode (set PE bit in CR0) */
-    u32 cr0 = get_cr0();
-    cr0 |= 0x00000001;  /* Set PE bit */
+    /*
+     * Set CR0.PE.
+     *
+     * The far jump that used to follow this (`jmp $0x08, $.flush`) does not
+     * encode in a 64-bit object: a far jump with an immediate selector is a
+     * legacy-mode instruction, and the assembler rejected it with "unsupported
+     * instruction `jmp'". The mode switch and the CS reload it performs both
+     * belong to the 16-bit stub -- from this translation unit there is no
+     * instruction that can enter or leave 32-bit protected mode.
+     *
+     * CR0.PE is still set here because that much is valid, and the descriptor
+     * tables the kernel inherits are then in place.
+     */
+    cr0 = get_cr0();
+    cr0 |= 0x00000001;  /* PE */
 
-    __asm__ volatile(
-        "mov %0, %%cr0\n"
-        "jmp $0x08, $.flush\n"
-        ".flush:\n"
-        :
-        : "r"(cr0)
-        : "memory"
-    );
+    /* There was a set_cr0() call here; no such function was ever declared or
+     * defined. Writing CR0 is a single instruction. */
+    /*
+     * "mov %0, %%cr0" with a u32 operand fails to assemble: CR0 has no
+     * 32-bit-register move form in 64-bit mode. Widening the value to 64 bits
+     * selects the valid encoding.
+     */
+    __asm__ volatile("mov %0, %%cr0" : : "r"((u64)cr0) : "memory");
 
-    /* Setup data segments */
+    /*
+     * Reload the data segment registers from the flat 0x10 descriptor. In
+     * 64-bit mode DS/ES/FS/GS/SS are ignored for addressing but must still be
+     * valid, and leaving them pointing at real-mode segments is not allowed.
+     */
+    /* Segment registers take a 16-bit operand; go through %ax, which is the
+     * form the assembler accepts. */
     __asm__ volatile(
-        "mov $0x10, %%ax\n"
+        "mov %w0, %%ax\n"
         "mov %%ax, %%ds\n"
         "mov %%ax, %%es\n"
         "mov %%ax, %%fs\n"
         "mov %%ax, %%gs\n"
         "mov %%ax, %%ss\n"
         :
-        :
-        : "ax"
+        : "r"((u32)0x10)
+        : "eax", "memory"
     );
 
     vga_print("Protected mode enabled.\n");
@@ -687,17 +741,49 @@ void bootloader_main(void)
 
     vga_set_color(0x07, 0x00);  /* Light gray on black */
 
-    /* Initialize GDT */
+    /*
+     * Initialize GDT and IDT, then actually enter protected mode.
+     *
+     * enter_protected_mode() was defined and never called, so the sequence
+     * stayed in whatever mode it was handed, with a GDT loaded but CR0.PE
+     * still clear. Every subsequent 32-bit descriptor-relative access then
+     * ran under real-mode segmentation.
+     */
     vga_print("Initializing GDT...\n");
     gdt_init();
 
-    /* Initialize IDT */
     vga_print("Initializing IDT...\n");
     idt_init();
+
+    enter_protected_mode();
 
     /* Detect memory */
     vga_print("Detecting memory...\n");
     detect_memory_e820();
+
+    /*
+     * E820 is not guaranteed to produce anything -- some BIOSes return
+     * nothing, and this build cannot issue the call at all (see
+     * disk_read_sectors()). Fall back to the INT 15h AX=E801h size, which is
+     * why detect_memory_simple() was written; it had no caller, so a machine
+     * with no E820 map booted with memory_map_count == 0 and the kernel would
+     * believe the system had no usable RAM.
+     */
+    if (memory_map_count == 0) {
+        u32 ext_bytes = detect_memory_simple();
+
+        if (ext_bytes > 0) {
+            memory_map[0].base_low = 0x100000;
+            memory_map[0].base_high = 0;
+            memory_map[0].length_low = ext_bytes;
+            memory_map[0].length_high = 0;
+            memory_map[0].type = MEM_AVAILABLE;
+            memory_map_count = 1;
+            boot_params.memory_map_entries = 1;
+
+            vga_print("  E820 unavailable, using E801 fallback\n");
+        }
+    }
 
     /* Load kernel */
     vga_print("Loading kernel...\n");

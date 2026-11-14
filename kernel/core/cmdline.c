@@ -112,6 +112,26 @@ void parse_boot_params(const char *cmdline)
             g_boot_params.vm_manager = true;
             printk("[BOOT] Virtualization Manager will start after boot\n");
         }
+        else if (strcmp(token, "terminal") == 0) {
+            /*
+             * Start the Terminal instead of dropping straight to the desktop.
+             * The terminal, shell and cell renderer were all implemented and
+             * had no entry point at all, so this is the only way to reach
+             * them on a system whose desktop has no command parser yet.
+             */
+            g_boot_params.terminal = true;
+            printk("[BOOT] Terminal will start after boot\n");
+        }
+        else if (strcmp(token, "nested_virt") == 0) {
+            /*
+             * Opt in to probing and enabling nested virtualization. Off by
+             * default: VMXON is only safe once firmware has set the
+             * IA32_FEATURE_CONTROL lock bit, and there is no reason to touch
+             * the VMX state on a machine that has no use for it.
+             */
+            g_boot_params.nested_virt = true;
+            printk("[BOOT] Nested virtualization will be probed\n");
+        }
         else if (strncmp(token, "loglevel=", 9) == 0) {
             printk("[BOOT] Log level set to %s\n", token + 9);
         }

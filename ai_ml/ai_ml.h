@@ -353,6 +353,8 @@ int npu_allocate_memory(size_t size, void **ptr);
 int npu_free_memory(void *ptr);
 int npu_copy_to_device(void *dst, const void *src, size_t size);
 int npu_copy_from_device(void *dst, const void *src, size_t size);
+int npu_execute(u32 command, u32 data);
+int npu_wait_idle(u32 timeout_ms);
 
 /* Tensor operations */
 tensor_t *tensor_create(const char *name, u32 ndim, const u32 *shape, u32 dtype);
@@ -398,6 +400,21 @@ nn_model_t *model_create_resnet(const char *name, u32 depth);
 nn_model_t *model_create_transformer(const char *name, u32 d_model, u32 n_heads, u32 n_layers);
 nn_model_t *model_create_yolo(const char *name, u32 num_classes);
 nn_model_t *model_create_bert(const char *name, u32 hidden_size, u32 n_layers);
+
+/* CNN inference (ai_ml/models/cnn.c). None of these were declared anywhere, so
+ * no translation unit could reach the CNN path even by hand. */
+int cnn_predict(nn_model_t *model, tensor_t *input, tensor_t **output);
+int cnn_preprocess_image(const void *image, u32 width, u32 height, u32 channels,
+                         tensor_t *output, bool normalize);
+int cnn_get_prediction(tensor_t *output, u32 top_k, u32 *indices,
+                       float *probabilities);
+
+/* Transformer inference (ai_ml/models/transformer.c). transformer_forward()
+ * held the whole encoder pass and was private with no caller. */
+int transformer_predict(nn_model_t *model, tensor_t *input, tensor_t **output);
+int transformer_generate(nn_model_t *model, u32 *input_ids, u32 input_len,
+                         u32 max_length, u32 *output_ids);
+void transformer_set_training_mode(nn_model_t *model, bool training);
 
 /* Utility functions */
 const char *ai_ml_get_version(void);

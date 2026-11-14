@@ -77,8 +77,7 @@ nn_model_t *model_create_cnn(const char *name, u32 num_classes)
     /* Build CNN architecture: Simple 8-layer CNN */
     
     /* Layer 1: Conv2D 3->32, kernel=3, stride=1, padding=1 */
-    layer = layer_create_conv2d(3, 32, 3, 1, 1);
-    layer->activation = ACTIVATION_RELU;
+    layer = create_conv_block(3, 32, 3, 1, false, ACTIVATION_RELU);
     snprintf(layer->name, sizeof(layer->name), "conv1");
     model_add_layer(model, layer);
 
@@ -88,8 +87,7 @@ nn_model_t *model_create_cnn(const char *name, u32 num_classes)
     model_add_layer(model, layer);
 
     /* Layer 3: Conv2D 32->64, kernel=3, stride=1, padding=1 */
-    layer = layer_create_conv2d(32, 64, 3, 1, 1);
-    layer->activation = ACTIVATION_RELU;
+    layer = create_conv_block(32, 64, 3, 1, false, ACTIVATION_RELU);
     snprintf(layer->name, sizeof(layer->name), "conv2");
     model_add_layer(model, layer);
 
@@ -99,8 +97,7 @@ nn_model_t *model_create_cnn(const char *name, u32 num_classes)
     model_add_layer(model, layer);
 
     /* Layer 5: Conv2D 64->128, kernel=3, stride=1, padding=1 */
-    layer = layer_create_conv2d(64, 128, 3, 1, 1);
-    layer->activation = ACTIVATION_RELU;
+    layer = create_conv_block(64, 128, 3, 1, false, ACTIVATION_RELU);
     snprintf(layer->name, sizeof(layer->name), "conv3");
     model_add_layer(model, layer);
 
@@ -110,8 +107,7 @@ nn_model_t *model_create_cnn(const char *name, u32 num_classes)
     model_add_layer(model, layer);
 
     /* Layer 7: Conv2D 128->256, kernel=3, stride=1, padding=1 */
-    layer = layer_create_conv2d(128, 256, 3, 1, 1);
-    layer->activation = ACTIVATION_RELU;
+    layer = create_conv_block(128, 256, 3, 1, false, ACTIVATION_RELU);
     snprintf(layer->name, sizeof(layer->name), "conv4");
     model_add_layer(model, layer);
 
@@ -352,10 +348,27 @@ static nn_layer_t *create_conv_block(u32 in_ch, u32 out_ch, u32 kernel,
                                       u32 stride, bool use_bn, u32 activation)
 {
     nn_layer_t *layer;
-    
+    nn_layer_t *bn;
+
     layer = layer_create_conv2d(in_ch, out_ch, kernel, stride, kernel / 2);
+    if (!layer) {
+        return NULL;
+    }
+
     layer->activation = activation;
-    
+
+    /*
+     * use_bn was a parameter of a function nobody called, so the batch-norm
+     * branch never existed: every "conv block" in this file was a bare conv.
+     * Append a normalisation layer to the block's chain when asked for.
+     */
+    if (use_bn) {
+        bn = layer_create_bn(out_ch);
+        if (bn) {
+            layer->next = bn;
+        }
+    }
+
     return layer;
 }
 
@@ -396,6 +409,39 @@ static int cnn_forward(nn_model_t *model, tensor_t *input)
 
     /* Run inference */
     return inference_run(model, &input, 1, model->outputs, model->num_outputs);
+}
+
+/**
+ * cnn_predict - Run a single input through a built CNN
+ * @model: Model built by model_create_cnn()/resnet()/yolo()
+ * @input: Preprocessed input tensor
+ * @output: Receives the model's output tensor
+ *
+ * Returns: 0 on success, negative error code on failure
+ *
+ * cnn_forward() below is the only place inference_run() is called for a CNN,
+ * and nothing ever called it: the model builders returned a model that no code
+ * could run. This is the missing public entry point.
+ */
+int cnn_predict(nn_model_t *model, tensor_t *input, tensor_t **output)
+{
+    int ret;
+
+    if (!model || !input || !output) {
+        return -EINVAL;
+    }
+
+    if (model->num_outputs == 0 || !model->outputs[0]) {
+        return -EINVAL;
+    }
+
+    ret = cnn_forward(model, input);
+    if (ret != 0) {
+        return ret;
+    }
+
+    *output = model->outputs[0];
+    return 0;
 }
 
 /*===========================================================================*/

@@ -39,6 +39,15 @@
 #define STORAGE_TYPE_EXTERNAL       5
 #define STORAGE_TYPE_RAID           6
 #define STORAGE_TYPE_VIRTUAL        7
+/*
+ * eMMC.
+ *
+ * storage-manager.c distinguishes CARD_TYPE_EMMC from other SD/MMC media when
+ * naming a device and classifying it, but this constant was never defined, so
+ * the file could not compile. drivers/storage/emmc.c has supported the device
+ * class all along.
+ */
+#define STORAGE_TYPE_EMMC           8
 
 /*===========================================================================*/
 /*                         FILESYSTEM TYPES                                  */
@@ -265,7 +274,16 @@ typedef struct {
 /**
  * Storage Manager State
  */
-typedef struct {
+/*
+ * The struct needs a tag.
+ *
+ * It was an anonymous `typedef struct { ... } storage_manager_t;` whose own
+ * callback members were declared to take `struct storage_manager *` - a type
+ * that did not exist. Each one produced a local, incomplete struct scoped to
+ * the member declaration, so the function pointers had the wrong type and the
+ * compiler could not check them against the handlers actually assigned.
+ */
+typedef struct storage_manager {
     bool initialized;             /* Is Initialized */
     bool monitoring_active;       /* Is Monitoring Active */
     

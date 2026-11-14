@@ -546,6 +546,16 @@ void detect_virtualization(void)
     } else if (strcmp(hypervisor_sig, "Microsoft Hv") == 0) {
         kernel_state.is_hyperv = true;
         strcpy(kernel_state.virt_mode, "hyperv");
+    } else if (strcmp(hypervisor_sig, "KVMKVMKVM") == 0 ||
+               strncmp(hypervisor_sig, "TCGTCGTCG", 9) == 0) {
+        /*
+         * QEMU reports "KVMKVMKVM" under KVM and "TCGTCGTCGTCG" without it
+         * (pure software emulation). The TCG case used to fall through to the
+         * CPUID-vendor fallback below and end up as "native", so is_qemu was
+         * never set in the configuration "make run" actually uses.
+         */
+        kernel_state.is_qemu = true;
+        strcpy(kernel_state.virt_mode, "qemu");
     } else {
         /* Check for QEMU by CPUID vendor string */
         __asm__ __volatile__(
@@ -597,11 +607,33 @@ void kernel_start_scheduler(void)
     /* Start the scheduler - this should never return for idle */
     scheduler_start();
 
-    /* If we get here, we're running on idle thread - halt */
-    printk("[WARN] Scheduler returned to idle (should not happen)\n");
+    /*
+     * scheduler_start() initializes the run queue and returns; the boot thread
+     * is not a task, so nothing would ever switch away from it. Enter the
+     * scheduler explicitly.
+     *
+     * This used to fall straight into `arch_halt_cpu()`, which is `cli; hlt` -
+     * it stopped the CPU with interrupts disabled, so the timer could not even
+     * fire, scheduler_tick() was never called, and no task ever ran. The GUI
+     * task, the init task and the service manager were all queued and none of
+     * them ever got a timeslice.
+     *
+     * scheduler_enter_from_boot() makes the boot thread the current task and
+     * switches into the idle task, which halts with interrupts enabled and
+     * picks up whatever is runnable.
+     */
+    printk("[INFO] Entering the scheduler\n");
+    extern void scheduler_enter_from_boot(void);
+    scheduler_enter_from_boot();
 
+    /*
+     * Reaching here means there was no runnable task and no valid context to
+     * resume. Idle with interrupts enabled so the system keeps ticking rather
+     * than locking up with interrupts off.
+     */
+    printk("[WARN] Scheduler returned to the boot thread\n");
     for (;;) {
-        arch_halt_cpu();
+        __asm__ __volatile__("sti; hlt");
     }
 }
 

@@ -32,6 +32,17 @@
 #define BPF_RET                 0x06
 #define BPF_MISC                0x07
 
+/*
+ * BPF operand sizes.
+ *
+ * bpf_load() documents its @size parameter as BPF_W / BPF_H / BPF_B and the
+ * program builder passes BPF_W, but none of the three was ever defined - the
+ * file could not compile. These are the standard classic-BPF size encodings.
+ */
+#define BPF_W                   0x00    /* 32-bit word  */
+#define BPF_H                   0x08    /* 16-bit half  */
+#define BPF_B                   0x10    /*  8-bit byte  */
+
 /* BPF Load Sources */
 #define BPF_IMM                 0x00
 #define BPF_ABS                 0x20

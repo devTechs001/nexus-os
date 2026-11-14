@@ -20,6 +20,8 @@
 
 static struct {
     bool initialized;
+    /* Re-entrancy guard for the fusion update; see sensor_hub_process_event() */
+    bool fusion_in_progress;
     
     /* Sensors */
     sensor_config_t sensors[MAX_SENSORS];
@@ -48,6 +50,8 @@ static struct {
         float quaternion[4];      /* Orientation quaternion */
         float gravity[3];         /* Gravity vector */
         float linear_accel[3];    /* Linear acceleration */
+        float magnetic_heading;   /* Tilt-compensated heading, radians */
+        bool heading_valid;       /* magnetic_heading has been computed */
         u64 last_update;
     } fusion_state;
     
@@ -71,6 +75,9 @@ static struct {
 /*===========================================================================*/
 
 static int sensor_hub_register_sensor(sensor_config_t *config);
+static void sensor_hub_register_default_sensors(void);
+static void generate_simulated_sensor_data(sensor_config_t *sensor,
+                                           sensor_event_t *event);
 static void sensor_hub_process_event(u32 sensor_id, sensor_event_t *event);
 static void sensor_hub_update_fusion(void);
 static float quaternion_to_euler_yaw(float w, float x, float y, float z);
@@ -152,7 +159,7 @@ static void sensor_hub_register_default_sensors(void)
     /* Accelerometer */
     memset(&config, 0, sizeof(config));
     config.sensor_id = 1;
-    strncpy(config.name, "BMI260 Accelerometer", MAX_SENSOR_NAME_LEN - 1);
+    strncpy(config.name, "BMI260 Accelerometer", sizeof(config.name) - 1);
     strncpy(config.vendor, "Bosch", sizeof(config.vendor) - 1);
     config.type = SENSOR_TYPE_ACCELEROMETER;
     config.version = 1;
@@ -161,12 +168,20 @@ static void sensor_hub_register_default_sensors(void)
     config.power_ma = 0.15f;
     config.min_delay_us = 2500;  /* 400 Hz */
     config.fifo_max = 1024;
-    g_sensor_hub.sensors[g_sensor_hub.num_sensors++] = config;
+    /*
+     * Go through the checked helper. The default path used to write straight
+     * into the array, bypassing the capacity check and the duplicate-id check
+     * that sensor_hub_register_sensor() performs - and that helper then had no
+     * caller at all.
+     */
+    if (sensor_hub_register_sensor(&config) != 0) {
+        pr_err("Failed to register sensor %u\n", config.sensor_id);
+    }
 
     /* Gyroscope */
     memset(&config, 0, sizeof(config));
     config.sensor_id = 2;
-    strncpy(config.name, "BMI260 Gyroscope", MAX_SENSOR_NAME_LEN - 1);
+    strncpy(config.name, "BMI260 Gyroscope", sizeof(config.name) - 1);
     strncpy(config.vendor, "Bosch", sizeof(config.vendor) - 1);
     config.type = SENSOR_TYPE_GYROSCOPE;
     config.version = 1;
@@ -175,12 +190,20 @@ static void sensor_hub_register_default_sensors(void)
     config.power_ma = 0.20f;
     config.min_delay_us = 2500;
     config.fifo_max = 1024;
-    g_sensor_hub.sensors[g_sensor_hub.num_sensors++] = config;
+    /*
+     * Go through the checked helper. The default path used to write straight
+     * into the array, bypassing the capacity check and the duplicate-id check
+     * that sensor_hub_register_sensor() performs - and that helper then had no
+     * caller at all.
+     */
+    if (sensor_hub_register_sensor(&config) != 0) {
+        pr_err("Failed to register sensor %u\n", config.sensor_id);
+    }
 
     /* Magnetometer */
     memset(&config, 0, sizeof(config));
     config.sensor_id = 3;
-    strncpy(config.name, "BMM150 Magnetometer", MAX_SENSOR_NAME_LEN - 1);
+    strncpy(config.name, "BMM150 Magnetometer", sizeof(config.name) - 1);
     strncpy(config.vendor, "Bosch", sizeof(config.vendor) - 1);
     config.type = SENSOR_TYPE_MAGNETOMETER;
     config.version = 1;
@@ -189,12 +212,20 @@ static void sensor_hub_register_default_sensors(void)
     config.power_ma = 0.10f;
     config.min_delay_us = 10000;  /* 100 Hz */
     config.fifo_max = 512;
-    g_sensor_hub.sensors[g_sensor_hub.num_sensors++] = config;
+    /*
+     * Go through the checked helper. The default path used to write straight
+     * into the array, bypassing the capacity check and the duplicate-id check
+     * that sensor_hub_register_sensor() performs - and that helper then had no
+     * caller at all.
+     */
+    if (sensor_hub_register_sensor(&config) != 0) {
+        pr_err("Failed to register sensor %u\n", config.sensor_id);
+    }
 
     /* Proximity */
     memset(&config, 0, sizeof(config));
     config.sensor_id = 4;
-    strncpy(config.name, "VCNL4040 Proximity", MAX_SENSOR_NAME_LEN - 1);
+    strncpy(config.name, "VCNL4040 Proximity", sizeof(config.name) - 1);
     strncpy(config.vendor, "Vishay", sizeof(config.vendor) - 1);
     config.type = SENSOR_TYPE_PROXIMITY;
     config.version = 1;
@@ -203,12 +234,20 @@ static void sensor_hub_register_default_sensors(void)
     config.power_ma = 0.05f;
     config.min_delay_us = 50000;  /* 20 Hz */
     config.fifo_max = 32;
-    g_sensor_hub.sensors[g_sensor_hub.num_sensors++] = config;
+    /*
+     * Go through the checked helper. The default path used to write straight
+     * into the array, bypassing the capacity check and the duplicate-id check
+     * that sensor_hub_register_sensor() performs - and that helper then had no
+     * caller at all.
+     */
+    if (sensor_hub_register_sensor(&config) != 0) {
+        pr_err("Failed to register sensor %u\n", config.sensor_id);
+    }
 
     /* Light */
     memset(&config, 0, sizeof(config));
     config.sensor_id = 5;
-    strncpy(config.name, "VCNL4040 Light", MAX_SENSOR_NAME_LEN - 1);
+    strncpy(config.name, "VCNL4040 Light", sizeof(config.name) - 1);
     strncpy(config.vendor, "Vishay", sizeof(config.vendor) - 1);
     config.type = SENSOR_TYPE_LIGHT;
     config.version = 1;
@@ -217,12 +256,20 @@ static void sensor_hub_register_default_sensors(void)
     config.power_ma = 0.05f;
     config.min_delay_us = 50000;
     config.fifo_max = 32;
-    g_sensor_hub.sensors[g_sensor_hub.num_sensors++] = config;
+    /*
+     * Go through the checked helper. The default path used to write straight
+     * into the array, bypassing the capacity check and the duplicate-id check
+     * that sensor_hub_register_sensor() performs - and that helper then had no
+     * caller at all.
+     */
+    if (sensor_hub_register_sensor(&config) != 0) {
+        pr_err("Failed to register sensor %u\n", config.sensor_id);
+    }
 
     /* Step Counter */
     memset(&config, 0, sizeof(config));
     config.sensor_id = 6;
-    strncpy(config.name, "Step Counter", MAX_SENSOR_NAME_LEN - 1);
+    strncpy(config.name, "Step Counter", sizeof(config.name) - 1);
     strncpy(config.vendor, "NEXUS", sizeof(config.vendor) - 1);
     config.type = SENSOR_TYPE_STEP_COUNTER;
     config.version = 1;
@@ -231,7 +278,15 @@ static void sensor_hub_register_default_sensors(void)
     config.power_ma = 0.01f;
     config.min_delay_us = 1000000;  /* 1 Hz */
     config.fifo_max = 16;
-    g_sensor_hub.sensors[g_sensor_hub.num_sensors++] = config;
+    /*
+     * Go through the checked helper. The default path used to write straight
+     * into the array, bypassing the capacity check and the duplicate-id check
+     * that sensor_hub_register_sensor() performs - and that helper then had no
+     * caller at all.
+     */
+    if (sensor_hub_register_sensor(&config) != 0) {
+        pr_err("Failed to register sensor %u\n", config.sensor_id);
+    }
 }
 
 /*===========================================================================*/
@@ -510,6 +565,17 @@ int sensor_read(u32 sensor_id, sensor_event_t *event)
 
     spin_unlock(&g_sensor_hub.lock);
 
+    /*
+     * Deliver the sample. sensor_hub_process_event() is the only code that
+     * stores an event, advances the FIFO, notifies the listener and triggers
+     * the fusion update, and nothing called it: this read path generated a
+     * sample, handed it to the caller, and dropped it. So listeners were never
+     * notified and the complementary filter never ran.
+     *
+     * Called after the unlock because it takes the same lock.
+     */
+    sensor_hub_process_event(sensor_id, event);
+
     return 0;
 }
 
@@ -611,12 +677,21 @@ static void sensor_hub_process_event(u32 sensor_id, sensor_event_t *event)
         g_sensor_hub.listeners[sensor_id - 1].callback(event);
     }
 
-    /* Update sensor fusion */
-    if (g_sensor_hub.fusion_enabled &&
+    /*
+     * Update sensor fusion.
+     *
+     * The guard matters: sensor_hub_update_fusion() itself reads sensors
+     * through sensor_read(), which now delivers into this function. Without it
+     * the first accelerometer sample would recurse forever:
+     * process_event -> update_fusion -> sensor_read -> process_event.
+     */
+    if (g_sensor_hub.fusion_enabled && !g_sensor_hub.fusion_in_progress &&
         (sensor->type == SENSOR_TYPE_ACCELEROMETER ||
          sensor->type == SENSOR_TYPE_GYROSCOPE ||
          sensor->type == SENSOR_TYPE_MAGNETOMETER)) {
+        g_sensor_hub.fusion_in_progress = true;
         sensor_hub_update_fusion();
+        g_sensor_hub.fusion_in_progress = false;
     }
 }
 
@@ -697,6 +772,37 @@ static void sensor_hub_update_fusion(void)
     g_sensor_hub.fusion_state.linear_accel[1] = ay - g_sensor_hub.fusion_state.gravity[1] * 9.81f;
     g_sensor_hub.fusion_state.linear_accel[2] = az - g_sensor_hub.fusion_state.gravity[2] * 9.81f;
 
+    /*
+     * Tilt-compensated magnetic heading.
+     *
+     * The magnetometer was read into mx/my/mz and then discarded, so nothing
+     * in this file used it: azimuth came from the gyro-integrated quaternion
+     * alone, which drifts without bound because there is no absolute reference
+     * to correct it. Rotate the field into the horizontal plane using the
+     * current pitch/roll and take atan2 of the horizontal components.
+     *
+     * These are the standard rotation formulas for a Z-Y-X (yaw-pitch-roll)
+     * body, applied with the pitch and roll already derived above.
+     */
+    {
+        float cp = cosf(pitch), sp = sinf(pitch);
+        float cr = cosf(roll),  sr = sinf(roll);
+
+        /* Horizontal components after de-rotating the field vector */
+        float mh_x = mx * cr + my * sr * sp - mz * cr * sp;
+        float mh_y = my * cr + mz * sr;
+
+        /*
+         * A magnetometer reading of zero (unpopulated part, or the simulated
+         * source before it is set up) carries no direction information; taking
+         * atan2(0,0) would report a confident heading of zero.
+         */
+        if (mx != 0.0f || my != 0.0f || mz != 0.0f) {
+            g_sensor_hub.fusion_state.magnetic_heading = atan2f(mh_y, mh_x);
+            g_sensor_hub.fusion_state.heading_valid = true;
+        }
+    }
+
     g_sensor_hub.fusion_updates++;
 }
 
@@ -742,6 +848,36 @@ int sensor_get_orientation(float *azimuth, float *pitch, float *roll)
     spin_unlock(&g_sensor_hub.lock);
 
     return 0;
+}
+
+/**
+ * sensor_get_magnetic_heading - Get tilt-compensated magnetic heading
+ * @heading_deg: Output heading in degrees, 0-360
+ *
+ * Returns: true if a heading is available, false otherwise
+ */
+bool sensor_get_magnetic_heading(float *heading_deg)
+{
+    bool ok;
+
+    if (!heading_deg || !g_sensor_hub.initialized) {
+        return false;
+    }
+
+    spin_lock(&g_sensor_hub.lock);
+
+    ok = g_sensor_hub.fusion_state.heading_valid;
+    if (ok) {
+        float deg = g_sensor_hub.fusion_state.magnetic_heading * (180.0f / M_PI);
+        if (deg < 0.0f) {
+            deg += 360.0f;
+        }
+        *heading_deg = deg;
+    }
+
+    spin_unlock(&g_sensor_hub.lock);
+
+    return ok;
 }
 
 /**

@@ -25,6 +25,12 @@
 #define NOTIFICATION_WIDTH          350
 #define NOTIFICATION_HEIGHT_AUTO    0
 
+/* Geometry of one row in the notification list. */
+#define NOTIFY_ITEM_WIDTH           NOTIFICATION_WIDTH
+#define NOTIFY_ITEM_HEIGHT          64
+/* How many rows fit in the visible area before scrolling. */
+#define NOTIFY_MAX_VISIBLE          8
+
 /*===========================================================================*/
 /*                         NOTIFICATION URGENCY                              */
 /*===========================================================================*/

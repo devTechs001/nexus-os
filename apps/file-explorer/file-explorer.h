@@ -11,6 +11,14 @@
 
 #include "../../gui/gui.h"
 #include "../../gui/widgets/widgets.h"
+/*
+ * window-manager.h and desktop-env.h hold wm_window_t, desktop_menu_t and
+ * desktop_environment_t, which this header uses. Pulling them in from gui.h
+ * instead would be circular (the window manager itself needs widgets.h), so
+ * they are included here, at the point of use.
+ */
+#include "../../gui/window-manager/window-manager.h"
+#include "../../gui/desktop-environment/desktop-env.h"
 #include "../../kernel/include/kernel.h"
 #include "../../kernel/include/types.h"
 
@@ -28,6 +36,8 @@
 #define MAX_SEARCH_HISTORY          100
 #define MAX_TABS                    32
 #define MAX_COLUMNS                 16
+/* Side of one icon cell in the file view grid, in pixels. */
+#define FILE_EXPLORER_ICON_CELL     96
 #define MAX_FILTERS                 32
 #define MAX_QUICK_ACTIONS           16
 
@@ -259,10 +269,6 @@ typedef struct file_explorer_window {
     } quick_actions[MAX_QUICK_ACTIONS];
     u32 quick_action_count;               /* Quick Action Count */
 
-    /* Bookmarks */
-    bookmark_entry_t bookmarks[MAX_BOOKMARKS]; /* Bookmarks */
-    u32 bookmark_count;                   /* Bookmark Count */
-
     /* Recent Folders */
     char recent_folders[MAX_RECENT_FOLDERS][MAX_PATH_LENGTH];
     u32 recent_folder_count;              /* Recent Folder Count */
@@ -320,6 +326,15 @@ typedef struct file_explorer_window {
     /* User Data */
     void *user_data;
 
+    /*
+     * Intrusive link for file_explorer_t's window list.
+     *
+     * file_explorer_create_window() does `win->next = explorer->windows;
+     * explorer->windows = win;` and destroy_explorer_window walks the same
+     * chain, but no such member existed -- the list could not be built.
+     */
+    struct file_explorer_window *next;
+
 } file_explorer_window_t;
 
 /**
@@ -371,6 +386,18 @@ typedef struct {
     int (*on_window_created)(file_explorer_window_t *);
     int (*on_window_closed)(file_explorer_window_t *);
     
+    /* Bookmarks
+     *
+     * These were declared on file_explorer_window_t, but every function in
+     * file-explorer.c -- init_default_bookmarks(), add/remove/edit, the
+     * sidebar renderer -- reaches them through the file_explorer_t it is
+     * given. Keeping them on the window meant the table could never be
+     * filled: bookmark_count stayed 0 and the sidebar's bookmark list was
+     * permanently empty.
+     */
+    bookmark_entry_t bookmarks[MAX_BOOKMARKS]; /* Bookmarks */
+    u32 bookmark_count;                   /* Bookmark Count */
+
     /* User Data */
     void *user_data;
     
@@ -406,6 +433,21 @@ int file_explorer_move_to_pane(file_explorer_window_t *win);
 
 /* Navigation */
 int file_explorer_navigate(file_explorer_window_t *win, const char *path);
+
+/*
+ * Internal-but-shared view maintenance.
+ *
+ * file-explorer-advanced.c calls all five of these. They were `static` in
+ * file-explorer.c, so every one of those calls was an implicit declaration --
+ * it compiled under the relaxed flags and would have failed to link, because
+ * the symbols the advanced file references do not exist outside their own
+ * translation unit.
+ */
+int load_directory(file_explorer_window_t *win, const char *path);
+int sort_entries(file_explorer_window_t *win);
+void free_entries(directory_entry_t *entries);
+int update_file_view(file_explorer_window_t *win);
+int update_status_bar(file_explorer_window_t *win);
 int file_explorer_navigate_up(file_explorer_window_t *win);
 int file_explorer_navigate_home(file_explorer_window_t *win);
 int file_explorer_navigate_back(file_explorer_window_t *win);

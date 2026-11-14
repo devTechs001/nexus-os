@@ -15,7 +15,8 @@ typedef enum {
     NEXUS_APP_VM_MANAGER,
     NEXUS_APP_FILE_MANAGER,
     NEXUS_APP_TASK_MANAGER,
-    NEXUS_APP_SETTINGS
+    NEXUS_APP_SETTINGS,
+    NEXUS_APP_TERMINAL
 } nexus_app_t;
 
 /* Start an application; returns 0 on success. */

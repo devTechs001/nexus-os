@@ -387,6 +387,31 @@ int numa_initialize(void)
         node->online = true;
         numa_manager.num_online_nodes++;
 
+        /*
+         * Give the node its memory. numa_add_memory_region_internal() is the
+         * only code that populates a node's region list and its memory_size /
+         * memory_free totals, and nothing ever called it: every node reported
+         * zero memory for the life of the system, and numa_get_stats() summed
+         * those zeros.
+         *
+         * On a single-node system the whole of physical memory belongs to
+         * node 0. With real SRAT/ACPI parsing each node's ranges would come
+         * from its proximity domain entry instead; there is no SRAT parser in
+         * this tree yet, so spreading the total across nodes would be a
+         * fabrication, and this assigns it to node 0 and leaves the others
+         * empty rather than inventing a split.
+         */
+        if (i == 0) {
+            phys_addr_t total = memory_get_total();
+
+            if (total > 0) {
+                ret = numa_add_memory_region_internal(node, 0, total);
+                if (ret < 0) {
+                    pr_err("NUMA: Node 0: failed to add memory region\n");
+                }
+            }
+        }
+
         pr_info("NUMA: Node %u online\n", i);
     }
 
@@ -948,7 +973,16 @@ u32 x86_numa_detect_nodes(void)
  */
 int x86_numa_init_node(u32 node_id)
 {
-    /* Placeholder - would parse SRAT/SLIT tables */
+    /*
+     * Nothing to do per-node yet: there is no SRAT/SLIT parser in this tree, so
+     * a node's memory ranges and distances come from numa_initialize()'s own
+     * setup rather than from firmware tables. Make that explicit rather than
+     * leaving a bare placeholder that looks like an oversight.
+     */
+    if (node_id >= (u32)numa_manager.num_nodes) {
+        return -EINVAL;
+    }
+
     return 0;
 }
 #endif

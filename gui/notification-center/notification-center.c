@@ -100,7 +100,13 @@ int notification_center_show(notification_center_t *center)
         window_show(center->center_window);
         center->visible = true;
     }
-    
+
+    /* Grouped view when grouping is enabled, otherwise the flat list built by
+     * notification_center_add() via create_notification_item(). */
+    if (center->group_notifications) {
+        return create_groups_view(center);
+    }
+
     return 0;
 }
 
@@ -287,19 +293,65 @@ static int create_notification_list(notification_center_t *center)
  */
 static int create_notification_item(notification_center_t *center, notification_t *notify)
 {
+    widget_t *item;
+    widget_t *dismiss;
+
     if (!center || !notify) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would create notification widget with:
-     * - App icon
-     * - Title
-     * - Message
-     * - Timestamp
-     * - Dismiss button
-     * - Action buttons
+
+    /*
+     * This was a comment listing what the item should contain. Nothing was
+     * ever created, so the handlers below (on_notification_clicked,
+     * on_dismiss_clicked, on_action_clicked) had no widget to be attached to,
+     * had no callers, and the notification centre rendered an empty list no
+     * matter how many notifications were added.
      */
-    
+    item = panel_create(center->center_widget,
+                        0,
+                        (s32)(notify->notify_id % NOTIFY_MAX_VISIBLE) * NOTIFY_ITEM_HEIGHT,
+                        NOTIFY_ITEM_WIDTH, NOTIFY_ITEM_HEIGHT);
+
+    if (!item) {
+        return -ENOMEM;
+    }
+
+    item->user_data = notify;
+    item->on_click = on_notification_clicked;
+
+    /* Title and body. */
+    label_create(item, notify->title, 8, 4,
+                 NOTIFY_ITEM_WIDTH - 40, 20);
+    label_create(item, notify->message, 8, 24,
+                 NOTIFY_ITEM_WIDTH - 40, NOTIFY_ITEM_HEIGHT - 28);
+
+    /* Action buttons; on_action_clicked had no widget to attach to. */
+    if (notify->has_actions && notify->action_count > 0) {
+        u32 a;
+
+        for (a = 0; a < notify->action_count && a < NOTIFICATION_MAX_ACTIONS; a++) {
+            widget_t *btn = button_create(item, notify->actions[a].label,
+                                          (s32)(8 + a * 96),
+                                          NOTIFY_ITEM_HEIGHT - 26, 88, 22);
+
+            if (!btn) {
+                break;
+            }
+
+            btn->user_data = notify;
+            btn->tag = a;
+            btn->on_click = on_action_clicked;
+        }
+    }
+
+    /* Dismiss button. */
+    dismiss = button_create(item, "x",
+                            NOTIFY_ITEM_WIDTH - 28, 4, 24, 24);
+    if (dismiss) {
+        dismiss->user_data = notify;
+        dismiss->on_click = on_dismiss_clicked;
+    }
+
     return 0;
 }
 
@@ -311,7 +363,38 @@ static int create_notification_item(notification_center_t *center, notification_
  */
 static int create_groups_view(notification_center_t *center)
 {
-    (void)center;
+    u32 i;
+
+    if (!center || !center->center_widget) {
+        return -EINVAL;
+    }
+
+    /*
+     * Previously a stub returning 0. When grouping is enabled the centre is
+     * supposed to show one row per app with a count rather than every
+     * notification individually.
+     */
+    if (!center->group_notifications) {
+        return 0;
+    }
+
+    for (i = 0; i < center->group_count && i < 32; i++) {
+        widget_t *row;
+        char label[160];
+
+        snprintf(label, sizeof(label), "%s (%u)",
+                 center->groups[i].app_name,
+                 center->groups[i].count);
+
+        row = label_create(center->center_widget, label, 0,
+                           (s32)(i * NOTIFY_ITEM_HEIGHT),
+                           NOTIFY_ITEM_WIDTH, NOTIFY_ITEM_HEIGHT);
+
+        if (!row) {
+            return -ENOMEM;
+        }
+    }
+
     return 0;
 }
 
@@ -323,7 +406,31 @@ static int create_groups_view(notification_center_t *center)
  */
 static int create_history_view(notification_center_t *center)
 {
-    (void)center;
+    notification_t *notify;
+    u32 row = 0;
+
+    if (!center || !center->center_widget) {
+        return -EINVAL;
+    }
+
+    /*
+     * Previously a stub returning 0, so the History tab was always blank even
+     * though dismissed notifications are appended to center->history.
+     */
+    for (notify = center->history; notify && row < center->max_visible;
+         notify = notify->next, row++) {
+        widget_t *item = label_create(center->center_widget, notify->title,
+                                      0, (s32)(row * NOTIFY_ITEM_HEIGHT),
+                                      NOTIFY_ITEM_WIDTH, NOTIFY_ITEM_HEIGHT);
+
+        if (!item) {
+            return -ENOMEM;
+        }
+
+        item->user_data = notify;
+        item->on_click = on_notification_clicked;
+    }
+
     return 0;
 }
 
@@ -763,10 +870,15 @@ int notification_center_show_history(notification_center_t *center)
     if (!center) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would show history view */
-    
-    return 0;
+
+    /*
+     * "In real implementation, would show history view" was the whole body,
+     * and create_history_view() had no caller for exactly that reason: the
+     * History tab was permanently empty.
+     */
+    center->visible = true;
+
+    return create_history_view(center);
 }
 
 /**
@@ -856,9 +968,20 @@ static void on_dismiss_clicked(widget_t *widget)
 
 static void on_action_clicked(widget_t *widget)
 {
-    if (!widget || !widget->user_data) return;
-    
-    /* In real implementation, would trigger action */
+    notification_t *notify;
+    notification_center_t *center;
+
+    if (!widget || !widget->user_data) {
+        return;
+    }
+
+    notify = (notification_t *)widget->user_data;
+    center = &g_notification_center;
+
+    if (center->on_action_triggered) {
+        /* tag carries the action index set when the button was created. */
+        center->on_action_triggered(notify, widget->tag);
+    }
 }
 
 static void on_clear_all_clicked(widget_t *widget)

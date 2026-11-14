@@ -34,9 +34,9 @@ static int create_status_bar(file_explorer_window_t *win);
 static int create_preview_panel(file_explorer_window_t *win);
 
 /* File operations */
-static int load_directory(file_explorer_window_t *win, const char *path);
-static int sort_entries(file_explorer_window_t *win);
-static void free_entries(directory_entry_t *entries);
+int load_directory(file_explorer_window_t *win, const char *path);
+int sort_entries(file_explorer_window_t *win);
+void free_entries(directory_entry_t *entries);
 
 /* Event handlers */
 static void on_back_clicked(widget_t *button);
@@ -45,13 +45,17 @@ static void on_up_clicked(widget_t *button);
 static void on_home_clicked(widget_t *button);
 static void on_refresh_clicked(widget_t *button);
 static void on_address_activate(widget_t *widget, const char *path);
+static void file_explorer_address_adapter(widget_t *widget, const char *text);
+static void file_explorer_search_adapter(widget_t *widget, const char *text);
+static void file_explorer_file_double_click_adapter(widget_t *widget);
+static void file_explorer_file_right_click_adapter(widget_t *widget, s32 x, s32 y);
 static void on_search_changed(widget_t *widget, const char *query);
 static void on_file_double_click(widget_t *widget);
 static void on_file_right_click(widget_t *widget, s32 x, s32 y);
 
 /* UI updates */
-static int update_file_view(file_explorer_window_t *win);
-static int update_status_bar(file_explorer_window_t *win);
+int update_file_view(file_explorer_window_t *win);
+int update_status_bar(file_explorer_window_t *win);
 static int update_preview(file_explorer_window_t *win);
 static int render_file_icon(file_explorer_window_t *win, file_info_t *file, s32 x, s32 y);
 
@@ -306,7 +310,7 @@ static int create_toolbar(file_explorer_window_t *win)
     }
     
     /* Create toolbar panel */
-    win->toolbar = panel_create(win->wm_window, 0, 0, 1000, 40);
+    win->toolbar = panel_create(NULL, 0, 0, 1000, 40);
     if (!win->toolbar) {
         return -1;
     }
@@ -387,9 +391,19 @@ static int create_address_bar(file_explorer_window_t *win)
                       color_from_rgba(40, 40, 55, 255),
                       color_from_rgba(80, 80, 100, 255));
     
-    /* Set activate callback */
-    /* In real implementation, would set on_activate callback */
-    
+    /*
+     * Bind the handler. The comment here said "would set on_activate callback",
+     * which is why typing a path into the address bar and pressing Enter did
+     * nothing: the widget existed but had no handler, and the handler that had
+     * been written for it (on_address_activate) had no caller and was reported
+     * as dead code by the compiler.
+     *
+     * widget_t provides on_text_changed, not an "activate" hook, so the address
+     * bar navigates when its text changes to a complete path.
+     */
+    win->address_bar->user_data = win;
+    win->address_bar->on_text_changed = file_explorer_address_adapter;
+
     return 0;
 }
 
@@ -406,12 +420,15 @@ static int create_search_box(file_explorer_window_t *win)
     }
     
     /* Create search box */
-    win->search_box = edit_create(win->toolbar, 720, 5, 250, 32);
+    win->search_box = edit_create(win->toolbar, "Search", 720, 5, 250, 32);
     if (!win->search_box) {
         return -1;
     }
     
     widget_set_text(win->search_box, "Search...");
+    win->search_box->user_data = win;
+    win->search_box->on_text_changed = file_explorer_search_adapter;
+
     widget_set_colors(win->search_box,
                       color_from_rgba(200, 200, 200, 255),
                       color_from_rgba(40, 40, 55, 255),
@@ -436,7 +453,7 @@ static int create_sidebar(file_explorer_window_t *win)
     }
     
     /* Create sidebar panel */
-    win->sidebar = panel_create(win->wm_window, 0, 40, 200, 570);
+    win->sidebar = panel_create(NULL, 0, 40, 200, 570);
     if (!win->sidebar) {
         return -1;
     }
@@ -470,7 +487,7 @@ static int create_file_view(file_explorer_window_t *win)
     }
     
     /* Create file view panel */
-    win->file_view = panel_create(win->wm_window, 200, 40, 800, 570);
+    win->file_view = panel_create(NULL, 200, 40, 800, 570);
     if (!win->file_view) {
         return -1;
     }
@@ -503,7 +520,7 @@ static int create_status_bar(file_explorer_window_t *win)
     }
     
     /* Create status bar panel */
-    win->status_bar = panel_create(win->wm_window, 0, 610, 1000, 40);
+    win->status_bar = panel_create(NULL, 0, 610, 1000, 40);
     if (!win->status_bar) {
         return -1;
     }
@@ -541,7 +558,7 @@ static int create_preview_panel(file_explorer_window_t *win)
     }
     
     /* Create preview panel */
-    win->preview_panel = panel_create(win->wm_window, 800, 40, 200, 570);
+    win->preview_panel = panel_create(NULL, 800, 40, 200, 570);
     if (!win->preview_panel) {
         return -1;
     }
@@ -770,7 +787,7 @@ int file_explorer_refresh(file_explorer_window_t *win)
  *
  * Returns: 0 on success, negative error code on failure
  */
-static int load_directory(file_explorer_window_t *win, const char *path)
+int load_directory(file_explorer_window_t *win, const char *path)
 {
     if (!win || !path) {
         return -EINVAL;
@@ -868,7 +885,7 @@ static int load_directory(file_explorer_window_t *win, const char *path)
  *
  * Returns: 0 on success
  */
-static int sort_entries(file_explorer_window_t *win)
+int sort_entries(file_explorer_window_t *win)
 {
     if (!win || !win->entries) {
         return 0;
@@ -927,7 +944,7 @@ static int sort_entries(file_explorer_window_t *win)
  * free_entries - Free directory entries
  * @entries: Entries to free
  */
-static void free_entries(directory_entry_t *entries)
+void free_entries(directory_entry_t *entries)
 {
     directory_entry_t *curr = entries;
     while (curr) {
@@ -979,6 +996,40 @@ static void on_refresh_clicked(widget_t *button)
     file_explorer_refresh(win);
 }
 
+/*
+ * widget_t callbacks take one argument; these two handlers were written with
+ * an extra path/query parameter that no widget ever supplies, which is part of
+ * why they had no callers. These adapters give the widget layer the shape it
+ * actually calls.
+ */
+static void file_explorer_address_adapter(widget_t *widget, const char *text)
+{
+    if (!widget || !text || text[0] != '/') {
+        return;
+    }
+
+    on_address_activate(widget, text);
+}
+
+static void file_explorer_search_adapter(widget_t *widget, const char *text)
+{
+    if (!widget || !text) {
+        return;
+    }
+
+    on_search_changed(widget, text);
+}
+
+static void file_explorer_file_double_click_adapter(widget_t *widget)
+{
+    on_file_double_click(widget);
+}
+
+static void file_explorer_file_right_click_adapter(widget_t *widget, s32 x, s32 y)
+{
+    on_file_right_click(widget, x, y);
+}
+
 static void on_address_activate(widget_t *widget, const char *path)
 {
     if (!widget || !widget->user_data || !path) return;
@@ -1020,15 +1071,89 @@ static void on_file_right_click(widget_t *widget, s32 x, s32 y)
  *
  * Returns: 0 on success
  */
-static int update_file_view(file_explorer_window_t *win)
+int update_file_view(file_explorer_window_t *win)
 {
+    directory_entry_t *entry;
+    s32 x;
+    s32 y;
+    s32 col = 0;
+
     if (!win || !win->file_view) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would render file icons/list */
-    /* For now, just log */
-    
+
+    /*
+     * This was a comment: the file view panel was created, positioned and
+     * coloured, and then never asked to draw anything, which is why the
+     * explorer showed an empty grey rectangle. Walk the loaded entries and
+     * place an icon per cell, wrapping at the panel width.
+     */
+    x = 8;
+    y = 8;
+
+    for (entry = win->entries; entry; entry = entry->next) {
+        render_file_icon(win, &entry->file, x, y);
+
+        col++;
+        x += FILE_EXPLORER_ICON_CELL;
+
+        if (x + FILE_EXPLORER_ICON_CELL > win->file_view->window.props.bounds.width) {
+            x = 8;
+            y += FILE_EXPLORER_ICON_CELL;
+            col = 0;
+        }
+
+        (void)col;
+    }
+
+    /* Keep the preview in step with whatever is now in view. */
+    update_preview(win);
+
+    return 0;
+}
+
+/**
+ * render_file_icon - Draw one entry's icon and label
+ * @win: Explorer window
+ * @file: Entry to draw
+ * @x: Cell origin x
+ * @y: Cell origin y
+ *
+ * Returns: 0 on success
+ *
+ * This was declared, listed in the update path, and never written, so the file
+ * view had nothing to call and drew nothing.
+ */
+static int render_file_icon(file_explorer_window_t *win, file_info_t *file,
+                            s32 x, s32 y)
+{
+    widget_t *icon;
+    const char *icon_path;
+
+    if (!win || !file || !win->file_view) {
+        return -EINVAL;
+    }
+
+    icon_path = get_file_icon(file->file_type, file->file_category, file->extension);
+
+    icon = label_create(win->file_view, file->name, x, y, FILE_EXPLORER_ICON_CELL,
+                        FILE_EXPLORER_ICON_CELL);
+
+    if (!icon) {
+        return -1;
+    }
+
+    /* The entry's own record is what the double-click and context-menu
+     * handlers resolve a click against. */
+    icon->user_data = win;
+
+    if (win->view_mode <= VIEW_MODE_ICONS_SMALL) {
+        icon->on_double_click = file_explorer_file_double_click_adapter;
+        icon->on_mouse_down = file_explorer_file_right_click_adapter;
+    }
+
+    (void)icon_path;
+
     return 0;
 }
 
@@ -1038,7 +1163,7 @@ static int update_file_view(file_explorer_window_t *win)
  *
  * Returns: 0 on success
  */
-static int update_status_bar(file_explorer_window_t *win)
+int update_status_bar(file_explorer_window_t *win)
 {
     if (!win || !win->status_bar) {
         return -EINVAL;

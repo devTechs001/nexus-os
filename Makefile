@@ -223,7 +223,8 @@ C_SOURCES = $(KERNEL_DIR)/core/kernel.c \
 
 # Object files
 ASM_OBJECTS = $(BUILD_DIR)/boot.o \
-              $(BUILD_DIR)/interrupts.o
+              $(BUILD_DIR)/interrupts.o \
+              $(BUILD_DIR)/syscall_entry.o
 C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/printk.o \
             $(BUILD_DIR)/string.o \
@@ -392,7 +393,13 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/apic.o \
             $(BUILD_DIR)/ecc.o \
             $(BUILD_DIR)/sha.o \
-            $(BUILD_DIR)/boot_menu.o
+            $(BUILD_DIR)/boot_menu.o \
+            $(BUILD_DIR)/syscall_wrapper.o \
+            $(BUILD_DIR)/libc_string.o \
+            $(BUILD_DIR)/libc_stdlib.o \
+            $(BUILD_DIR)/libc_stdio.o \
+            $(BUILD_DIR)/user_init.o \
+            $(BUILD_DIR)/service_manager.o
 
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
@@ -551,6 +558,13 @@ $(BUILD_DIR)/boot.o: $(KERNEL_DIR)/arch/x86_64/boot/boot.asm | $(BUILD_DIR)
 $(BUILD_DIR)/interrupts.o: $(KERNEL_DIR)/arch/x86_64/interrupts/interrupts.asm | $(BUILD_DIR)
 	@echo "  [NASM]  $<"
 	@$(NASM) $(ASFLAGS) -o $@ $<
+
+# SYSCALL/SYSRET entry and the ring-3 transition. Assembled with gcc's
+# integrated assembler rather than nasm, so it builds with the same toolchain
+# as the rest of the kernel and is verifiable here.
+$(BUILD_DIR)/syscall_entry.o: $(KERNEL_DIR)/arch/x86_64/syscall/syscall_entry.S | $(BUILD_DIR)
+	@echo "  [AS]    $<"
+	@$(CC) -c -o $@ $<
 
 # Compile C files
 $(BUILD_DIR)/kernel.o: $(KERNEL_DIR)/core/kernel.c | $(BUILD_DIR)
@@ -1209,6 +1223,109 @@ $(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; if [ ! -w "$(TMPDIR)" ]; then echo "  [ERR]   compiler scratch dir $(TMPDIR) is not writable"; elif [ "$(df -P "$(TMPDIR)" 2>/dev/null | awk 'NR==2{print $4}')" != "" ] && [ "$(df -P "$(TMPDIR)" | awk 'NR==2{print $4}')" -lt 2048 ]; then echo "  [ERR]   only $(df -P "$(TMPDIR)" | awk 'NR==2{print $4}') KB free in $(TMPDIR)"; echo "  [ERR]   that is a disk-space problem, not a source problem"; fi; exit 1; }
 
 # ---------------------------------------------------------------------------
+# Userspace runtime (libc, libsys, init, services)
+#
+# These 40k lines were written and never compiled: they were absent from
+# C_SOURCES, so no build ever looked at them. One pattern rule covers the
+# whole tree; each source keeps its natural path so include directives resolve
+# as written.
+#
+# The kernel is freestanding and provides its own string/memory primitives, so
+# the userspace libc objects are built with the same freestanding flags and
+# linked into the kernel image rather than a separate user binary.
+# ---------------------------------------------------------------------------
+USERSPACE_DIRS = userspace/libc userspace/libsys userspace/init userspace/services
+USERSPACE_CFLAGS = -ffreestanding -fno-stack-protector -fno-pie -m64 \
+                   -mno-red-zone -O2 -g -Wall -Wextra -fno-builtin \
+                   -I$(KERNEL_DIR)/include -Iuserspace/include -Iuserspace \
+                   -D__FREESTANDING__=1 \
+                   -Wno-unused-parameter -Wno-unused-variable
+
+$(BUILD_DIR)/syscall_wrapper.o: userspace/libsys/syscall_wrapper.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/libc_string.o: userspace/libc/string.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/libc_stdlib.o: userspace/libc/stdlib.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/libc_stdio.o: userspace/libc/stdio.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/user_init.o: userspace/init/init.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/service_manager.o: userspace/services/service_manager.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/boot_enhanced.o: boot/bootloader/gui-boot-enhanced.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/scanner.o: drivers/scanner/scanner.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/boot_diag.o: kernel/diag/boot_diag.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/dev_support.o: system/dev-support/dev-support.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/memory_map.o: hal/memory/memory_map.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/boot_splash.o: gui/boot-splash/boot_splash.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/coap.o: iot/protocols/coap.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/mqtt.o: iot/protocols/mqtt.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/cpu_features.o: hal/cpu/cpu_features.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/device_tree.o: hal/power/device_tree.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/device_registry.o: iot/device_management/device_registry.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/edge_runtime.o: iot/edge_computing/edge_runtime.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/gic.o: hal/interrupts/gic.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/status_bar.o: gui/status-bar/status-bar.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/gui_boot.o: boot/bootloader/gui-boot.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+# ---------------------------------------------------------------------------
 # Build guard
 #
 # This target DEPENDS ON $(OBJECTS). It verifies that every object listed in
@@ -1266,7 +1383,7 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@echo 'set timeout=10' > $@
 	@echo 'set default=0' >> $@
-	@echo 'set gfxmode=1024x768' >> $@
+	@echo 'set gfxmode=1024x768x32,1024x768,auto' >> $@
 	@echo 'set gfxpayload=keep' >> $@
 	@echo '' >> $@
 	@echo '# NEXUS OS Boot Menu' >> $@
@@ -1293,6 +1410,11 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo '' >> $@
 	@echo 'menuentry "[NATIVE]    NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
+	@echo '}' >> $@
+	@echo '' >> $@
+	@echo 'menuentry "[TERM]      NEXUS OS - Terminal (Nexus Shell)" {' >> $@
+	@echo '    set gfxpayload=1024x768x32' >> $@
+	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash terminal virt=auto' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[MENU]      NEXUS OS - Interactive Boot Menu" {' >> $@
@@ -1326,7 +1448,7 @@ run: $(KERNEL_ISO)
 	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
-		-serial file:qemu_run.log \
+		-serial stdio \
 		-display gtk \
 		-name "NEXUS OS" \
 		-no-reboot
@@ -1338,7 +1460,7 @@ run-vmware: $(KERNEL_ISO)
 	@qemu-system-x86_64 -cdrom $(KERNEL_ISO) -boot d \
 		-m 2G \
 		-smp 2 \
-		-serial file:qemu_vmware.log \
+		-serial stdio \
 		-machine vmport=on \
 		-device vmxnet3,netdev=net0 \
 		-netdev user,id=net0 \

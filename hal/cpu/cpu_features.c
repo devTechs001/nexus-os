@@ -72,24 +72,6 @@ static inline void cpuid(u32 eax, u32 *ebx, u32 ecx, u32 *edx)
 #endif
 }
 
-/**
- * cpuid_count - Execute CPUID with count
- * @eax: Input EAX value
- * @count: Count value (ECX)
- * @regs: Output registers array [EAX, EBX, ECX, EDX]
- */
-static inline void cpuid_count(u32 eax, u32 count, u32 regs[4])
-{
-#if defined(ARCH_X86_64)
-    __asm__ __volatile__(
-        "cpuid\n\t"
-        : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
-        : "a"(eax), "c"(count)
-        : "memory"
-    );
-#endif
-}
-
 /*===========================================================================*/
 /*                         X86_64 FEATURE DETECTION                          */
 /*===========================================================================*/
@@ -208,8 +190,14 @@ static void x86_detect_cache(cpu_features_t *features)
         }
 
         level = (regs[0] >> 5) & 0x7;
+        /*
+         * The last factor was `((regs[0] >> 14) & 0xFFF + 1)`. Unary + binds
+         * tighter than &, so that parses as `x & (0xFFF + 1)`, i.e. `x & 0x1000`
+         * - a single bit instead of the 12-bit ways field plus one. Every
+         * reported cache size was wrong. Parenthesise the addition.
+         */
         size = ((regs[1] >> 22) + 1) * ((regs[1] & 0x3FF) + 1) *
-               ((regs[0] >> 14) & 0xFFF + 1) * 64;
+               (((regs[0] >> 14) & 0xFFF) + 1) * 64;
         size /= 1024; /* Convert to KB */
 
         switch (level) {
@@ -275,7 +263,6 @@ static void x86_detect_topology(cpu_features_t *features)
 static void x86_detect_virtualization(cpu_features_t *features)
 {
     u32 regs[4];
-    u32 vendor_ecx;
 
     /* Check vendor for virtualization type */
     if (strcmp(features->vendor_string, "GenuineIntel") == 0) {
@@ -438,6 +425,14 @@ int cpu_features_detect(u32 cpu_id, cpu_features_t *features)
         return -EINVAL;
     }
 
+    /*
+     * cpu_id is not an input to CPUID: every leaf describes the CPU executing
+     * it, so on a multi-core system this must be called once per core to
+     * collect per-core differences. The parameter is kept so callers can be
+     * explicit about which core they mean if that ever becomes possible.
+     */
+    (void)cpu_id;
+
     /* Zero the structure */
     memset(features, 0, sizeof(cpu_features_t));
 
@@ -540,7 +535,17 @@ bool cpu_features_has(u32 cpu_id, u64 feature)
         return false;
     }
 
-    return !!(features->features & feature);
+    /*
+     * The feature space is split across four bitfields: `features` holds the
+     * architectural CPUID bits, and features_vmx / features_svm / features_ext
+     * hold the virtualization and security groups that no longer fit in 64
+     * bits. Testing only `features`, as this used to, meant an SVM or SMEP
+     * query could never be true no matter what the CPU reported.
+     */
+    return !!(features->features & feature) ||
+           !!(features->features_vmx & feature) ||
+           !!(features->features_svm & feature) ||
+           !!(features->features_ext & feature);
 }
 
 /**
