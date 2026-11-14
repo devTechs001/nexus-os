@@ -141,6 +141,7 @@ extern login_screen_t *login_screen_get_instance(void);
 extern int login_screen_init(login_screen_t *screen);
 extern int login_screen_run(login_screen_t *screen);
 extern int login_screen_update(login_screen_t *screen);
+extern int login_screen_poll_input(login_screen_t *screen);
 extern onboarding_wizard_t *onboarding_wizard_get_instance(void);
 extern int onboarding_wizard_init(onboarding_wizard_t *wizard);
 extern int onboarding_wizard_run(onboarding_wizard_t *wizard);
@@ -523,7 +524,15 @@ void kernel_init_userspace(void)
                 last_frame_time = current_time;
                 frame_count++;
 
-                /* Update GUI state */
+                /* Update GUI state.
+                 *
+                 * login_screen_poll_input() is what makes the login screen
+                 * usable at all: it had no input handling, so the password
+                 * field could never be filled and Enter could never be
+                 * pressed, even though the whole authentication path was
+                 * implemented and waiting.
+                 */
+                login_screen_poll_input(login);
                 login_screen_update(login);
                 onboarding_wizard_update(wizard);
 

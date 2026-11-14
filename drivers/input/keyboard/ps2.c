@@ -243,17 +243,23 @@ static void ps2_keyboard_handler(u8 scan_code)
         /* ... more shift mappings */
     }
     
-    /* Create input event */
+    /*
+     * Create input event.
+     *
+     * The translated character was computed above and then discarded: the event
+     * carried only the raw scancode, so any consumer wanting text had to
+     * re-implement this keymap. input_event_t has no room for both, so the
+     * character goes in .value: a press carries the ASCII code (always > 0) and
+     * a release carries 0. Callers that want edge-triggered typing check
+     * value != 0; the raw scancode stays in .code.
+     */
     input_event_t event;
     memset(&event, 0, sizeof(event));
     event.timestamp = ktime_get_us();
-    
-    if (!is_release) {
-        event.type = EV_KEY;
-        event.code = key_code;
-        event.value = 1;
-        input_queue_event(&event);
-    }
+    event.type = EV_KEY;
+    event.code = key_code;
+    event.value = is_release ? 0 : (s32)(u8)c;
+    input_queue_event(&event);
 }
 
 static int ps2_keyboard_init(void)
