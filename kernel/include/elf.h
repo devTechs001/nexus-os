@@ -201,6 +201,24 @@ static inline bool elf_check_header(const void *buf, u64 size)
     return true;
 }
 
+/*
+ * elf_image_t - A loaded ELF image
+ *
+ * Filled in by the loader in kernel/core/elf_loader.c and passed back to
+ * callers that need the entry point or the address span. Defined here rather
+ * than in the .c file so the scheduler's PID 1 path can hold one by value.
+ */
+typedef struct {
+    virt_addr_t base;           /* Where the image was placed */
+    u64 size;                   /* Image span (max_vaddr - min_vaddr) */
+    u64 entry;                  /* Entry point, adjusted to the load base */
+    u64 vaddr_min;
+    u64 vaddr_max;
+    u32 segment_count;
+    u32 entry_segment;
+    bool loaded;
+} elf_image_t;
+
 #ifdef __cplusplus
 }
 #endif

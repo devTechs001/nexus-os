@@ -1028,14 +1028,20 @@ int chown(const char *pathname, uid_t owner, gid_t group)
 /*                         PROCESS OPERATIONS                                */
 /*===========================================================================*/
 
-/**
- * exit - Terminate process
+/*
+ * exit() is deliberately NOT defined here.
+ *
+ * libc/stdlib.c already provides it, and does the work that has to happen
+ * before a process disappears: run the atexit handlers in reverse order, then
+ * flush stdout and stderr. The version that used to live here issued SYS_EXIT
+ * immediately, which would have discarded every buffered stdio write - with
+ * stdio buffered by default, that is most of a program's output.
+ *
+ * Two definitions in one binary was also a hard link error, so only one of them
+ * could survive anyway. The complete one survives.
+ *
+ * _exit() below is the "skip the cleanup" form and is intentionally separate.
  */
-void exit(int status)
-{
-    syscall1(SYS_EXIT, status & 0xFF);
-    for (;;);  /* Should never return */
-}
 
 /**
  * _exit - Terminate process (no cleanup)

@@ -38,16 +38,12 @@
 /*                              STATE                                        */
 /*===========================================================================*/
 
-typedef struct {
-    virt_addr_t base;           /* Where the image was placed */
-    u64 size;                   /* Image span (max_vaddr - min_vaddr) */
-    u64 entry;                  /* Entry point, adjusted to the load base */
-    u64 vaddr_min;
-    u64 vaddr_max;
-    u32 segment_count;
-    u32 entry_segment;
-    bool loaded;
-} elf_image_t;
+/*
+ * elf_image_t is declared in kernel/include/elf.h so that callers outside this
+ * file (the scheduler's PID 1 path) can hold one on their stack by value
+ * instead of guessing at its size.
+ */
+typedef elf_image_t elf_image_local_t;
 
 static struct {
     bool initialized;
@@ -149,36 +145,26 @@ static int read_file(const char *path, u8 **out, u64 *size)
  *
  * Returns 0 on success, negative error code on failure.
  */
-int elf_load_image(const char *path, elf_image_t *img)
+static int elf_load_buffer(const char *name, const u8 *file, u64 file_size,
+                           elf_image_t *img)
 {
     elf64_ehdr_t *eh;
     elf64_phdr_t *ph;
-    u8 *file = NULL;
-    u64 file_size = 0;
     u64 min_vaddr = ~0ULL;
     u64 max_vaddr = 0;
     u64 bias;
     u8 *image;
     u64 image_size;
     u32 loadable = 0;
-    int rc;
 
-    if (!path || !img) {
+    if (!name || !file || !img) {
         return -EINVAL;
     }
 
     memset(img, 0, sizeof(*img));
 
-    rc = read_file(path, &file, &file_size);
-    if (rc != 0) {
-        pr_err("[ELF] Cannot read %s (%d)\n", path, rc);
-        g_elf.load_failures++;
-        return rc;
-    }
-
     if (!elf_check_header(file, file_size)) {
-        pr_err("[ELF] %s: not a valid x86-64 ELF64 executable\n", path);
-        kfree(file);
+        pr_err("[ELF] %s: not a valid x86-64 ELF64 executable\n", name);
         g_elf.load_failures++;
         return -ENOEXEC;
     }
@@ -193,8 +179,7 @@ int elf_load_image(const char *path, elf_image_t *img)
         }
 
         if (ph[i].p_offset + ph[i].p_filesz > file_size) {
-            pr_err("[ELF] %s: segment %u extends past end of file\n", path, i);
-            kfree(file);
+            pr_err("[ELF] %s: segment %u extends past end of file\n", name, i);
             g_elf.load_failures++;
             return -ENOEXEC;
         }
@@ -207,25 +192,22 @@ int elf_load_image(const char *path, elf_image_t *img)
         }
 
         if (++loadable >= ELF_MAX_SEGMENTS) {
-            pr_err("[ELF] %s: too many segments\n", path);
-            kfree(file);
+            pr_err("[ELF] %s: too many segments\n", name);
             g_elf.load_failures++;
             return -ENOEXEC;
         }
     }
 
     if (loadable == 0 || max_vaddr <= min_vaddr) {
-        pr_err("[ELF] %s: no loadable segments\n", path);
-        kfree(file);
+        pr_err("[ELF] %s: no loadable segments\n", name);
         g_elf.load_failures++;
         return -ENOEXEC;
     }
 
     image_size = max_vaddr - min_vaddr;
     if (image_size > ELF_MAX_IMAGE_SIZE) {
-        pr_err("[ELF] %s: image too large (%llu bytes)\n", path,
+        pr_err("[ELF] %s: image too large (%llu bytes)\n", name,
                (unsigned long long)image_size);
-        kfree(file);
         g_elf.load_failures++;
         return -E2BIG;
     }
@@ -239,7 +221,6 @@ int elf_load_image(const char *path, elf_image_t *img)
      */
     image = (u8 *)kmalloc((size_t)image_size + ELF_MIN_ALIGN);
     if (!image) {
-        kfree(file);
         g_elf.load_failures++;
         return -ENOMEM;
     }
@@ -282,9 +263,61 @@ int elf_load_image(const char *path, elf_image_t *img)
     img->segment_count = loadable;
     img->loaded = true;
 
+    return 0;
+}
+
+/**
+ * elf_load_image - Load an ELF64 executable from a VFS path
+ *
+ * Reads the file, then hands the bytes to elf_load_buffer(). Kept as a thin
+ * wrapper so the path-based callers are unchanged.
+ *
+ * Returns 0 on success, negative error code on failure.
+ */
+int elf_load_image(const char *path, elf_image_t *img)
+{
+    u8 *file = NULL;
+    u64 file_size = 0;
+    int rc;
+
+    if (!path || !img) {
+        return -EINVAL;
+    }
+
+    rc = read_file(path, &file, &file_size);
+    if (rc != 0) {
+        pr_err("[ELF] Cannot read %s (%d)\n", path, rc);
+        g_elf.load_failures++;
+        return rc;
+    }
+
+    rc = elf_load_buffer(path, file, file_size, img);
+
     kfree(file);
 
-    return 0;
+    return rc;
+}
+
+/**
+ * elf_load_module - Load an ELF64 executable already resident in memory
+ *
+ * @name:       Display name for diagnostics
+ * @image:      Image bytes as handed to the kernel by the bootloader
+ * @image_size: Byte count of @image
+ * @img:        Receives the loaded image description
+ *
+ * Userspace reaches the kernel as a multiboot2 module, not as a file. There is
+ * no mounted root filesystem at boot - vfs_mount() has no caller, so the
+ * nexfs filesystem is registered and never mounted - which means the
+ * path-based elf_load_image() has nothing to read from and could never have
+ * started PID 1. This entry point takes the bytes directly.
+ *
+ * Returns 0 on success, negative error code on failure.
+ */
+int elf_load_module(const char *name, const u8 *image, u64 image_size,
+                    elf_image_t *img)
+{
+    return elf_load_buffer(name, image, image_size, img);
 }
 
 /*===========================================================================*/

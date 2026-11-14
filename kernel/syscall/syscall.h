@@ -410,6 +410,8 @@ s64 sys_rt_sigqueueinfo(struct syscall_args *args);
 s64 sys_kill(struct syscall_args *args);
 s64 sys_tkill(struct syscall_args *args);
 s64 sys_tgkill(struct syscall_args *args);
+s64 sys_mknod(struct syscall_args *args);
+s64 sys_getcmdline(struct syscall_args *args);
 s64 sys_sigpending(struct syscall_args *args);
 s64 sys_sigsuspend(struct syscall_args *args);
 s64 sys_sigreturn(struct syscall_args *args);

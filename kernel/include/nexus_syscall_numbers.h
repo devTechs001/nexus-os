@@ -270,4 +270,22 @@
 #define SYS_NEXUS_STOP_SERVICE       93
 #define SYS_NEXUS_QUERY_SERVICE      94
 
+/*
+ * mknod is used by userspace init to create the /dev nodes it opens, so it
+ * needs a number even though no kernel handler is registered for it yet. The
+ * dispatcher answers ENOSYS for unregistered slots, which is the honest
+ * response and is what init already has to tolerate: device nodes are created
+ * by the kernel from its own table, not on request.
+ */
+#define SYS_MKNOD                    95
+
+/*
+ * getcmdline - copy this boot's kernel command line into a user buffer.
+ *
+ * Needed by userspace init: it parses the same option string the kernel parsed
+ * (quiet, splash, virt=, terminal, ...), and until this call existed it had no
+ * way to obtain it.
+ */
+#define SYS_GET_CMDLINE              96
+
 #endif /* _NEXUS_SYSCALL_NUMBERS_H */

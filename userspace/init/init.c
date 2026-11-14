@@ -140,6 +140,7 @@ extern int syscall_kill(pid_t pid, int sig);
 extern int syscall_reboot(int magic);
 extern int syscall_sigaction(int signum, const void *act, void *oldact);
 extern int syscall_gettimeofday(struct timeval *tv, void *tz);
+extern ssize_t syscall_getcmdline(char *buf, size_t size);
 
 /* File constants */
 #define O_RDONLY        0
@@ -761,6 +762,35 @@ static void init_logging(void)
     }
 }
 
+/*
+ * init_get_cmdline - Return this boot's kernel command line
+ *
+ * main() calls this and was the only caller, but the function was never
+ * defined anywhere in the tree - the call resolved to nothing, so the option
+ * string could never reach init_parse_cmdline() and every init-side option was
+ * ignored.
+ *
+ * The string is fetched once through SYS_GET_CMDLINE and cached in the init
+ * state, because the parser walks it and several later paths re-read it.
+ * Returns an empty string rather than NULL when the kernel has no command line,
+ * so callers can test cmdline[0] without a second NULL check.
+ */
+static const char *init_get_cmdline(void)
+{
+    ssize_t n;
+
+    if (init_state.cmdline[0] != '\0') {
+        return init_state.cmdline;
+    }
+
+    n = syscall_getcmdline(init_state.cmdline, sizeof(init_state.cmdline));
+    if (n <= 0) {
+        init_state.cmdline[0] = '\0';
+    }
+
+    return init_state.cmdline;
+}
+
 /**
  * init_parse_cmdline - Parse kernel command line
  */
@@ -925,7 +955,6 @@ int main(int argc, char *argv[], char *envp[])
      * kernel option intended for init was ignored.
      */
     {
-        extern const char *init_get_cmdline(void);
         const char *cmdline = init_get_cmdline();
 
         if (cmdline && cmdline[0]) {

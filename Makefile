@@ -55,6 +55,10 @@ KERNEL_NAME = nexus-kernel
 KERNEL_BIN = $(BUILD_DIR)/$(KERNEL_NAME).bin
 KERNEL_ISO = $(BUILD_DIR)/$(KERNEL_NAME).iso
 
+# Userspace PID 1 image. Packaged into the ISO as a multiboot2 module and
+# loaded by the kernel at boot; never linked into the kernel image.
+USERSPACE_ELF = $(BUILD_DIR)/userspace/init.elf
+
 # Compiler flags - freestanding kernel
 CFLAGS = -ffreestanding -fno-stack-protector -fno-pie -nostdlib -nodefaultlibs \
          -Wall -Wextra -O2 -g \
@@ -393,13 +397,7 @@ C_OBJECTS = $(BUILD_DIR)/kernel.o \
             $(BUILD_DIR)/apic.o \
             $(BUILD_DIR)/ecc.o \
             $(BUILD_DIR)/sha.o \
-            $(BUILD_DIR)/boot_menu.o \
-            $(BUILD_DIR)/syscall_wrapper.o \
-            $(BUILD_DIR)/libc_string.o \
-            $(BUILD_DIR)/libc_stdlib.o \
-            $(BUILD_DIR)/libc_stdio.o \
-            $(BUILD_DIR)/user_init.o \
-            $(BUILD_DIR)/service_manager.o
+            $(BUILD_DIR)/boot_menu.o
 
 OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
@@ -1225,14 +1223,20 @@ $(BUILD_DIR)/boot_menu.o: boot/bootloader/boot_menu.c | $(BUILD_DIR)
 # ---------------------------------------------------------------------------
 # Userspace runtime (libc, libsys, init, services)
 #
-# These 40k lines were written and never compiled: they were absent from
-# C_SOURCES, so no build ever looked at them. One pattern rule covers the
-# whole tree; each source keeps its natural path so include directives resolve
-# as written.
+# These programs are NOT part of the kernel. They are a separate freestanding
+# ET_EXEC image linked at 0x400000 by userspace/linker.ld, packaged into the ISO
+# as a multiboot2 module, and handed to the kernel by GRUB at boot. The kernel
+# loads it, maps it, and enters ring 3 at _start; see kernel/arch/x86_64/boot/
+# boot.asm (module tag request) and kernel/core/userspace_loader.c.
 #
-# The kernel is freestanding and provides its own string/memory primitives, so
-# the userspace libc objects are built with the same freestanding flags and
-# linked into the kernel image rather than a separate user binary.
+# Linking them into the kernel was the old arrangement and it could not work:
+# libc_string/libc_stdlib/libc_stdio redefine 33 symbols the kernel already
+# defines (memcpy, strlen, atoi, vsnprintf, ...), so ld refused the kernel image
+# with "multiple definition" errors. Two programs with two entry points and two
+# address spaces need two binaries.
+#
+# Both sides stay in sync on syscall numbering through
+# kernel/include/nexus_syscall_numbers.h, which libsys includes.
 # ---------------------------------------------------------------------------
 USERSPACE_DIRS = userspace/libc userspace/libsys userspace/init userspace/services
 USERSPACE_CFLAGS = -ffreestanding -fno-stack-protector -fno-pie -m64 \
@@ -1241,29 +1245,81 @@ USERSPACE_CFLAGS = -ffreestanding -fno-stack-protector -fno-pie -m64 \
                    -D__FREESTANDING__=1 \
                    -Wno-unused-parameter -Wno-unused-variable
 
-$(BUILD_DIR)/syscall_wrapper.o: userspace/libsys/syscall_wrapper.c | $(BUILD_DIR)
-	@echo "  [CC]    $<"
+# Userspace objects get their own directory so they can never be confused with
+# kernel objects by a pattern rule or by the check-build guard.
+USER_BUILD_DIR = $(BUILD_DIR)/userspace
+USER_OBJECTS = $(USER_BUILD_DIR)/syscall_wrapper.o \
+               $(USER_BUILD_DIR)/syscall_glue.o \
+               $(USER_BUILD_DIR)/crt0.o \
+               $(USER_BUILD_DIR)/string.o \
+               $(USER_BUILD_DIR)/stdlib.o \
+               $(USER_BUILD_DIR)/stdio.o \
+               $(USER_BUILD_DIR)/math.o \
+               $(USER_BUILD_DIR)/user_init.o
+
+$(USER_BUILD_DIR):
+	@mkdir -p $@
+
+$(USER_BUILD_DIR)/%.o: userspace/libc/%.c | $(USER_BUILD_DIR)
+	@echo "  [CC-u]  $<"
 	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
-$(BUILD_DIR)/libc_string.o: userspace/libc/string.c | $(BUILD_DIR)
-	@echo "  [CC]    $<"
+$(USER_BUILD_DIR)/%.o: userspace/libsys/%.c | $(USER_BUILD_DIR)
+	@echo "  [CC-u]  $<"
 	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
-$(BUILD_DIR)/libc_stdlib.o: userspace/libc/stdlib.c | $(BUILD_DIR)
-	@echo "  [CC]    $<"
+$(USER_BUILD_DIR)/%.o: userspace/libsys/%.S | $(USER_BUILD_DIR)
+	@echo "  [AS-u]  $<"
+	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   assemble failed: $<"; exit 1; }
+
+$(USER_BUILD_DIR)/user_init.o: userspace/init/init.c | $(USER_BUILD_DIR)
+	@echo "  [CC-u]  $<"
 	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
-$(BUILD_DIR)/libc_stdio.o: userspace/libc/stdio.c | $(BUILD_DIR)
-	@echo "  [CC]    $<"
+# ---------------------------------------------------------------------------
+# userspace/init.elf - the PID 1 image
+#
+# Linked at its own base address with its own linker script, entry _start from
+# crt0.S. -nostdlib keeps the host libc out; every symbol resolves inside the
+# image. The result is what GRUB hands the kernel as a multiboot2 module.
+# ---------------------------------------------------------------------------
+$(USERSPACE_ELF): $(USER_OBJECTS) userspace/linker.ld
+	@echo "  [LD-u]  $@"
+	@$(LD) -T userspace/linker.ld -nostdlib -z max-page-size=0x1000 \
+		-o $@ $(USER_OBJECTS) 2>&1
+	@echo "  [INFO]  Userspace size: $$(stat -c %s $@ 2>/dev/null || stat -f %z $@ 2>/dev/null || echo 0) bytes"
+
+# ---------------------------------------------------------------------------
+# service_manager.elf - the first service init will exec
+#
+# init starts services by path through SYS_EXECVE (userspace/init/init.c:515),
+# so the service manager is a separate program, not part of the PID 1 image.
+# It shares every library object with init but supplies its own main(), which is
+# exactly why the two cannot be linked together: two mains, one image.
+#
+# It is built but not yet packaged: init execs /sbin/service_manager, and no
+# root filesystem is mounted at boot for that path to resolve against. Building
+# it here keeps it compiling and linking so the gap is visible rather than
+# silent; packaging it is part of getting a root filesystem mounted.
+# ---------------------------------------------------------------------------
+SERVICE_MANAGER_ELF = $(USER_BUILD_DIR)/service_manager.elf
+
+$(USER_BUILD_DIR)/service_manager.o: userspace/services/service_manager.c | $(USER_BUILD_DIR)
+	@echo "  [CC-u]  $<"
 	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
-$(BUILD_DIR)/user_init.o: userspace/init/init.c | $(BUILD_DIR)
-	@echo "  [CC]    $<"
-	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+$(SERVICE_MANAGER_ELF): $(USER_BUILD_DIR)/service_manager.o \
+                        $(filter-out $(USER_BUILD_DIR)/user_init.o,$(USER_OBJECTS)) \
+                        userspace/linker.ld
+	@echo "  [LD-u]  $@"
+	@$(LD) -T userspace/linker.ld -nostdlib -z max-page-size=0x1000 \
+		-o $@ $(USER_BUILD_DIR)/service_manager.o \
+		$(filter-out $(USER_BUILD_DIR)/user_init.o,$(USER_OBJECTS)) 2>&1
 
-$(BUILD_DIR)/service_manager.o: userspace/services/service_manager.c | $(BUILD_DIR)
-	@echo "  [CC]    $<"
-	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+userspace-bin: $(USERSPACE_ELF) $(SERVICE_MANAGER_ELF)
+	@echo "  [INFO]  Userspace binaries built"
+
+.PHONY: userspace-bin
 
 $(BUILD_DIR)/boot_enhanced.o: boot/bootloader/gui-boot-enhanced.c | $(BUILD_DIR)
 	@echo "  [CC]    $<"
@@ -1359,6 +1415,14 @@ check-build: $(OBJECTS)
 	  printf '            %s\n' $$absent; \
 	  exit 1; \
 	fi
+	@leaked=$$(printf '%s\n' $(C_OBJECTS) | grep -E '(^|/)(syscall_wrapper|syscall_glue|crt0|libc_string|libc_stdlib|libc_stdio|user_init|service_manager)\.o$$'); \
+	if [ -n "$$leaked" ]; then \
+	  echo "  [ERR]   userspace objects found in C_OBJECTS:"; \
+	  printf '            %s\n' $$leaked; \
+	  echo "  [ERR]   these are linked into their own image by $(USERSPACE_ELF)"; \
+	  echo "  [ERR]   linking them into the kernel reintroduces the multiple-definition failure"; \
+	  exit 1; \
+	fi
 	@echo "  [CHECK] link inputs OK - $(words $(C_OBJECTS)) C objects"
 
 # Link kernel
@@ -1393,38 +1457,47 @@ $(ISO_DIR)/boot/grub/grub.cfg: | $(BUILD_DIR)
 	@echo 'menuentry "[GRAPHICAL] NEXUS OS - Graphical Mode (Default)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash virt=auto' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[TEXT]      NEXUS OS - Text Mode (VGA Console)" {' >> $@
 	@echo '    set gfxpayload=text' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[SAFE]      NEXUS OS - Safe Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin nomodeset nosmp noapic nolapic' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[DEBUG]     NEXUS OS - Debug Mode" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin debug loglevel=7 earlyprintk=vga' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[NATIVE]    NEXUS OS - Native Hardware" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin virt=native' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[TERM]      NEXUS OS - Terminal (Nexus Shell)" {' >> $@
 	@echo '    set gfxpayload=1024x768x32' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin splash terminal virt=auto' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 	@echo '' >> $@
 	@echo 'menuentry "[MENU]      NEXUS OS - Interactive Boot Menu" {' >> $@
 	@echo '    multiboot2 /boot/$(KERNEL_NAME).bin' >> $@
+	@echo '    module2 /boot/init.elf init' >> $@
 	@echo '}' >> $@
 
 # Create bootable ISO
-$(KERNEL_ISO): $(KERNEL_BIN) $(ISO_DIR)/boot/grub/grub.cfg
+$(KERNEL_ISO): $(KERNEL_BIN) $(USERSPACE_ELF) $(ISO_DIR)/boot/grub/grub.cfg
 	@echo "  [CP]    Copying kernel to ISO dir"
 	@cp $(KERNEL_BIN) $(ISO_DIR)/boot/
+	@echo "  [CP]    Copying userspace init to ISO dir"
+	@cp $(USERSPACE_ELF) $(ISO_DIR)/boot/init.elf
 	@echo "  [GRUB-MKRESCUE] Creating ISO"
 	@if command -v $(GRUB_MKRESUE) > /dev/null 2>&1; then \
 		$(GRUB_MKRESUE) -o $(KERNEL_ISO) $(ISO_DIR) 2>&1; \

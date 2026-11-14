@@ -8,6 +8,12 @@
 
 #include "syscall.h"
 #include "../sched/sched.h"
+
+/*
+ * The command line in force for this boot, filled in by kernel_main() in
+ * kernel/core/kernel.c. SYS_GET_CMDLINE serves it to userspace init.
+ */
+extern char g_boot_cmdline_effective[];
 #include "../mm/mm.h"
 #include "../ipc/ipc.h"
 
@@ -2812,4 +2818,77 @@ s64 sys_tgkill(struct syscall_args *args)
     pr_debug("sys_tgkill: sending signal %d to TGID %u, TID %u\n", sig, tgid, tid);
 
     return task_kill(task, sig);
+}
+
+/**
+ * sys_getcmdline - Copy this boot's kernel command line into userspace
+ * @args->arg1: user buffer
+ * @args->arg2: buffer size in bytes
+ *
+ * Returns: number of bytes written including the NUL, or -errno
+ *
+ * userspace/init/init.c calls init_get_cmdline() to obtain the option string so
+ * it can honour the same flags the kernel parsed (quiet, splash, virt=,
+ * terminal, ...). That function was declared and called but never defined, so
+ * PID 1 could not see the command line at all and every init-side option was
+ * silently ignored. This is the kernel half of that call.
+ *
+ * The string is a boot property, not per-process state, so it is served from
+ * the buffer kernel_main() filled in rather than from a copy on the task.
+ */
+s64 sys_getcmdline(struct syscall_args *args)
+{
+    char *user_buf = (char *)args->arg1;
+    u64 user_size = args->arg2;
+    size_t len;
+    s64 ret;
+
+    if (!user_buf) {
+        return -EFAULT;
+    }
+
+    if (user_size == 0) {
+        return -EINVAL;
+    }
+
+    len = strlen(g_boot_cmdline_effective);
+
+    /* Never write more than the caller's buffer, and always NUL-terminate. */
+    if (len + 1 > user_size) {
+        len = user_size - 1;
+    }
+
+    ret = copy_to_user(user_buf, g_boot_cmdline_effective, len);
+    if (ret < 0) {
+        return ret;
+    }
+
+    /* Explicit terminator: copy_to_user above copies exactly len bytes. */
+    {
+        char nul = '\0';
+
+        ret = copy_to_user(user_buf + len, &nul, 1);
+        if (ret < 0) {
+            return ret;
+        }
+    }
+
+    return (s64)(len + 1);
+}
+
+/**
+ * sys_mknod - Create a filesystem node
+ *
+ * Returns: -ENOSYS
+ *
+ * Reserved number (SYS_MKNOD) so userspace init can issue the call and get a
+ * defined answer. Device nodes in this tree are created by the kernel from its
+ * own device table, not on request from userspace, so there is no handler to
+ * dispatch to yet. Returning ENOSYS is accurate and lets init degrade instead
+ * of failing to link.
+ */
+s64 sys_mknod(struct syscall_args *args)
+{
+    (void)args;
+    return -ENOSYS;
 }
