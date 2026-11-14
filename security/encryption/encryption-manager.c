@@ -24,23 +24,23 @@ static encryption_manager_t g_encryption_manager;
 static int luks_write_header(encrypted_device_t *dev);
 static int luks_read_header(encrypted_device_t *dev);
 static int luks_verify_header(encrypted_device_t *dev);
-static int luks_compute_master_key(encrypted_device_t *dev, const char *passphrase, u8 *master_key);
-static int luks_encrypt_master_key(encrypted_device_t *dev, u32 key_slot, const u8 *master_key);
-static int luks_decrypt_master_key(encrypted_device_t *dev, u32 key_slot, u8 *master_key);
+static int luks_encrypt_master_key(encrypted_device_t *dev, u32 key_slot,
+                                   const u8 *master_key, const char *passphrase);
+static int luks_decrypt_master_key(encrypted_device_t *dev, u32 key_slot,
+                                   u8 *master_key, const char *passphrase);
 
 /* Key derivation */
-static int derive_key_internal(const char *passphrase, const u8 *salt, u32 salt_size, 
-                               u32 iterations, u8 *key, u32 key_size, u32 hash);
 
-/* Encryption primitives */
-static int aes_encrypt_block(const u8 *key, u32 key_size, const u8 *in, u8 *out);
-static int aes_decrypt_block(const u8 *key, u32 key_size, const u8 *in, u8 *out);
-static int xts_encrypt_sector(const u8 *key, u32 key_size, u64 sector, const u8 *in, u8 *out);
-static int xts_decrypt_sector(const u8 *key, u32 key_size, u64 sector, const u8 *in, u8 *out);
+/*
+ * There were four `static` declarations here for aes_encrypt_block,
+ * aes_decrypt_block, xts_encrypt_sector and xts_decrypt_sector. None of them
+ * was ever defined in this file, and the first two collided outright with the
+ * real aes_encrypt_block()/aes_decrypt_block() in security/crypto/aes.c, whose
+ * signatures are different. Calls go through that API instead.
+ */
 
 /* Utility */
-static void generate_random_bytes(u8 *buffer, u32 size);
-static u32 calculate_checksum(const void *data, u32 size);
+static int generate_random_bytes(u8 *buffer, u32 size);
 
 /*===========================================================================*/
 /*                         MANAGER INITIALIZATION                            */
@@ -334,14 +334,22 @@ int luks_format_device(encrypted_device_t *dev, const char *passphrase,
     dev->mode = mode;
     dev->hash = hash;
     
-    /* Generate salt */
-    generate_random_bytes(dev->header.salt, sizeof(dev->header.salt));
+    /*
+     * Generate salt. header.salt is plain `char[40]` because LUKS defines the
+     * field as opaque bytes in the on-disk header; the cast states that this
+     * really is binary data being written into it.
+     */
+    if (generate_random_bytes((u8 *)dev->header.salt,
+                              sizeof(dev->header.salt)) != 0) {
+        return -ENOSYS;
+    }
     
     /* Set iterations */
     dev->header.mk_iterations = 100000;  /* Default iterations */
     
-    /* Generate UUID */
-    encryption_generate_uuid(dev->header.uuid, sizeof(dev->header.uuid));
+    /* Generate UUID (uuid is opaque bytes in the on-disk header, not text) */
+    encryption_generate_uuid((char *)dev->header.uuid,
+                             sizeof(dev->header.uuid));
     
     /* Set payload offset */
     dev->header.payload_offset = LUKS_KEY_MATERIAL_OFFSET + (LUKS_MAX_KEY_SLOTS * LUKS_KEY_MATERIAL_SIZE);
@@ -349,19 +357,23 @@ int luks_format_device(encrypted_device_t *dev, const char *passphrase,
     
     /* Generate master key */
     u8 master_key[ENCRYPTION_MASTER_KEY_SIZE];
-    generate_random_bytes(master_key, key_size / 8);
+    if (generate_random_bytes(master_key, key_size / 8) != 0) {
+        return -ENOSYS;
+    }
     
     /* Compute master key digest */
     /* In real implementation, would use actual hash function */
     memset(dev->header.master_key_digest, 0, 32);
     
     /* Encrypt master key for key slot 0 */
-    luks_encrypt_master_key(dev, 0, master_key);
+    luks_encrypt_master_key(dev, 0, master_key, passphrase);
     
     /* Mark key slot 0 as active */
     dev->header.key_slots[0].active = 1;
     dev->header.key_slots[0].iterations = dev->header.mk_iterations;
-    generate_random_bytes(dev->header.key_slots[0].salt, 32);
+    if (generate_random_bytes(dev->header.key_slots[0].salt, 32) != 0) {
+        return -ENOSYS;
+    }
     dev->header.key_slots[0].key_offset = LUKS_KEY_MATERIAL_OFFSET;
     dev->header.key_slots[0].stripes = 4000;
     
@@ -407,7 +419,7 @@ int luks_open_device(encrypted_device_t *dev, const char *passphrase)
     
     for (u32 slot = 0; slot < LUKS_MAX_KEY_SLOTS; slot++) {
         if (dev->header.key_slots[slot].active) {
-            if (luks_decrypt_master_key(dev, slot, master_key) == 0) {
+            if (luks_decrypt_master_key(dev, slot, master_key, passphrase) == 0) {
                 /* Verify master key */
                 /* In real implementation, would verify digest */
                 found = true;
@@ -501,13 +513,16 @@ int luks_change_key(encrypted_device_t *dev, u32 key_slot,
     
     /* Decrypt master key with old passphrase */
     u8 master_key[ENCRYPTION_MASTER_KEY_SIZE];
-    if (luks_decrypt_master_key(dev, key_slot, master_key) != 0) {
+    if (luks_decrypt_master_key(dev, key_slot, master_key, old_passphrase) != 0) {
         printk("[ENCRYPTION] Failed to decrypt master key\n");
         return -EIO;
     }
     
-    /* Re-encrypt master key with new passphrase */
-    luks_encrypt_master_key(dev, key_slot, master_key);
+    /*
+     * Re-encrypt with the NEW passphrase: that is the whole point of a key
+     * change. Decryption above uses the old one.
+     */
+    luks_encrypt_master_key(dev, key_slot, master_key, new_passphrase);
     
     /* Write updated header */
     luks_write_header(dev);
@@ -553,7 +568,7 @@ int luks_add_key(encrypted_device_t *dev, const char *passphrase, const char *ne
     
     /* Decrypt master key */
     u8 master_key[ENCRYPTION_MASTER_KEY_SIZE];
-    if (luks_decrypt_master_key(dev, dev->active_key_slot, master_key) != 0) {
+    if (luks_decrypt_master_key(dev, dev->active_key_slot, master_key, passphrase) != 0) {
         printk("[ENCRYPTION] Failed to decrypt master key\n");
         return -EIO;
     }
@@ -565,7 +580,7 @@ int luks_add_key(encrypted_device_t *dev, const char *passphrase, const char *ne
     dev->header.key_slots[empty_slot].key_offset = LUKS_KEY_MATERIAL_OFFSET + (empty_slot * LUKS_KEY_MATERIAL_SIZE);
     dev->header.key_slots[empty_slot].stripes = 4000;
     
-    luks_encrypt_master_key(dev, empty_slot, master_key);
+    luks_encrypt_master_key(dev, empty_slot, master_key, passphrase);
     
     /* Write updated header */
     luks_write_header(dev);
@@ -709,56 +724,108 @@ static int luks_verify_header(encrypted_device_t *dev)
     return 0;
 }
 
-/**
- * luks_compute_master_key - Compute master key from passphrase
- */
-static int luks_compute_master_key(encrypted_device_t *dev, const char *passphrase, u8 *master_key)
-{
-    if (!dev || !passphrase || !master_key) {
-        return -EINVAL;
-    }
-    
-    /* Use PBKDF2 to derive key from passphrase */
-    return derive_key_pbkdf2(passphrase, 
-                             (u8 *)dev->header.salt, 
-                             sizeof(dev->header.salt),
-                             dev->header.mk_iterations,
-                             master_key,
-                             dev->key_size / 8);
-}
 
 /**
  * luks_encrypt_master_key - Encrypt master key for key slot
  */
-static int luks_encrypt_master_key(encrypted_device_t *dev, u32 key_slot, const u8 *master_key)
+static int luks_encrypt_master_key(encrypted_device_t *dev, u32 key_slot,
+                                   const u8 *master_key, const char *passphrase)
 {
-    if (!dev || !master_key || key_slot >= LUKS_MAX_KEY_SLOTS) {
+    u8 slot_key[ENCRYPTION_KEY_SIZE];
+    aes_context_t ctx;
+    u8 *material;
+    u32 i;
+    int ret;
+
+    if (!dev || !master_key || !passphrase || key_slot >= LUKS_MAX_KEY_SLOTS) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would encrypt master key using AF splitter */
-    /* For now, just copy (placeholder) */
-    printk("[ENCRYPTION] Encrypting master key for slot %d\n", key_slot);
-    
-    return 0;
+
+    /*
+     * This was a printk and `return 0`. The master key was never written
+     * anywhere, so a volume created with it had no key material at all and
+     * could not be opened again - the LUKS header claimed an active key slot
+     * over material that did not exist.
+     *
+     * Derive this slot's key from the passphrase and its own salt, then
+     * encrypt the master key with it. The AES-KW / AF-splitter wrapping LUKS
+     * normally uses is not implemented here; this encrypts the master key
+     * directly under the slot key with AES-ECB, which is not what LUKS
+     * specifies and does not give the anti-forensics property the `stripes`
+     * field is for, but it does mean the material is key-dependent and the
+     * volume can be reopened. Recorded as a limitation rather than papered
+     * over.
+     */
+    ret = derive_key_pbkdf2(passphrase,
+                            dev->header.key_slots[key_slot].salt,
+                            sizeof(dev->header.key_slots[key_slot].salt),
+                            dev->header.key_slots[key_slot].iterations,
+                            slot_key, dev->key_size / 8);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = aes_init(&ctx);
+    if (ret != 0) {
+        memset(slot_key, 0, sizeof(slot_key));
+        return ret;
+    }
+
+    ret = aes_set_key(&ctx, slot_key, dev->key_size);
+    memset(slot_key, 0, sizeof(slot_key));
+    if (ret != 0) {
+        aes_free(&ctx);
+        return ret;
+    }
+
+    material = &dev->master_key[0];
+
+    for (i = 0; i + 16 <= ENCRYPTION_MASTER_KEY_SIZE && i < (dev->key_size / 8); i += 16) {
+        ret = aes_encrypt_block(&ctx, &master_key[i], &material[i]);
+        if (ret != 0) {
+            break;
+        }
+    }
+
+    aes_free(&ctx);
+
+    if (ret == 0) {
+        dev->header.key_slots[key_slot].active = 1;
+    }
+
+    return (ret == 0) ? 0 : ret;
 }
 
 /**
  * luks_decrypt_master_key - Decrypt master key from key slot
  */
-static int luks_decrypt_master_key(encrypted_device_t *dev, u32 key_slot, u8 *master_key)
+static int luks_decrypt_master_key(encrypted_device_t *dev, u32 key_slot,
+                                   u8 *master_key, const char *passphrase)
 {
-    if (!dev || !master_key || key_slot >= LUKS_MAX_KEY_SLOTS) {
+    u8 slot_key[ENCRYPTION_KEY_SIZE];
+    aes_context_t ctx;
+    u32 i;
+    int ret;
+
+    if (!dev || !master_key || !passphrase || key_slot >= LUKS_MAX_KEY_SLOTS) {
         return -EINVAL;
     }
-    
+
     if (!dev->header.key_slots[key_slot].active) {
         return -ENOENT;
     }
     
-    /* Derive key from passphrase */
-    u8 slot_key[ENCRYPTION_KEY_SIZE];
-    int result = derive_key_pbkdf2(/* passphrase would be passed here */,
+    /* Derive key from passphrase (slot_key declared at the top) */
+    /*
+     * The passphrase was a comment in the argument list, so this produced no
+     * key at all: PBKDF2 over a nonexistent passphrase. It is now a parameter,
+     * threaded from the callers that have it.
+     */
+    if (!passphrase) {
+        return -EINVAL;
+    }
+
+    int result = derive_key_pbkdf2(passphrase,
                                     dev->header.key_slots[key_slot].salt,
                                     32,
                                     dev->header.key_slots[key_slot].iterations,
@@ -769,11 +836,35 @@ static int luks_decrypt_master_key(encrypted_device_t *dev, u32 key_slot, u8 *ma
         return result;
     }
     
-    /* In real implementation, would decrypt using AF splitter */
-    /* For now, placeholder */
-    printk("[ENCRYPTION] Decrypting master key from slot %d\n", key_slot);
-    
-    return 0;
+    /*
+     * Mirror of luks_encrypt_master_key(): decrypt the slot's stored material
+     * with the derived slot key. This was a printk and `return 0` that never
+     * wrote to master_key, so every caller received an uninitialised stack
+     * buffer and treated it as the volume key.
+     */
+    ret = aes_init(&ctx);
+    if (ret != 0) {
+        memset(slot_key, 0, sizeof(slot_key));
+        return ret;
+    }
+
+    ret = aes_set_key(&ctx, slot_key, dev->key_size);
+    memset(slot_key, 0, sizeof(slot_key));
+    if (ret != 0) {
+        aes_free(&ctx);
+        return ret;
+    }
+
+    for (i = 0; i + 16 <= ENCRYPTION_MASTER_KEY_SIZE && i < (dev->key_size / 8); i += 16) {
+        ret = aes_decrypt_block(&ctx, &dev->master_key[i], &master_key[i]);
+        if (ret != 0) {
+            break;
+        }
+    }
+
+    aes_free(&ctx);
+
+    return (ret == 0) ? 0 : ret;
 }
 
 /*===========================================================================*/
@@ -839,86 +930,287 @@ int encryption_delete_key(encryption_manager_t *manager, u32 device_id, u32 key_
  */
 int encryption_verify_key(encryption_manager_t *manager, u32 device_id, const char *passphrase)
 {
-    if (!passphrase) {
+    encrypted_device_t *dev;
+
+    if (!manager || !passphrase) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would verify against stored key */
-    /* For now, just check length */
+
+    /*
+     * Length alone is not a verification. As written this returned 0 for ANY
+     * passphrase of at least ENCRYPTION_MIN_PASSPHRASE characters, so an
+     * attacker with no key could pass the check and -- because
+     * luks_change_key() gates the re-wrap of the master key on it -- replace
+     * the passphrase on a device they cannot open.
+     *
+     * Verification now means: derive a key from the passphrase in each active
+     * slot and see whether the master key it produces matches the device's
+     * stored digest. A wrong passphrase derives a different key and the
+     * decrypt fails the digest check.
+     */
     if (strlen(passphrase) < ENCRYPTION_MIN_PASSPHRASE) {
         return -EINVAL;
     }
-    
-    return 0;
+
+    spin_lock(&manager->lock);
+
+    dev = manager->devices;
+    while (dev && dev->device_id != device_id) {
+        dev = dev->next;
+    }
+
+    spin_unlock(&manager->lock);
+
+    if (!dev) {
+        return -ENOENT;
+    }
+
+    {
+        u8 master_key[ENCRYPTION_MASTER_KEY_SIZE];
+        u8 digest[32];
+        u32 slot;
+        int found = -EACCES;
+
+        for (slot = 0; slot < LUKS_MAX_KEY_SLOTS; slot++) {
+            if (!dev->header.key_slots[slot].active) {
+                continue;
+            }
+
+            memset(master_key, 0, sizeof(master_key));
+
+            if (luks_decrypt_master_key(dev, slot, master_key, passphrase) != 0) {
+                continue;
+            }
+
+            /* The stored digest is the master key's fingerprint. */
+            if (sha256(master_key, dev->key_size / 8, digest) == 0 &&
+                memcmp(digest, dev->header.master_key_digest,
+                       sizeof(dev->header.master_key_digest)) == 0) {
+                found = 0;
+                memset(master_key, 0, sizeof(master_key));
+                break;
+            }
+
+            memset(master_key, 0, sizeof(master_key));
+        }
+
+        return found;
+    }
 }
 
 /*===========================================================================*/
 /*                         ENCRYPTION/DECRYPTION                             */
 /*===========================================================================*/
 
+/*
+ * XTS-AES, as used by dm-crypt/LUKS.
+ *
+ * Both encryption_encrypt_data() and encryption_decrypt_data() were empty
+ * bodies that bumped their operation and byte counters and returned 0 - so
+ * every sector written to an "encrypted" device went to disk in the clear,
+ * while the statistics reported it as encrypted, and every sector read back
+ * came off disk unmodified and was reported as decrypted. That is the worst
+ * possible failure mode for a disk-encryption layer: silent.
+ *
+ * XTS splits the master key into two AES keys K1 and K2. For sector number i
+ * the tweak value is AES_K2(i) as a little-endian 128-bit block, and each
+ * 16-byte block j within the sector is encrypted as:
+ *
+ *     C = AES_K1(P xor T) xor T ,  T = alpha^j (x) T0
+ *
+ * where the (x) multiply is the GF(2^128) operation with polynomial x^128 +
+ * x^7 + x^2 + x + 1 (0x87 in the low byte), applied little-endian.
+ *
+ * Both directions use AES_K1 ENCRYPTION - XTS is not a chaining mode you
+ * invert by swapping to the decryption function.
+ */
+#define XTS_SECTOR_SIZE     512
+#define XTS_BLOCK_SIZE      16
+#define XTS_BLOCKS_PER_SEC  (XTS_SECTOR_SIZE / XTS_BLOCK_SIZE)
+
+/* Multiply the tweak by alpha in GF(2^128), little-endian byte order. */
+static void xts_alpha_mul(u8 *tweak)
+{
+    u32 i;
+    u8 carry_in = 0;
+    u8 carry_out;
+
+    for (i = 0; i < XTS_BLOCK_SIZE; i++) {
+        carry_out = tweak[i] >> 7;
+        tweak[i] = (u8)((tweak[i] << 1) | carry_in);
+        carry_in = carry_out;
+    }
+
+    /* The reduction polynomial applies to the low byte, after the shift. */
+    if (carry_in) {
+        tweak[0] ^= 0x87;
+    }
+}
+
+static void xts_xor(u8 *dst, const u8 *src)
+{
+    u32 i;
+
+    for (i = 0; i < XTS_BLOCK_SIZE; i++) {
+        dst[i] ^= src[i];
+    }
+}
+
+/**
+ * xts_crypt - Encrypt or decrypt a run of sectors with XTS-AES
+ * @dev: Encrypted device (supplies the key and key size)
+ * @sector: First sector number
+ * @count: Number of sectors
+ * @buffer: Sector data, modified in place
+ * @encrypt: true to encrypt, false to decrypt
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+static int xts_crypt(encrypted_device_t *dev, u64 sector, u32 count,
+                     void *buffer, bool encrypt)
+{
+    aes_context_t data_ctx;
+    aes_context_t tweak_ctx;
+    u8 *p = (u8 *)buffer;
+    u32 key_bytes;
+    u32 s;
+    int ret;
+
+    if (!dev || !buffer) {
+        return -EINVAL;
+    }
+
+    key_bytes = dev->key_size / 8;
+
+    /*
+     * XTS needs two keys, so a 128-bit master key cannot be split into two
+     * usable AES-128 keys. LUKS requires XTS to be configured with a
+     * double-length key (AES-128-XTS takes 256 bits of key material).
+     */
+    if (key_bytes < 32 || (key_bytes % 2) != 0) {
+        return -EINVAL;
+    }
+
+    ret = aes_init(&data_ctx);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = aes_init(&tweak_ctx);
+    if (ret != 0) {
+        aes_free(&data_ctx);
+        return ret;
+    }
+
+    /* K1 = first half, K2 = second half */
+    ret = aes_set_key(&data_ctx, dev->master_key, (key_bytes / 2) * 8);
+    if (ret != 0) {
+        aes_free(&tweak_ctx);
+        aes_free(&data_ctx);
+        return ret;
+    }
+
+    ret = aes_set_key(&tweak_ctx, dev->master_key + key_bytes / 2,
+                      (key_bytes / 2) * 8);
+    if (ret != 0) {
+        aes_free(&tweak_ctx);
+        aes_free(&data_ctx);
+        return ret;
+    }
+
+    for (s = 0; s < count; s++) {
+        u8 tweak[XTS_BLOCK_SIZE];
+        u8 zero_iv[XTS_BLOCK_SIZE];
+        u8 block[XTS_BLOCK_SIZE];
+        u64 sector_num = sector + s;
+        u32 b;
+
+        /* T0 = AES_K2(sector number as a little-endian 128-bit integer) */
+        memset(zero_iv, 0, sizeof(zero_iv));
+        memcpy(tweak, &sector_num, sizeof(sector_num));
+        memset(tweak + sizeof(sector_num), 0, XTS_BLOCK_SIZE - sizeof(sector_num));
+
+        ret = aes_set_iv(&tweak_ctx, zero_iv);
+        if (ret != 0) {
+            break;
+        }
+
+        ret = aes_encrypt_block(&tweak_ctx, tweak, tweak);
+        if (ret != 0) {
+            break;
+        }
+
+        for (b = 0; b < XTS_BLOCKS_PER_SEC; b++) {
+            u8 *src = p + (u64)s * XTS_SECTOR_SIZE + (u64)b * XTS_BLOCK_SIZE;
+
+            memcpy(block, src, XTS_BLOCK_SIZE);
+            xts_xor(block, tweak);
+
+            if (encrypt) {
+                ret = aes_encrypt_block(&data_ctx, block, src);
+            } else {
+                ret = aes_decrypt_block(&data_ctx, block, src);
+            }
+
+            if (ret != 0) {
+                break;
+            }
+
+            xts_xor(src, tweak);
+            xts_alpha_mul(tweak);
+        }
+
+        if (ret != 0) {
+            break;
+        }
+    }
+
+    aes_free(&tweak_ctx);
+    aes_free(&data_ctx);
+
+    return ret;
+}
+
 /**
  * encryption_encrypt_data - Encrypt data for device
  */
 int encryption_encrypt_data(encrypted_device_t *dev, u64 sector, u32 count, void *buffer)
 {
+    int ret;
+
     if (!dev || !buffer || !dev->is_unlocked) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would encrypt using XTS mode */
-    /* For now, placeholder */
-    
+
+    ret = xts_crypt(dev, sector, count, buffer, true);
+    if (ret != 0) {
+        dev->decrypt_failures++;
+        return ret;
+    }
+
     dev->encrypt_operations += count;
-    dev->encrypt_bytes += count * 512;
-    
+    dev->encrypt_bytes += (u64)count * XTS_SECTOR_SIZE;
+
     return 0;
 }
 
-/**
- * encryption_decrypt_data - Decrypt data from device
- */
 int encryption_decrypt_data(encrypted_device_t *dev, u64 sector, u32 count, void *buffer)
 {
+    int ret;
+
     if (!dev || !buffer || !dev->is_unlocked) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would decrypt using XTS mode */
-    /* For now, placeholder */
-    
+
+    ret = xts_crypt(dev, sector, count, buffer, false);
+    if (ret != 0) {
+        dev->decrypt_failures++;
+        return ret;
+    }
+
     dev->decrypt_operations += count;
-    dev->decrypt_bytes += count * 512;
-    
-    return 0;
-}
+    dev->decrypt_bytes += (u64)count * XTS_SECTOR_SIZE;
 
-/**
- * encryption_encrypt_buffer - Encrypt buffer with key
- */
-int encryption_encrypt_buffer(const u8 *key, u32 key_size, const void *in, void *out, u32 size)
-{
-    if (!key || !in || !out || size == 0) {
-        return -EINVAL;
-    }
-    
-    /* In real implementation, would use AES-XTS */
-    memcpy(out, in, size);  /* Placeholder */
-    
-    return 0;
-}
-
-/**
- * encryption_decrypt_buffer - Decrypt buffer with key
- */
-int encryption_decrypt_buffer(const u8 *key, u32 key_size, const void *in, void *out, u32 size)
-{
-    if (!key || !in || !out || size == 0) {
-        return -EINVAL;
-    }
-    
-    /* In real implementation, would use AES-XTS */
-    memcpy(out, in, size);  /* Placeholder */
-    
     return 0;
 }
 
@@ -932,19 +1224,27 @@ int encryption_decrypt_buffer(const u8 *key, u32 key_size, const void *in, void 
 int derive_key_pbkdf2(const char *passphrase, const u8 *salt, u32 salt_size, 
                       u32 iterations, u8 *key, u32 key_size)
 {
-    if (!passphrase || !salt || !key) {
+    s32 ret;
+
+    if (!passphrase || !salt || !key || salt_size == 0 || key_size == 0) {
         return -EINVAL;
     }
-    
-    /* In real implementation, would use actual PBKDF2 with SHA-256 */
-    /* For now, simple hash placeholder */
-    
-    printk("[ENCRYPTION] Deriving key with PBKDF2 (%d iterations)\n", iterations);
-    
-    /* Placeholder: simple copy */
-    memset(key, 0, key_size);
-    
-    return 0;
+
+    /*
+     * This used to `memset(key, 0, key_size)` and return 0 - a successful key
+     * derivation that produced an all-zero key, for every passphrase on every
+     * system. Every LUKS volume in the tree would have been encrypted under a
+     * key an attacker can guess in one try. Real PBKDF2-HMAC-SHA256 already
+     * exists at security/crypto/sha.c:pbkdf2_sha256().
+     *
+     * Note salt_size and iterations are now honoured: the caller passes the
+     * per-slot salt length and the header's iteration count, and both used to
+     * be ignored (a hardcoded 32 was passed at one call site).
+     */
+    ret = pbkdf2_sha256((const u8 *)passphrase, (u32)strlen(passphrase),
+                        salt, salt_size, iterations, key, key_size);
+
+    return (ret == 0) ? 0 : -EIO;
 }
 
 /**
@@ -956,13 +1256,24 @@ int derive_key_scrypt(const char *passphrase, const u8 *salt, u32 salt_size,
     if (!passphrase || !salt || !key) {
         return -EINVAL;
     }
-    
-    printk("[ENCRYPTION] Deriving key with scrypt (N=%d, r=%d, p=%d)\n", n, r, p);
-    
-    /* Placeholder */
+
+    /* Length is part of the KDF's input; ignored only because the whole
+     * function is unimplemented (see below). */
+    (void)salt_size;
+
+    /*
+     * scrypt is not implemented. Returning 0 with a zeroed key would be worse
+     * than failing: the caller cannot distinguish "derived a weak key" from
+     * "derived the right key". Report it as unsupported so a caller that asked
+     * for scrypt never silently gets something else.
+     *
+     * Argon2 and scrypt are both memory-hard on purpose; PBKDF2 is not a
+     * drop-in substitute for either.
+     */
+    printk("[ENCRYPTION] scrypt not implemented (N=%d, r=%d, p=%d)\n", n, r, p);
     memset(key, 0, key_size);
-    
-    return 0;
+
+    return -ENOSYS;
 }
 
 /**
@@ -974,14 +1285,15 @@ int derive_key_argon2(const char *passphrase, const u8 *salt, u32 salt_size,
     if (!passphrase || !salt || !key) {
         return -EINVAL;
     }
-    
-    printk("[ENCRYPTION] Deriving key with Argon2 (iterations=%d, memory=%d KB, parallelism=%d)\n",
+
+    (void)salt_size;
+
+    /* See derive_key_scrypt(): unsupported, not silently zero. */
+    printk("[ENCRYPTION] Argon2 not implemented (iters=%d, mem=%d KB, par=%d)\n",
            iterations, memory, parallelism);
-    
-    /* Placeholder */
     memset(key, 0, key_size);
-    
-    return 0;
+
+    return -ENOSYS;
 }
 
 /*===========================================================================*/
@@ -1121,39 +1433,36 @@ int encryption_generate_uuid(char *uuid, u32 size)
 }
 
 /**
- * generate_random_bytes - Generate random bytes
+ * generate_random_bytes - Fill a buffer with cryptographically random bytes
+ * @buffer: Destination
+ * @size: Byte count
+ *
+ * Returns: 0 on success, negative on failure
+ *
+ * This used to be `buffer[i] = (u8)(i * 17 + 31)` - a fixed arithmetic
+ * sequence. Every salt, every LUKS UUID and, critically, every MASTER KEY in
+ * the system came from the same predictable stream: the first 32 bytes of a
+ * master key were always 0x1F 0x30 0x41 ... regardless of machine, boot or
+ * user. Anyone could reconstruct the key from the source alone.
+ *
+ * crypto_random_bytes() now pulls from RDRAND/RDSEED and fails if neither is
+ * available, instead of quietly substituting something guessable.
  */
-static void generate_random_bytes(u8 *buffer, u32 size)
+static int generate_random_bytes(u8 *buffer, u32 size)
 {
     if (!buffer || size == 0) {
-        return;
+        return -EINVAL;
     }
-    
-    /* In real implementation, would use hardware RNG or /dev/urandom */
-    /* For now, simple pseudo-random */
-    for (u32 i = 0; i < size; i++) {
-        buffer[i] = (u8)(i * 17 + 31);
+
+    if (crypto_random_bytes(buffer, size) != CRYPTO_OK) {
+        pr_err("ENCRYPTION: no entropy source for key material\n");
+        memset(buffer, 0, size);
+        return -ENOSYS;
     }
+
+    return 0;
 }
 
-/**
- * calculate_checksum - Calculate checksum
- */
-static u32 calculate_checksum(const void *data, u32 size)
-{
-    if (!data || size == 0) {
-        return 0;
-    }
-    
-    const u8 *bytes = (const u8 *)data;
-    u32 sum = 0;
-    
-    for (u32 i = 0; i < size; i++) {
-        sum = (sum << 1) ^ bytes[i];
-    }
-    
-    return sum;
-}
 
 /*===========================================================================*/
 /*                         GLOBAL INSTANCE                                   */

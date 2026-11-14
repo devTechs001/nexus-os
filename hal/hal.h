@@ -664,4 +664,40 @@ static inline void cpuid_count(u32 eax, u32 count, u32 regs[4])
 #endif
 }
 
+/*---------------------------------------------------------------------------*/
+/*                          TIMER STATISTICS                                 */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * timer_get_stats() took a pointer to `struct timer_stats`, which was never
+ * defined: the function could not be called and, inside it, sizeof() on the
+ * incomplete type did not compile. The counters below are exactly the fields
+ * timer.c fills in.
+ */
+struct timer_stats {
+    u64 tick_period_ns;             /* Nanoseconds per tick */
+    u32 ticks_per_second;           /* Tick rate */
+    u64 total_interrupts;           /* Timer interrupts taken */
+    u64 total_expiries;             /* Timers that expired */
+    u64 active_timers;              /* Timers currently armed, all CPUs */
+    u64 cpu_expiries[MAX_CPUS];     /* Expiries per CPU */
+    char clocksource_name[32];      /* Active clocksource */
+    u64 clocksource_frequency;      /* Its frequency in Hz */
+};
+
+/* Local APIC timer (hal/interrupts/apic.c). timer.c called the one-shot entry
+ * point with no declaration, so the u32 argument was passed through a
+ * prototype the compiler invented. */
+void apic_timer_setup(u32 mode, u32 ticks);
+void apic_timer_set_periodic(u32 ms);
+void apic_timer_set_oneshot(u32 ms);
+void apic_timer_cancel(void);
+
+/* Timer subsystem (hal/timer/timer.c). None of these were declared. */
+void timer_early_init(void);
+void timer_init(void);
+void timer_interrupt(void);
+int timer_get_stats(struct timer_stats *stats);
+void timer_dump_stats(void);
+
 #endif /* _NEXUS_HAL_H */

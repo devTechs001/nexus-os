@@ -962,16 +962,88 @@ s32 ecc_verify(ecc_context_t *ctx, const u8 *hash, u32 hash_len,
  */
 s32 crypto_random_bytes(u8 *buffer, u32 length)
 {
-    u32 i;
-
     if (!buffer || length == 0) {
         return CRYPTO_ERR_INVALID_INPUT;
     }
 
-    /* Simplified random generation */
-    /* In real implementation, use hardware RNG or /dev/urandom */
-    for (i = 0; i < length; i++) {
-        buffer[i] = (u8)(get_time_ms() ^ (i * 0x9E3779B9)) & 0xFF;
+    /*
+     * Key material has to come from a real entropy source.
+     *
+     * This used to derive each byte as `get_time_ms() ^ (i * 0x9E3779B9)` - a
+     * value fully determined by the millisecond clock and the byte index. Two
+     * keys generated in the same millisecond were identical, and an attacker
+     * who knows roughly when a key was made can enumerate the whole space.
+     * Everything upstream of this - ECDSA nonces, RNG state for the encryption
+     * manager's salts and master keys - depended on it.
+     *
+     * RDRAND is used when the CPU has it (CPUID.01H:ECX bit 30). RDSEED is
+     * preferred where available because it is a true entropy source rather
+     * than a DRBG output. When neither is present this function now FAILS
+     * rather than returning predictable bytes.
+     */
+    {
+        u32 regs[4];
+        bool have_rdrand = false;
+        bool have_rdseed = false;
+        u32 i2;
+
+        __asm__ __volatile__("cpuid"
+                             : "=a"(regs[0]), "=b"(regs[1]),
+                               "=c"(regs[2]), "=d"(regs[3])
+                             : "a"(1), "c"(0));
+
+        have_rdrand = (regs[2] & (1u << 30)) != 0;
+
+        __asm__ __volatile__("cpuid"
+                             : "=a"(regs[0]), "=b"(regs[1]),
+                               "=c"(regs[2]), "=d"(regs[3])
+                             : "a"(7), "c"(0));
+
+        have_rdseed = (regs[1] & (1u << 18)) != 0;
+
+        if (!have_rdrand && !have_rdseed) {
+            pr_err("CRYPTO: no hardware entropy source (RDRAND/RDSEED)\n");
+            memset(buffer, 0, length);
+            return CRYPTO_ERR_NOT_SUPPORTED;
+        }
+
+        i2 = 0;
+        while (i2 < length) {
+            u64 word = 0;
+            unsigned char ok = 0;
+            u32 attempts = 0;
+
+            /* The instructions can fail transiently; a bounded retry is the
+             * documented usage. After 10 failures, fall through to the next
+             * source rather than spinning. */
+            while (attempts++ < 10) {
+                if (have_rdseed) {
+                    __asm__ __volatile__("rdseed %0; setc %1"
+                                         : "=r"(word), "=qm"(ok));
+                } else {
+                    __asm__ __volatile__("rdrand %0; setc %1"
+                                         : "=r"(word), "=qm"(ok));
+                }
+
+                if (ok) {
+                    break;
+                }
+            }
+
+            if (!ok) {
+                /*
+                 * Do not hand back whatever is in `word`. Leave the caller
+                 * with a hard failure it can report.
+                 */
+                pr_err("CRYPTO: entropy source failed after retries\n");
+                memset(buffer, 0, length);
+                return CRYPTO_ERR_NOT_SUPPORTED;
+            }
+
+            for (u32 b = 0; b < sizeof(word) && i2 < length; b++) {
+                buffer[i2++] = (u8)(word >> (8 * b));
+            }
+        }
     }
 
     return CRYPTO_OK;
