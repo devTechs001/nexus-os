@@ -451,6 +451,12 @@ int sensor_enable(u32 sensor_id, s32 sampling_rate_hz);
 int sensor_disable(u32 sensor_id);
 int sensor_read(u32 sensor_id, sensor_event_t *event);
 int sensor_set_listener(u32 sensor_id, void (*callback)(sensor_event_t *));
+/* Fused orientation. Declared here now; sensor_get_orientation() was defined in
+ * sensor_hub.c and reachable from nowhere. */
+int sensor_get_orientation(float *azimuth, float *pitch, float *roll);
+/* Tilt-compensated magnetic heading in degrees, 0-360. Returns false if the
+ * magnetometer has not produced a non-zero sample yet. */
+bool sensor_get_magnetic_heading(float *heading_deg);
 
 /* Display */
 int display_set_brightness(u32 level);

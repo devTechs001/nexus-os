@@ -524,19 +524,27 @@ u64 hpet_get_frequency(void)
 /*===========================================================================*/
 
 /**
- * hpet_clocksource_read - Read HPET as clocksource
+ * hpet_clocksource_read - Read HPET as a free-running clocksource
  *
- * Returns: Current counter value
+ * Returns: Current counter value in ticks
+ *
+ * Exposed rather than private: there is no clocksource registry in this tree
+ * for a static callback to be handed to, so a private wrapper had no possible
+ * caller. This is the HPET's monotonic time source for anything that needs
+ * finer resolution than the PIT.
  */
-static u64 hpet_clocksource_read(void)
+u64 hpet_clocksource_read(void)
 {
     return hpet_read_counter();
 }
 
 /**
- * hpet_register_clocksource - Register HPET as clocksource
+ * hpet_register_clocksource - Report HPET as the system clocksource
  *
  * Returns: 0 on success, negative error code on failure
+ *
+ * Nothing registers a clocksource yet, so this reports readiness instead of
+ * pretending to have registered with a subsystem that does not exist.
  */
 int hpet_register_clocksource(void)
 {
@@ -544,10 +552,8 @@ int hpet_register_clocksource(void)
         return -ENODEV;
     }
 
-    pr_info("HPET: Registering as clocksource (%llu Hz)\n",
+    pr_info("HPET: clocksource ready (%llu Hz)\n",
             hpet_manager.hpet.frequency);
-
-    /* Would register with clocksource subsystem */
 
     return 0;
 }
@@ -564,14 +570,45 @@ int hpet_register_clocksource(void)
  */
 int hpet_set_next_event(u64 delta_ns)
 {
-    u64 current, target;
+    /*
+     * Not `current`: kernel.h defines current as get_current(), so a local of
+     * that name expands into a function call and the assignment below becomes
+     * "lvalue required". This is the third time the macro has caught a
+     * identifier in this tree.
+     */
+    u64 now, target;
 
     if (!hpet_manager.initialized) {
         return -ENODEV;
     }
 
-    current = hpet_read_counter();
-    target = current + (delta_ns * 1000000 / hpet_manager.hpet.period);
+    now = hpet_read_counter();
+
+    if (hpet_manager.hpet.frequency == 0) {
+        return -ENODEV;
+    }
+
+    /*
+     * ticks = delta_ns * frequency / 1e9.
+     *
+     * delta_ns * frequency overflows 64 bits for any delta above a few
+     * seconds at typical HPET rates (14.318 MHz * 1e9 ns is already 1.4e16,
+     * close to the limit, and worse on faster counters). Split delta_ns into
+     * whole and fractional milliseconds and work in kHz, which keeps every
+     * intermediate product below 1e16.
+     */
+    {
+        u64 khz = hpet_manager.hpet.frequency / 1000;
+        u64 whole_ms = delta_ns / 1000000;
+        u64 rem_ns = delta_ns % 1000000;
+        u64 ticks = whole_ms * khz + (rem_ns * khz) / 1000000;
+
+        if (ticks == 0 && delta_ns > 0) {
+            ticks = 1;      /* sub-tick request: wait at least one tick */
+        }
+
+        target = now + ticks;
+    }
 
     hpet_timer_set_comparator(0, target);
 

@@ -409,6 +409,13 @@ int cnn_preprocess_image(const void *image, u32 width, u32 height, u32 channels,
 int cnn_get_prediction(tensor_t *output, u32 top_k, u32 *indices,
                        float *probabilities);
 
+/* Transformer inference (ai_ml/models/transformer.c). transformer_forward()
+ * held the whole encoder pass and was private with no caller. */
+int transformer_predict(nn_model_t *model, tensor_t *input, tensor_t **output);
+int transformer_generate(nn_model_t *model, u32 *input_ids, u32 input_len,
+                         u32 max_length, u32 *output_ids);
+void transformer_set_training_mode(nn_model_t *model, bool training);
+
 /* Utility functions */
 const char *ai_ml_get_version(void);
 const char *ai_ml_get_codename(void);

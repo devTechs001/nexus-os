@@ -304,10 +304,13 @@ static int inference_execute_layer(nn_layer_t *layer)
         case LAYER_POOLING:
             return inference_execute_pooling(layer);
         
+        /*
+         * ReLU, sigmoid and tanh are not layer types - they are ACTIVATION_*
+         * values carried in layer->activation, and the toolkit creates them as
+         * LAYER_ACTIVATION. Three case labels here named constants that were
+         * never defined anywhere in the tree.
+         */
         case LAYER_ACTIVATION:
-        case LAYER_RELU:
-        case LAYER_SIGMOID:
-        case LAYER_TANH:
             return inference_execute_activation(layer);
         
         case LAYER_BN:
@@ -448,8 +451,15 @@ static int inference_execute_conv2d(nn_layer_t *layer)
                                 s32 ih = oh * stride + kh - padding;
                                 s32 iw = ow * stride + kw - padding;
                                 
-                                /* Handle padding */
-                                if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
+                                /*
+                                 * Handle padding. ih/iw are signed because
+                                 * the subtraction can go negative, and in_h /
+                                 * in_w are u32; the upper bound has to be
+                                 * compared as signed or a large ih would be
+                                 * considered in range.
+                                 */
+                                if (ih >= 0 && ih < (s32)in_h &&
+                                    iw >= 0 && iw < (s32)in_w) {
                                     u32 in_idx = ((n * in_h + ih) * in_w + iw) * in_c + ic;
                                     u32 w_idx = ((oc * in_c + ic) * kernel_size + kh) * kernel_size + kw;
                                     sum += in_data[in_idx] * w_data[w_idx];

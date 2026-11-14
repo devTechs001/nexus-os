@@ -10,10 +10,23 @@
  */
 
 #include "../ai_ml.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
+
+/*
+ * Upper bound for the attention score row. multi_head_attention() keeps its
+ * per-position scores in a fixed stack array, and this is that array's size;
+ * it was a bare 512 literal in the middle of the loop with no check that
+ * seq_len fit inside it.
+ */
+#define TRANSFORMER_MAX_SEQ_LEN     512
+/*
+ * These four used to be <stdio.h>, <stdlib.h>, <string.h> and <math.h>. The
+ * kernel is built freestanding against its own headers, so the angle-bracket
+ * forms resolved to nothing useful and every snprintf/memset/sqrtf call here
+ * was implicitly declared - which silently truncates pointer arguments to int.
+ */
+#include "../../kernel/include/kernel.h"
+#include "../../kernel/mm/mm.h"
+#include "../../kernel/include/math.h"
 
 /*===========================================================================*/
 /*                         TRANSFORMER CONFIGURATION                         */
@@ -105,6 +118,15 @@ typedef struct transformer_state {
     
     /* Attention mask */
     tensor_t *attention_mask;       /* Attention mask tensor */
+
+    /* BERT head. These were created by model_create_bert() and then dropped on
+     * the floor with (void) casts - allocated and leaked, with nothing left
+     * holding a pointer, so the pooler could never be run. */
+    tensor_t *cls_sep_embeddings;   /* [CLS]/[SEP] embeddings */
+    tensor_t *pooler_ln_gamma;      /* Pooler layer-norm gamma */
+    tensor_t *pooler_ln_beta;       /* Pooler layer-norm beta */
+    tensor_t *pooler_dense;         /* Pooler dense weights */
+    tensor_t *pooler_bias;          /* Pooler bias */
     
     /* Temporary buffers */
     tensor_t *q_proj;               /* Query projection buffer */
@@ -132,7 +154,6 @@ static int layer_normalization(tensor_t *input, tensor_t *output,
                                 tensor_t *gamma, tensor_t *beta);
 static int feed_forward(tensor_t *input, tensor_t *output,
                         tensor_t *w1, tensor_t *w2, tensor_t *b1, tensor_t *b2);
-static void softmax_attention(float *attention, u32 seq_len);
 
 /*===========================================================================*/
 /*                         TRANSFORMER MODEL CREATION                        */
@@ -320,7 +341,7 @@ nn_model_t *model_create_bert(const char *name, u32 hidden_size, u32 n_layers)
     nn_model_t *model;
     transformer_state_t *state;
     u32 n_heads;
-    
+
     if (!name) {
         pr_err("BERT model name required\n");
         return NULL;
@@ -361,12 +382,23 @@ nn_model_t *model_create_bert(const char *name, u32 hidden_size, u32 n_layers)
     tensor_t *pooler_dense = tensor_create("pooler_dense", 2, pooler_shape, PRECISION_FP32);
     tensor_t *pooler_bias = tensor_create("pooler_bias", 1, ln_shape, PRECISION_FP32);
 
-    /* Store BERT-specific tensors in model */
-    /* (In a full implementation, these would be stored in state) */
-    (void)cls_sep;
-    (void)pooler_ln_gamma;
-    (void)pooler_ln_beta;
-    (void)pooler_dense;
+    /* Store BERT-specific tensors in the transformer state, which is what
+     * owns every other tensor in this model. */
+    if (!state) {
+        pr_err("BERT state unavailable\n");
+        tensor_destroy(cls_sep);
+        tensor_destroy(pooler_ln_gamma);
+        tensor_destroy(pooler_ln_beta);
+        tensor_destroy(pooler_dense);
+        tensor_destroy(pooler_bias);
+        return NULL;
+    }
+
+    state->cls_sep_embeddings = cls_sep;
+    state->pooler_ln_gamma = pooler_ln_gamma;
+    state->pooler_ln_beta = pooler_ln_beta;
+    state->pooler_dense = pooler_dense;
+    state->pooler_bias = pooler_bias;
     (void)pooler_bias;
 
     /* BERT output is typically the [CLS] token representation */
@@ -465,6 +497,38 @@ static int transformer_forward(nn_model_t *model, tensor_t *input)
     }
     tensor_destroy(hidden);
 
+    return 0;
+}
+
+/**
+ * transformer_predict - Run one forward pass through a built transformer
+ * @model: Transformer model
+ * @input: Input tensor of token ids [batch, seq_len]
+ * @output: Receives the model's first output tensor
+ *
+ * Returns: 0 on success, negative error code on failure
+ *
+ * transformer_forward() holds the entire encoder pass and had no caller, so a
+ * transformer built by model_create_transformer()/bert() could not be run.
+ */
+int transformer_predict(nn_model_t *model, tensor_t *input, tensor_t **output)
+{
+    int ret;
+
+    if (!model || !input || !output) {
+        return -EINVAL;
+    }
+
+    if (model->num_outputs == 0 || !model->outputs[0]) {
+        return -EINVAL;
+    }
+
+    ret = transformer_forward(model, input);
+    if (ret != 0) {
+        return ret;
+    }
+
+    *output = model->outputs[0];
     return 0;
 }
 
@@ -618,13 +682,14 @@ static int multi_head_attention(tensor_t *q, tensor_t *k, tensor_t *v,
                                  tensor_t *output, u32 n_heads, tensor_t *mask)
 {
     float *q_data, *k_data, *v_data, *out_data;
-    u32 batch_size, seq_len, d_model, d_k;
-    
+    u32 seq_len, d_model, d_k;
+
     if (!q || !k || !v || !output) {
         return INFERENCE_ERR_INPUT;
     }
 
-    batch_size = q->shape[0];
+    /* shape[0] is the batch dimension; the head loop below is batch-agnostic,
+     * so there is nothing to read it into. */
     seq_len = q->shape[1];
     d_model = q->shape[2];
     d_k = d_model / n_heads;
@@ -641,9 +706,19 @@ static int multi_head_attention(tensor_t *q, tensor_t *k, tensor_t *v,
         /* For each position in sequence */
         for (u32 i = 0; i < seq_len; i++) {
             /* Compute attention scores */
-            float scores[512];  /* Max sequence length */
+            float scores[TRANSFORMER_MAX_SEQ_LEN];
             float max_score = -INFINITY;
-            
+
+            /*
+             * scores is a fixed-size stack array and seq_len comes straight
+             * from the input tensor's shape, which was never checked against
+             * it: a sequence longer than the array wrote straight off the top
+             * of this frame. Clamp instead.
+             */
+            if (seq_len > TRANSFORMER_MAX_SEQ_LEN) {
+                seq_len = TRANSFORMER_MAX_SEQ_LEN;
+            }
+
             for (u32 j = 0; j < seq_len; j++) {
                 float score = 0.0f;
                 
@@ -698,39 +773,6 @@ static int multi_head_attention(tensor_t *q, tensor_t *k, tensor_t *v,
     }
 
     return 0;
-}
-
-/**
- * softmax_attention - Apply softmax to attention scores
- * @attention: Attention score matrix [seq_len, seq_len]
- * @seq_len: Sequence length
- */
-static void softmax_attention(float *attention, u32 seq_len)
-{
-    for (u32 i = 0; i < seq_len; i++) {
-        float max_val = -INFINITY;
-        float sum = 0.0f;
-        
-        /* Find max for numerical stability */
-        for (u32 j = 0; j < seq_len; j++) {
-            float val = attention[i * seq_len + j];
-            if (val > max_val) {
-                max_val = val;
-            }
-        }
-        
-        /* Compute exp and sum */
-        for (u32 j = 0; j < seq_len; j++) {
-            float exp_val = expf(attention[i * seq_len + j] - max_val);
-            attention[i * seq_len + j] = exp_val;
-            sum += exp_val;
-        }
-        
-        /* Normalize */
-        for (u32 j = 0; j < seq_len; j++) {
-            attention[i * seq_len + j] /= sum;
-        }
-    }
 }
 
 /*===========================================================================*/
@@ -929,17 +971,23 @@ int transformer_generate(nn_model_t *model, u32 *input_ids, u32 input_len,
         return INFERENCE_ERR_INPUT;
     }
 
-    /* Copy input to output */
+    /* Copy input to output, clipping to the caller's buffer */
+    u32 written = 0;
     for (u32 i = 0; i < input_len && i < max_length; i++) {
         output_ids[i] = input_ids[i];
+        written++;
     }
 
-    /* Generate remaining tokens */
-    for (u32 pos = input_len; pos < max_length; pos++) {
-        /* In a real implementation, would run forward pass and sample */
-        output_ids[pos] = 0;  /* EOS token */
-        break;
+    /*
+     * Generate remaining tokens. The loop body stops after one token, so the
+     * function must report one token appended - it used to return max_length
+     * regardless, claiming it had filled the buffer when it had filled
+     * written + 1 entries and left the rest untouched.
+     */
+    if (written < max_length) {
+        output_ids[written] = 0;  /* EOS: no sampling yet */
+        written++;
     }
 
-    return max_length;
+    return (int)written;
 }
