@@ -80,7 +80,66 @@ void interrupt_handler(struct registers *regs)
         __asm__ __volatile__("mov %%cr2, %0" : "=r"(cr2));
         pr_err("EXCEPTION %d (error 0x%X) at 0x%llX, CR2=0x%llX\n", 
                (u32)regs->isr_num, (u32)regs->error_code, regs->rip, cr2);
-        
+
+        /*
+         * A single line naming the vector and RIP is not enough to act on.
+         * Several exception kinds look alike from the outside:
+         *
+         *  - #PF carries the faulting address in CR2 and a meaningful error
+         *    code. A CR2 of 0 with error 0 means CR2 is stale.
+         *  - Accessing a non-canonical address raises #GP with error code 0
+         *    and leaves CR2 untouched - the faulting pointer is in a
+         *    register, not in CR2.
+         *  - A bad indirect call or a corrupt return address shows up as #GP
+         *    with the destination in RIP and the culprit on the stack.
+         *
+         * Distinguishing these needs the register file, the stack pointer and
+         * the bytes the CPU was executing. Dump all three.
+         */
+        pr_err("  RIP=0x%016llX  CS=0x%04llX  RFLAGS=0x%016llX\n",
+               regs->rip, regs->cs, regs->rflags);
+        pr_err("  RSP=0x%016llX  SS=0x%04llX\n", regs->rsp, regs->ss);
+        pr_err("  RAX=0x%016llX  RBX=0x%016llX  RCX=0x%016llX\n",
+               regs->rax, regs->rbx, regs->rcx);
+        pr_err("  RDX=0x%016llX  RSI=0x%016llX  RDI=0x%016llX\n",
+               regs->rdx, regs->rsi, regs->rdi);
+        pr_err("  RBP=0x%016llX  R8 =0x%016llX  R9 =0x%016llX\n",
+               regs->rbp, regs->r8, regs->r9);
+        pr_err("  R10=0x%016llX  R11=0x%016llX  R12=0x%016llX\n",
+               regs->r10, regs->r11, regs->r12);
+        pr_err("  R13=0x%016llX  R14=0x%016llX  R15=0x%016llX\n",
+               regs->r13, regs->r14, regs->r15);
+
+        /*
+         * The instruction bytes at RIP. If RIP points into a function that
+         * could not plausibly be executing, this confirms a corrupt return
+         * address or a bad indirect call rather than a genuine fault inside
+         * that function.
+         */
+        {
+            /*
+             * Only read the bytes if RIP is a canonical, kernel-space address
+             * that the current page table actually maps. Reading an unmapped or
+             * non-canonical address here would fault again inside the fault
+             * handler and turn a diagnosable crash into a triple fault with no
+             * output at all.
+             */
+            u64 rip = regs->rip;
+            u64 canonical = (u64)((s64)((rip << 16) >> 16));
+
+            if (rip == canonical && rip >= 0x100000ULL) {  /* kernel image starts at 1 MB */
+                const u8 *code = (const u8 *)(uintptr_t)rip;
+
+                pr_err("  code:");
+                for (int i = 0; i < 8; i++) {
+                    pr_err(" %02X", code[i]);
+                }
+                pr_err("\n");
+            } else {
+                pr_err("  RIP is not a mapped kernel address; not dumping code\n");
+            }
+        }
+
         kernel_panic("CPU Exception: %d", (u32)regs->isr_num);
     }
 
