@@ -3,7 +3,19 @@
  * hal/timer/arm_timer.c - ARM Timer Subsystem
  *
  * Implements ARM Generic Timer and architectural timer support for ARM64
+ *
+ * ARCHITECTURE GUARD
+ *
+ * This file is ARM64-only: it reads the generic timer with `mrs cntpct_el0`,
+ * writes comparators with `msr cntp_cval_el0`, and issues `isb`. None of those
+ * exist on x86_64. The C front end accepts the inline asm (it is a string to
+ * it), so the file compiled cleanly and only the assembler rejected it - the
+ * same trap gic.c fell into. Compile the whole translation unit only for
+ * AArch64 and emit an empty object otherwise, so a link step still finds
+ * build/arm_timer.o.
  */
+
+#if defined(__aarch64__) || defined(CONFIG_ARCH_ARM64)
 
 #include "../hal.h"
 #include "../../kernel/include/kernel.h"
@@ -373,7 +385,7 @@ void arm_timer_physical_disable(void)
 void arm_timer_physical_set_oneshot(u64 ns)
 {
     u64 ticks;
-    u64 current;
+    u64 now_tick;
 
     if (!timer_manager.initialized) {
         return;
@@ -383,8 +395,8 @@ void arm_timer_physical_set_oneshot(u64 ns)
     ticks = (ns * timer_manager.arch_timer.frequency) / 1000000000ULL;
 
     /* Set comparator */
-    current = timer_read_cntpct();
-    timer_write_cntp_cval(current + ticks);
+    now_tick = timer_read_cntpct();
+    timer_write_cntp_cval(now_tick + ticks);
 
     /* Enable timer */
     timer_manager.physical_timer.periodic = false;
@@ -400,7 +412,7 @@ void arm_timer_physical_set_oneshot(u64 ns)
 void arm_timer_physical_set_periodic(u64 ns)
 {
     u64 ticks;
-    u64 current;
+    u64 now_tick;
 
     if (!timer_manager.initialized) {
         return;
@@ -410,8 +422,8 @@ void arm_timer_physical_set_periodic(u64 ns)
     ticks = (ns * timer_manager.arch_timer.frequency) / 1000000000ULL;
 
     /* Set comparator */
-    current = timer_read_cntpct();
-    timer_write_cntp_cval(current + ticks);
+    now_tick = timer_read_cntpct();
+    timer_write_cntp_cval(now_tick + ticks);
 
     /* Enable timer in periodic mode */
     timer_manager.physical_timer.periodic = true;
@@ -479,7 +491,7 @@ void arm_timer_virtual_disable(void)
 void arm_timer_virtual_set_oneshot(u64 ns)
 {
     u64 ticks;
-    u64 current;
+    u64 now_tick;
 
     if (!timer_manager.initialized) {
         return;
@@ -489,8 +501,8 @@ void arm_timer_virtual_set_oneshot(u64 ns)
     ticks = (ns * timer_manager.arch_timer.frequency) / 1000000000ULL;
 
     /* Set comparator */
-    current = timer_read_cntvct();
-    timer_write_cntv_cval(current + ticks);
+    now_tick = timer_read_cntvct();
+    timer_write_cntv_cval(now_tick + ticks);
 
     /* Enable timer */
     timer_manager.virtual_timer.periodic = false;
@@ -506,7 +518,7 @@ void arm_timer_virtual_set_oneshot(u64 ns)
 void arm_timer_virtual_set_periodic(u64 ns)
 {
     u64 ticks;
-    u64 current;
+    u64 now_tick;
 
     if (!timer_manager.initialized) {
         return;
@@ -516,8 +528,8 @@ void arm_timer_virtual_set_periodic(u64 ns)
     ticks = (ns * timer_manager.arch_timer.frequency) / 1000000000ULL;
 
     /* Set comparator */
-    current = timer_read_cntvct();
-    timer_write_cntv_cval(current + ticks);
+    now_tick = timer_read_cntvct();
+    timer_write_cntv_cval(now_tick + ticks);
 
     /* Enable timer in periodic mode */
     timer_manager.virtual_timer.periodic = true;
@@ -834,3 +846,14 @@ void arm_timer_shutdown(void)
 
     pr_info("ARM Timer: Shutdown complete\n");
 }
+
+#else /* !(__aarch64__ || CONFIG_ARCH_ARM64) */
+
+/*
+ * x86_64 build: the ARM generic timer does not exist. Keep the object
+ * non-empty (some linkers warn about, and some build systems treat as an
+ * error, a truly empty object) but export nothing.
+ */
+typedef int arm_timer_not_applicable_on_this_architecture;
+
+#endif /* __aarch64__ || CONFIG_ARCH_ARM64 */
