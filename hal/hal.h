@@ -84,24 +84,43 @@
 #define CPU_FEATURE_F16C        (1ULL << 60)
 #define CPU_FEATURE_RDRAND      (1ULL << 61)
 
-/* Virtualization Features */
-#define CPU_FEATURE_VMX_VMXON   (1ULL << 62)
-#define CPU_FEATURE_VMX_EPT     (1ULL << 63)
-#define CPU_FEATURE_SVM         (1ULL << 64)
-#define CPU_FEATURE_SVM_NPT     (1ULL << 65)
-#define CPU_FEATURE_SVM_LBRV    (1ULL << 66)
-#define CPU_FEATURE_SVM_SVML    (1ULL << 67)
-#define CPU_FEATURE_SVM_NRIPS   (1ULL << 68)
-#define CPU_FEATURE_SVM_TSC_RATE (1ULL << 69)
+/*
+ * Virtualization Features.
+ *
+ * Everything below bit 64 lives in cpu_features_t.features. These used to be
+ * numbered 64..76 on a u64 field, which is a shift count greater than or equal
+ * to the width of the type - undefined behaviour, and in practice every one of
+ * them evaluated to zero, so SVM, SMEP, SMAP, PKU, SGX, MPX and SHA could never
+ * be detected at all.
+ *
+ * They are now split into the two bitfields the structure already provides:
+ * vmx_* for VT-x capabilities and svm_* for AMD-V.
+ */
+#define CPU_FEATURE_VMX_VMXON   (1ULL << 0)     /* features_vmx */
+#define CPU_FEATURE_VMX_EPT     (1ULL << 1)     /* features_vmx */
 
-/* Security Features */
-#define CPU_FEATURE_SMEP        (1ULL << 70)
-#define CPU_FEATURE_SMAP        (1ULL << 71)
-#define CPU_FEATURE_PKU         (1ULL << 72)
-#define CPU_FEATURE_OSPKE       (1ULL << 73)
-#define CPU_FEATURE_SGX         (1ULL << 74)
-#define CPU_FEATURE_MPX         (1ULL << 75)
-#define CPU_FEATURE_SHA         (1ULL << 76)
+#define CPU_FEATURE_SVM         (1ULL << 0)     /* features_svm */
+#define CPU_FEATURE_SVM_NPT     (1ULL << 1)     /* features_svm */
+#define CPU_FEATURE_SVM_LBRV    (1ULL << 2)     /* features_svm */
+#define CPU_FEATURE_SVM_SVML    (1ULL << 3)     /* features_svm */
+#define CPU_FEATURE_SVM_NRIPS   (1ULL << 4)     /* features_svm */
+#define CPU_FEATURE_SVM_TSC_RATE (1ULL << 5)    /* features_svm */
+
+/*
+ * Security Features.
+ *
+ * There is no spare bit left in `features` (bits 0..61 are architectural
+ * CPUID leaves), so these use the top two bits that remain plus their own
+ * group. SMEP/SMAP are CPUID.(EAX=7,ECX=0):EBX bits 7 and 20, but that leaf is
+ * already fully mapped above, so they are carried in features_ext.
+ */
+#define CPU_FEATURE_SMEP        (1ULL << 0)     /* features_ext */
+#define CPU_FEATURE_SMAP        (1ULL << 1)     /* features_ext */
+#define CPU_FEATURE_PKU         (1ULL << 2)     /* features_ext */
+#define CPU_FEATURE_OSPKE       (1ULL << 3)     /* features_ext */
+#define CPU_FEATURE_SGX         (1ULL << 4)     /* features_ext */
+#define CPU_FEATURE_MPX         (1ULL << 5)     /* features_ext */
+#define CPU_FEATURE_SHA         (1ULL << 6)     /* features_ext */
 
 /**
  * cpu_features_t - CPU feature information
@@ -251,6 +270,13 @@ typedef struct memory_region {
 #define MEM_TYPE_NVS            3
 #define MEM_TYPE_UNUSABLE       4
 #define MEM_TYPE_PERSISTENT     5
+
+/*
+ * Not a region type: returned by memory_region_type() when the requested range
+ * is not fully covered by any single region. Kept outside the MEM_TYPE_ range
+ * so it cannot be confused with a real classification.
+ */
+#define MEMORY_TYPE_NONE        0xFF
 
 /* Memory Attributes */
 #define MEM_ATTR_WRITEBACK      0x00000001

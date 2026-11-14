@@ -9,9 +9,13 @@
  */
 
 #include "../iot.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+/*
+ * These were <stdio.h>, <stdlib.h> and <string.h>, which do not exist for a
+ * freestanding kernel build. With no declaration in scope, krealloc() was
+ * assumed to return int and its pointer was truncated to 32 bits.
+ */
+#include "../../kernel/mm/mm.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         EDGE RUNTIME STATE                                */
@@ -57,9 +61,6 @@ static u32 generate_node_id(void);
 static u32 generate_function_id(void);
 static u32 generate_workflow_id(void);
 static int execute_function_internal(edge_function_t *func,
-                                      const void *input, size_t input_len,
-                                      void *output, size_t *output_len);
-static int execute_workflow_internal(edge_workflow_t *workflow,
                                       const void *input, size_t input_len,
                                       void *output, size_t *output_len);
 
@@ -936,25 +937,27 @@ int edge_workflow_execute(edge_workflow_t *workflow, const void *input,
     return 0;
 }
 
-/**
- * execute_workflow_internal - Internal workflow execution (stub)
+/*
+ * execute_workflow_internal() was removed.
+ *
+ * It was a `static` one-line forwarder to edge_workflow_execute() with no
+ * callers, so it added a frame and nothing else. Publishing it would have made
+ * two names for one operation; deleting it leaves a single entry point.
  */
-static int execute_workflow_internal(edge_workflow_t *workflow,
-                                      const void *input, size_t input_len,
-                                      void *output, size_t *output_len)
-{
-    return edge_workflow_execute(workflow, input, input_len, output, output_len);
-}
 
 /*===========================================================================*/
 /*                         RUNTIME STATISTICS                                */
 /*===========================================================================*/
 
-/**
- * edge_runtime_get_stats - Get runtime statistics
- * @stats: Output statistics structure
+/*
+ * edge_runtime_stats_t - Runtime statistics.
+ *
+ * This struct was declared inline in the parameter list of
+ * edge_runtime_get_stats(). Its type is local to that declaration, so no
+ * caller could declare an object of it to pass in: the function was
+ * effectively uncallable from any other translation unit.
  */
-void edge_runtime_get_stats(struct {
+typedef struct edge_runtime_stats {
     u32 num_nodes;
     u32 num_functions;
     u32 num_workflows;
@@ -963,7 +966,13 @@ void edge_runtime_get_stats(struct {
     u64 failed_executions;
     u32 current_executions;
     u64 avg_execution_time_us;
-} *stats)
+} edge_runtime_stats_t;
+
+/**
+ * edge_runtime_get_stats - Get runtime statistics
+ * @stats: Output statistics structure
+ */
+void edge_runtime_get_stats(edge_runtime_stats_t *stats)
 {
     if (!stats) {
         return;

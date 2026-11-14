@@ -361,6 +361,11 @@ static int device_tree_validate(fdt_header_t *fdt)
     return 0;
 }
 
+/* Parsers defined below; called from device_tree_init(). */
+static int device_tree_parse_memory(void);
+static int device_tree_parse_cpus(void);
+static int device_tree_parse_interrupts(void);
+
 /**
  * device_tree_init - Initialize device tree subsystem
  */
@@ -424,11 +429,26 @@ void device_tree_init(void)
         return;
     }
 
-    /* Parse memory regions */
-    /* (Would parse /memory node) */
+    /*
+     * Parse the sub-trees.
+     *
+     * These were comments - "Would parse /memory node", "Would parse /cpus
+     * node" - sitting exactly where the calls belong. The three parsers below
+     * were written and had no caller, so a device tree could be validated and
+     * then never read: memory regions, topology and interrupt specifiers were
+     * all empty.
+     */
+    if (device_tree_parse_memory() < 0) {
+        pr_warn("DT: no usable /memory node\n");
+    }
 
-    /* Parse CPUs */
-    /* (Would parse /cpus node) */
+    if (device_tree_parse_cpus() < 0) {
+        pr_warn("DT: no usable /cpus node\n");
+    }
+
+    if (device_tree_parse_interrupts() < 0) {
+        pr_warn("DT: no interrupt specifiers\n");
+    }
 
     dt_manager.initialized = true;
 
@@ -446,10 +466,62 @@ void device_tree_init(void)
  *
  * Returns: Property value, or NULL if not found
  */
+/*
+ * dt_find_property - Look up a named property on a node
+ */
+static dt_property_t *dt_find_property(dt_node_t *node, const char *property)
+{
+    u32 i;
+
+    for (i = 0; i < node->num_properties; i++) {
+        if (strcmp(node->properties[i].name, property) == 0) {
+            return &node->properties[i];
+        }
+    }
+
+    return NULL;
+}
+
+/*
+ * dt_walk - Depth-first search for a node by path
+ */
+static dt_node_t *dt_walk(dt_node_t *node, const char *path)
+{
+    dt_node_t *child;
+
+    if (!node) {
+        return NULL;
+    }
+
+    if (strcmp(node->path, path) == 0) {
+        return node;
+    }
+
+    for (child = node->children; child; child = child->next) {
+        dt_node_t *found = dt_walk(child, path);
+
+        if (found) {
+            return found;
+        }
+    }
+
+    return NULL;
+}
+
 void *device_tree_get_property(const char *node, const char *property)
 {
-    dt_node_t *current;
-    /* Simplified implementation */
+    /*
+     * The local variable here was named `current`, which is a macro in
+     * kernel/include/kernel.h that expands to get_current(). Declaring a local
+     * of that name made the compiler see a function returning dt_node_t * and
+     * reject the whole file - this file had never been compiled, so it never
+     * came up.
+     *
+     * The body was also a stub that searched nothing and always returned NULL,
+     * so no caller could ever read a device tree property.
+     */
+    dt_node_t *found;
+    dt_property_t *prop;
 
     if (!dt_manager.initialized || !node || !property) {
         return NULL;
@@ -457,11 +529,12 @@ void *device_tree_get_property(const char *node, const char *property)
 
     spin_lock(&dt_manager.lock);
 
-    /* Would walk tree to find node and property */
+    found = dt_walk(dt_manager.root, node);
+    prop = found ? dt_find_property(found, property) : NULL;
 
     spin_unlock(&dt_manager.lock);
 
-    return NULL;
+    return prop;
 }
 
 /**
@@ -472,13 +545,17 @@ void *device_tree_get_property(const char *node, const char *property)
  */
 dt_node_t *device_tree_find_node(const char *path)
 {
+    dt_node_t *found;
+
     if (!dt_manager.initialized || !path) {
         return NULL;
     }
 
-    /* Would walk tree to find node */
+    spin_lock(&dt_manager.lock);
+    found = dt_walk(dt_manager.root, path);
+    spin_unlock(&dt_manager.lock);
 
-    return NULL;
+    return found;
 }
 
 /**

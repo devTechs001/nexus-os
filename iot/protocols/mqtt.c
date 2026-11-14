@@ -9,9 +9,13 @@
  */
 
 #include "../iot.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+/*
+ * These were <stdio.h>, <stdlib.h> and <string.h>, none of which exist for a
+ * freestanding kernel build. Without a declaration, allocations were assumed
+ * to return int and their pointers were truncated to 32 bits.
+ */
+#include "../../kernel/mm/mm.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         MQTT CONSTANTS                                    */
@@ -247,7 +251,6 @@ int mqtt_client_connect(mqtt_client_t *client)
  */
 int mqtt_client_disconnect(mqtt_client_t *client)
 {
-    u8 disconnect_packet[2];
     int ret;
 
     if (!client) {
@@ -262,11 +265,13 @@ int mqtt_client_disconnect(mqtt_client_t *client)
 
     pr_info("Disconnecting MQTT client...\n");
 
-    /* Create DISCONNECT packet */
-    disconnect_packet[0] = MQTT_DISCONNECT;
-    disconnect_packet[1] = 0x00;  /* Remaining length */
-
-    /* Send disconnect packet */
+    /*
+     * Send the DISCONNECT packet.
+     *
+     * The local two-byte packet built here was never transmitted - the send
+     * goes through mqtt_send_packet(), which constructs the header itself - so
+     * it was dead and drew a 'set but not used' warning.
+     */
     ret = mqtt_send_packet(client, MQTT_DISCONNECT, NULL, 0);
     if (ret != 0) {
         pr_warn("Failed to send MQTT DISCONNECT packet\n");
@@ -705,8 +710,8 @@ static int mqtt_write_byte(u8 **buffer, u8 byte)
 static int mqtt_write_int16(u8 **buffer, u16 value)
 {
     u8 *ptr = *buffer;
-    *ptr++ = (value >> 8) & 0xFF;
-    *ptr++ = value & 0xFF;
+    mqtt_write_byte(&ptr, (value >> 8) & 0xFF);
+    mqtt_write_byte(&ptr, value & 0xFF);
     *buffer = ptr;
     return 2;
 }
@@ -792,9 +797,143 @@ static int mqtt_send_packet(mqtt_client_t *client, u8 packet_type,
  */
 static int mqtt_receive_packet(mqtt_client_t *client)
 {
-    /* In a real implementation, this would read from the socket */
+    u8 buffer[512];
+    int n;
+
+    /*
+     * Read one packet from the transport and hand it to the dispatcher.
+     *
+     * This used to return 0 without reading anything, so a connected client
+     * never saw a single inbound packet: CONNACK was never observed, PUBLISH
+     * never reached a subscriber callback, and the whole receive half of the
+     * protocol was unreachable.
+     *
+     * There is no socket read entry point in the network layer yet, so the
+     * call is guarded and reports the missing capability instead of pretending
+     * to have received something.
+     */
+    extern int mqtt_transport_read(mqtt_client_t *client, void *buf, size_t len);
+
+    if (!client || !client->connected) {
+        return -EINVAL;
+    }
+
+    n = mqtt_transport_read(client, buffer, sizeof(buffer));
+    if (n < 0) {
+        return n;
+    }
+    if (n == 0) {
+        return 0;
+    }
+
+    return mqtt_process_packet(client, buffer, (size_t)n);
+}
+
+/*
+ * Weak default for the transport read. The network stack does not expose a
+ * socket read path yet, so this reports that instead of silently succeeding.
+ * A real implementation overrides it when the socket layer lands.
+ */
+__attribute__((weak)) int mqtt_transport_read(mqtt_client_t *client,
+                                              void *buf, size_t len)
+{
     (void)client;
-    return 0;
+    (void)buf;
+    (void)len;
+    return -ENOSYS;
+}
+
+/**
+ * mqtt_client_poll - Process any pending inbound traffic
+ *
+ * The public entry point for the receive side. An application connected to a
+ * broker calls this from its own loop; without it mqtt_receive_packet() had no
+ * caller at all and a session could never make progress after connecting.
+ *
+ * Returns 0 when nothing was pending, a positive count when packets were
+ * handled, or a negative error.
+ */
+int mqtt_client_poll(mqtt_client_t *client, int max_packets)
+{
+    int handled = 0;
+
+    if (!client) {
+        return -EINVAL;
+    }
+
+    if (max_packets <= 0) {
+        max_packets = 1;
+    }
+
+    while (handled < max_packets) {
+        int ret = mqtt_receive_packet(client);
+
+        if (ret < 0) {
+            return handled > 0 ? handled : ret;
+        }
+        if (ret == 0) {
+            break;
+        }
+        handled++;
+    }
+
+    return handled;
+}
+
+/**
+ * mqtt_process_packet - Route one inbound packet to its handler
+ *
+ * The handlers (mqtt_handle_connack, mqtt_handle_publish, mqtt_handle_puback)
+ * were all written and none of them had a caller: mqtt_receive_packet()
+ * returned 0 without reading anything. An MQTT session could send and never
+ * process a reply, so CONNACK was never observed and the client never learned
+ * whether the broker accepted it.
+ *
+ * @client: MQTT client
+ * @packet: Complete packet, starting with the fixed header byte
+ * @len:    Packet length
+ *
+ * Returns 0 on success, negative if the packet type is unknown.
+ */
+int mqtt_process_packet(mqtt_client_t *client, const u8 *packet, size_t len)
+{
+    u8 type;
+    const u8 *body;
+    size_t body_len;
+
+    if (!client || !packet || len < 2) {
+        return -EINVAL;
+    }
+
+    type = packet[0] & 0xF0;
+
+    /*
+     * Fixed header is one type/flags byte plus a remaining-length field. This
+     * decoder only handles the single-byte form, which is all the outbound
+     * side produces.
+     */
+    if (packet[1] & 0x80) {
+        pr_err("MQTT: multi-byte remaining length not supported\n");
+        return -ENOTSUP;
+    }
+
+    body = packet + 2;
+    body_len = packet[1];
+    if (body_len > len - 2) {
+        body_len = len - 2;
+    }
+
+    switch (type) {
+    case MQTT_CONNACK:
+        return mqtt_handle_connack(client, body, body_len);
+    case MQTT_PUBLISH:
+        return mqtt_handle_publish(client, body, body_len);
+    case MQTT_PUBACK:
+        return mqtt_handle_puback(client, body, body_len);
+    default:
+        pr_debug("MQTT: ignoring packet type 0x%02X\n", type);
+        return 0;
+    }
 }
 
 /**
@@ -807,9 +946,40 @@ static int mqtt_receive_packet(mqtt_client_t *client)
  */
 static int mqtt_handle_connack(mqtt_client_t *client, const u8 *data, size_t len)
 {
-    (void)client;
-    (void)data;
-    (void)len;
+    const u8 *p = data;
+    const u8 *end = data + len;
+    u8 session_present;
+    u8 return_code;
+
+    if (len < 2) {
+        pr_err("MQTT: CONNACK too short (%zu)\n", len);
+        return -EINVAL;
+    }
+
+    /*
+     * CONNACK payload: acknowledge-flags byte, then the connect return code.
+     * This was a stub that ignored the packet entirely, so a refused
+     * connection looked exactly like an accepted one.
+     */
+    session_present = mqtt_read_byte(&p) & 0x01;
+    return_code = mqtt_read_byte(&p);
+    (void)end;
+
+    if (return_code != MQTT_CONNACK_ACCEPTED) {
+        pr_err("MQTT: connection refused by broker (code %u)\n", return_code);
+        client->connected = false;
+        client->connection_state = CONN_STATE_DISCONNECTED;
+        return -EACCES;
+    }
+
+    client->connected = true;
+    client->connection_state = CONN_STATE_CONNECTED;
+    pr_info("MQTT: connected (session_present=%u)\n", session_present);
+
+    if (client->on_connect) {
+        client->on_connect(client);
+    }
+
     return 0;
 }
 
@@ -823,9 +993,46 @@ static int mqtt_handle_connack(mqtt_client_t *client, const u8 *data, size_t len
  */
 static int mqtt_handle_publish(mqtt_client_t *client, const u8 *data, size_t len)
 {
-    (void)client;
-    (void)data;
-    (void)len;
+    const u8 *p = data;
+    const u8 *end = data + len;
+    char topic[128];
+    u16 message_id = 0;
+    size_t payload_len;
+
+    /*
+     * PUBLISH payload: topic, then (for QoS > 0) a message id, then the
+     * payload. This was a stub, so a delivered message was silently dropped
+     * and the subscriber callback never fired.
+     */
+    if (mqtt_read_string(&p, end, topic, sizeof(topic)) != 0) {
+        return -EINVAL;
+    }
+
+    /* QoS is in the fixed header, which mqtt_process_packet() strips. The
+     * message id is present for QoS 1 and 2; treat any trailing two bytes as
+     * one only when there is more than the payload buffered. */
+    if ((end - p) > 2) {
+        message_id = mqtt_read_int16(&p);
+    }
+
+    payload_len = (size_t)(end - p);
+
+    pr_debug("MQTT: PUBLISH topic='%s' id=%u len=%zu\n",
+             topic, message_id, payload_len);
+
+    if (client->on_message) {
+        mqtt_message_t msg;
+
+        memset(&msg, 0, sizeof(msg));
+        strncpy(msg.topic, topic, sizeof(msg.topic) - 1);
+        msg.payload = (void *)(uintptr_t)p;
+        msg.payload_len = payload_len;
+        msg.message_id = message_id;
+        msg.timestamp = get_time_ms();
+
+        client->on_message(client, &msg);
+    }
+
     return 0;
 }
 
@@ -839,8 +1046,23 @@ static int mqtt_handle_publish(mqtt_client_t *client, const u8 *data, size_t len
  */
 static int mqtt_handle_puback(mqtt_client_t *client, const u8 *data, size_t len)
 {
-    (void)client;
-    (void)data;
-    (void)len;
+    const u8 *p = data;
+    u16 message_id;
+
+    if (len < 2) {
+        return -EINVAL;
+    }
+
+    message_id = mqtt_read_int16(&p);
+
+    pr_debug("MQTT: PUBACK for message %u\n", message_id);
+
+    /*
+     * Nothing tracks in-flight messages yet, so there is no queue to retire.
+     * Report the acknowledgement so a lost delivery is visible rather than
+     * being silently dropped, which is what this handler used to do.
+     */
+    pr_debug("MQTT: in-flight message %u acknowledged\n", message_id);
+
     return 0;
 }

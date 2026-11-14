@@ -10,28 +10,43 @@
  */
 
 #include "../iot.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+/*
+ * These were <stdio.h>, <stdlib.h> and <string.h>, which do not exist for a
+ * freestanding kernel build. With no declaration in scope, krealloc() was
+ * assumed to return int and its pointer was truncated to 32 bits.
+ */
+#include "../../kernel/mm/mm.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         DEVICE REGISTRY STATE                             */
 /*===========================================================================*/
+
+/*
+ * device_group_t - A named group of devices.
+ *
+ * This was an anonymous struct nested inside the registry. Several functions
+ * re-declared it locally to name the element type, which produced a second,
+ * distinct type with the same layout: the compiler rejects the assignment as
+ * incompatible pointers, and two copies of one record can silently drift
+ * apart. Naming it once removes both problems.
+ */
+typedef struct device_group {
+    u32 group_id;
+    char name[64];
+    char description[256];
+    u32 *device_ids;
+    u32 num_devices;
+} device_group_t;
 
 static struct {
     bool initialized;
     iot_device_t *devices;          /* Linked list of devices */
     u32 num_devices;
     u32 next_device_id;
-    
+
     /* Device groups */
-    struct {
-        u32 group_id;
-        char name[64];
-        char description[256];
-        u32 *device_ids;
-        u32 num_devices;
-    } groups[MAX_DEVICE_GROUPS];
+    device_group_t groups[MAX_DEVICE_GROUPS];
     u32 num_groups;
     
     /* Discovery cache */
@@ -583,13 +598,8 @@ u32 device_group_create(const char *name, const char *description)
     spin_lock(&g_device_registry.lock);
 
     group_id = g_device_registry.num_groups + 1;
-    struct {
-        u32 group_id;
-        char name[64];
-        char description[256];
-        u32 *device_ids;
-        u32 num_devices;
-    } *group = &g_device_registry.groups[g_device_registry.num_groups];
+    device_group_t *group =
+        &g_device_registry.groups[g_device_registry.num_groups];
 
     group->group_id = group_id;
     strncpy(group->name, name, sizeof(group->name) - 1);
@@ -617,13 +627,7 @@ u32 device_group_create(const char *name, const char *description)
  */
 int device_group_add_device(u32 group_id, u32 device_id)
 {
-    struct {
-        u32 group_id;
-        char name[64];
-        char description[256];
-        u32 *device_ids;
-        u32 num_devices;
-    } *group;
+    device_group_t *group;
     u32 *new_ids;
 
     if (!g_device_registry.initialized) {
@@ -681,13 +685,7 @@ int device_group_add_device(u32 group_id, u32 device_id)
  */
 int device_group_remove_device(u32 group_id, u32 device_id)
 {
-    struct {
-        u32 group_id;
-        char name[64];
-        char description[256];
-        u32 *device_ids;
-        u32 num_devices;
-    } *group;
+    device_group_t *group;
 
     if (!g_device_registry.initialized) {
         return -1;

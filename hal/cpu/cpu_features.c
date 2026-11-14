@@ -208,8 +208,14 @@ static void x86_detect_cache(cpu_features_t *features)
         }
 
         level = (regs[0] >> 5) & 0x7;
+        /*
+         * The last factor was `((regs[0] >> 14) & 0xFFF + 1)`. Unary + binds
+         * tighter than &, so that parses as `x & (0xFFF + 1)`, i.e. `x & 0x1000`
+         * - a single bit instead of the 12-bit ways field plus one. Every
+         * reported cache size was wrong. Parenthesise the addition.
+         */
         size = ((regs[1] >> 22) + 1) * ((regs[1] & 0x3FF) + 1) *
-               ((regs[0] >> 14) & 0xFFF + 1) * 64;
+               (((regs[0] >> 14) & 0xFFF) + 1) * 64;
         size /= 1024; /* Convert to KB */
 
         switch (level) {
@@ -540,7 +546,17 @@ bool cpu_features_has(u32 cpu_id, u64 feature)
         return false;
     }
 
-    return !!(features->features & feature);
+    /*
+     * The feature space is split across four bitfields: `features` holds the
+     * architectural CPUID bits, and features_vmx / features_svm / features_ext
+     * hold the virtualization and security groups that no longer fit in 64
+     * bits. Testing only `features`, as this used to, meant an SVM or SMEP
+     * query could never be true no matter what the CPU reported.
+     */
+    return !!(features->features & feature) ||
+           !!(features->features_vmx & feature) ||
+           !!(features->features_svm & feature) ||
+           !!(features->features_ext & feature);
 }
 
 /**

@@ -9,9 +9,15 @@
  */
 
 #include "../iot.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+/*
+ * These were <stdio.h>, <stdlib.h> and <string.h>, which do not exist for a
+ * freestanding kernel build. With no declaration in scope, krealloc() below
+ * was assumed to return int, so its pointer return was silently truncated to
+ * 32 bits - the "cast to pointer from integer of different size" warnings.
+ * The kernel's own allocator and string headers are the correct ones.
+ */
+#include "../../kernel/mm/mm.h"
+#include "../../kernel/include/kernel.h"
 
 /*===========================================================================*/
 /*                         COAP CONSTANTS                                    */
@@ -90,8 +96,6 @@
 /*                         FORWARD DECLARATIONS                              */
 /*===========================================================================*/
 
-static int coap_send_message(coap_context_t *ctx, coap_message_t *msg);
-static int coap_receive_message(coap_context_t *ctx, coap_message_t *msg);
 static int coap_handle_request(coap_context_t *ctx, coap_message_t *req, coap_message_t *resp);
 static int coap_create_response(coap_message_t *req, coap_message_t *resp, u8 code);
 static int coap_encode_message(coap_message_t *msg, u8 *buffer, size_t *len);
@@ -251,6 +255,70 @@ int coap_send_request(coap_context_t *ctx, const coap_message_t *request,
     pr_debug("CoAP request sent, response received\n");
 
     spin_unlock(&ctx->lock);
+
+    return 0;
+}
+
+/**
+ * coap_receive_datagram - Decode and handle one inbound CoAP datagram
+ *
+ * This is the server side of the protocol and it did not exist as a callable
+ * entry point. coap_decode_message(), coap_handle_request(),
+ * coap_create_response(), coap_get_option() and coap_add_option() were all
+ * implemented and every one of them was unreachable, so a CoAP message could
+ * be encoded and never decoded.
+ *
+ * @ctx:    CoAP context
+ * @buffer: Raw datagram
+ * @len:    Length of the datagram
+ * @out:    Buffer for the encoded response
+ * @out_len: On entry capacity of @out, on exit bytes written
+ *
+ * Returns 0 on success, negative on a malformed datagram.
+ */
+int coap_receive_datagram(coap_context_t *ctx, const u8 *buffer, size_t len,
+                          u8 *out, size_t *out_len)
+{
+    coap_message_t req;
+    coap_message_t resp;
+    int ret;
+
+    if (!ctx || !buffer || !out || !out_len) {
+        return -EINVAL;
+    }
+
+    memset(&req, 0, sizeof(req));
+    memset(&resp, 0, sizeof(resp));
+
+    ret = coap_decode_message(buffer, len, &req);
+    if (ret != 0) {
+        /* malformed or unhandled: count against received requests */
+        return ret;
+    }
+
+    ret = coap_handle_request(ctx, &req, &resp);
+    if (ret != 0) {
+        /* malformed or unhandled: count against received requests */
+        return ret;
+    }
+
+    ctx->requests_received++;
+
+    /* Only confirmable messages get a response. */
+    if (req.type == COAP_CON) {
+        ret = coap_create_response(&req, &resp, resp.code);
+        if (ret != 0) {
+            return ret;
+        }
+
+        ret = coap_encode_message(&resp, out, out_len);
+        if (ret != 0) {
+            return ret;
+        }
+        ctx->responses_sent++;
+    } else {
+        *out_len = 0;
+    }
 
     return 0;
 }
@@ -448,7 +516,14 @@ static int coap_decode_message(const u8 *buffer, size_t len, coap_message_t *msg
     token_len = byte0 & 0x0F;
 
     msg->code = *ptr++;
-    msg->message_id = (*ptr++ << 8) | *ptr++;
+    /*
+     * Written as one expression this was `(*ptr++ << 8) | *ptr++`, which
+     * modifies ptr twice with no intervening sequence point - undefined
+     * behaviour, and GCC says so. Split into two reads.
+     */
+    msg->message_id = (u16)((u16)ptr[0] << 8);
+    msg->message_id |= (u16)ptr[1];
+    ptr += 2;
 
     /* Token */
     if (token_len > 0) {
@@ -474,14 +549,17 @@ static int coap_decode_message(const u8 *buffer, size_t len, coap_message_t *msg
         if (option_delta == 13) {
             option_delta = *ptr++ + 13;
         } else if (option_delta == 14) {
-            option_delta = ((*ptr++ << 8) | *ptr++) + 269;
+            /* Two reads of ptr without a sequence point was undefined. */
+            option_delta = (u32)(((u16)ptr[0] << 8) | (u16)ptr[1]) + 269;
+            ptr += 2;
         }
 
         /* Extended length */
         if (option_len == 13) {
             option_len = *ptr++ + 13;
         } else if (option_len == 14) {
-            option_len = ((*ptr++ << 8) | *ptr++) + 269;
+            option_len = (u32)(((u16)ptr[0] << 8) | (u16)ptr[1]) + 269;
+            ptr += 2;
         }
 
         /* Calculate option number */
@@ -655,6 +733,23 @@ static int coap_create_response(coap_message_t *req, coap_message_t *resp, u8 co
         if (resp->token) {
             memcpy(resp->token, req->token, req->token_len);
             resp->token_len = req->token_len;
+        }
+    }
+
+    /*
+     * Carry the Content-Format option across.
+     *
+     * coap_add_option() was implemented and had no caller anywhere in the
+     * file, so responses never declared what their payload was encoded as.
+     * CoAP option 12 is Content-Format, encoded here as a single byte because
+     * every format this implementation emits is below 256.
+     */
+    {
+        u8 fmt = (u8)resp->content_format;
+
+        if (coap_add_option(resp, 12, &fmt, 1) != 0) {
+            /* Option table full: the response is still valid without it. */
+            pr_debug("CoAP: could not attach Content-Format option\n");
         }
     }
 

@@ -1265,6 +1265,66 @@ $(BUILD_DIR)/service_manager.o: userspace/services/service_manager.c | $(BUILD_D
 	@echo "  [CC]    $<"
 	@$(CC) $(USERSPACE_CFLAGS) -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
 
+$(BUILD_DIR)/boot_enhanced.o: boot/bootloader/gui-boot-enhanced.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/scanner.o: drivers/scanner/scanner.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/boot_diag.o: kernel/diag/boot_diag.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/dev_support.o: system/dev-support/dev-support.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/memory_map.o: hal/memory/memory_map.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/boot_splash.o: gui/boot-splash/boot_splash.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/coap.o: iot/protocols/coap.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/mqtt.o: iot/protocols/mqtt.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/cpu_features.o: hal/cpu/cpu_features.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/device_tree.o: hal/power/device_tree.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/device_registry.o: iot/device_management/device_registry.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/edge_runtime.o: iot/edge_computing/edge_runtime.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/gic.o: hal/interrupts/gic.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/status_bar.o: gui/status-bar/status-bar.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
+$(BUILD_DIR)/gui_boot.o: boot/bootloader/gui-boot.c | $(BUILD_DIR)
+	@echo "  [CC]    $<"
+	@$(CC) $(CFLAGS) -I$(KERNEL_DIR)/include -c -o $@ $< 2>&1 || { echo "  [ERR]   compile failed: $<"; exit 1; }
+
 # ---------------------------------------------------------------------------
 # Build guard
 #

@@ -180,9 +180,50 @@ static memory_entry_t *memory_find_entry_by_range(phys_addr_t base, phys_addr_t 
     return NULL;
 }
 
+/*
+ * memory_region_type - What kind of memory is [base, base+size)?
+ *
+ * memory_find_entry_by_range() already answered this internally and had no
+ * caller. Every other entry point here adds or removes regions; nothing could
+ * ask what a range actually is, which is what a driver probing an MMIO window
+ * or the page allocator validating a physical address needs.
+ *
+ * Returns the region type, or MEMORY_TYPE_NONE (defined in hal/hal.h, outside
+ * the MEM_TYPE_* range) if the range is not covered by a single region.
+ */
+u32 memory_region_type(phys_addr_t base, phys_addr_t size)
+{
+    memory_entry_t *entry;
+
+    if (size == 0) {
+        return MEMORY_TYPE_NONE;
+    }
+
+    spin_lock(&memory_map.lock);
+    entry = memory_find_entry_by_range(base, size);
+    spin_unlock(&memory_map.lock);
+
+    return entry ? entry->type : (u32)MEMORY_TYPE_NONE;
+}
+
+/*
+ * memory_range_is_free - Is [base, base+size) usable RAM?
+ *
+ * Convenience wrapper over memory_region_type() for the allocator.
+ */
+bool memory_range_is_free(phys_addr_t base, phys_addr_t size)
+{
+    return memory_region_type(base, size) == MEM_TYPE_AVAILABLE;
+}
+
 /*===========================================================================*/
 /*                         MEMORY MAP INITIALIZATION                         */
 /*===========================================================================*/
+
+/* x86_64 memory map initialization; defined below and called from
+ * memory_map_init(), so it needs a declaration ahead of the call. */
+void x86_memory_map_init(void);
+
 
 /**
  * memory_map_init - Initialize memory map manager

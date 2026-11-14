@@ -4,7 +4,18 @@
  *
  * Implements Generic Interrupt Controller (GIC) support for ARM64
  * architecture including GICv2 and GICv3
+ *
+ * ARCHITECTURE GUARD
+ *
+ * This file is ARM64-only: it reads and writes GIC system registers with
+ * `mrs`/`msr s3_0_c12_*` and issues `isb`, none of which exist on x86_64.
+ * It was absent from the build, so nothing noticed; adding it as-is broke the
+ * compiler with "no such instruction". The whole translation unit is therefore
+ * compiled only when targeting AArch64, and produces an empty object
+ * otherwise so the link step still sees build/gic.o.
  */
+
+#if defined(__aarch64__) || defined(CONFIG_ARCH_ARM64)
 
 #include "../hal.h"
 #include "../../kernel/include/kernel.h"
@@ -235,7 +246,21 @@ static gic_version_t gic_detect_version(void)
     pidr0 = gic_dist_read(GICD_IIDR);
     pidr1 = gic_dist_read(GICD_IIDR + 4);
 
+    /*
+     * The part number identifies the implementation. pidr1 was read and then
+     * discarded; the architecture revision sits in its low nibble, so include
+     * it in the diagnostic rather than throwing the read away. A zero pair
+     * means the distributor did not respond, which is worth distinguishing
+     * from an unknown-but-present GIC.
+     */
     part_number = (pidr0 >> 4) & 0xFFF;
+
+    if (pidr0 == 0 && pidr1 == 0) {
+        pr_warn("GIC: distributor did not respond (IIDR reads zero)\n");
+        return GIC_VERSION_V2;
+    }
+
+    pr_info("GIC: IIDR=0x%08X revision=%u\n", pidr0, pidr1 & 0xF);
 
     /* Determine version from part number */
     if (part_number == 0x020 || part_number == 0x040) {
@@ -862,3 +887,13 @@ void gic_shutdown(void)
 
     pr_info("GIC: Shutdown complete\n");
 }
+
+#else /* not AArch64 */
+
+/*
+ * x86_64 build: the GIC does not exist on this architecture. Emit nothing so
+ * the object file is present but empty.
+ */
+typedef int gic_not_applicable_on_x86_64;
+
+#endif /* __aarch64__ || CONFIG_ARCH_ARM64 */

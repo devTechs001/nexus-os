@@ -346,8 +346,18 @@ static int create_quick_settings(status_bar_t *bar)
         return -EINVAL;
     }
     
-    /* Create quick settings panel */
-    bar->quick_settings_panel = panel_create(bar->bar_window, 1800, 32, 120, 200);
+    /*
+     * Create the quick settings panel.
+     *
+     * This passed bar->bar_window as the parent, but panel_create() takes a
+     * widget_t * - a window is a different type, so the arguments were being
+     * reinterpreted, and the panel would have been parented to whatever the
+     * window struct happened to look like as a widget.
+     *
+     * The panel is a popup in its own right, so it is created with no parent
+     * and positioned absolutely.
+     */
+    bar->quick_settings_panel = panel_create(NULL, 1800, 32, 120, 200);
     if (!bar->quick_settings_panel) {
         return -1;
     }
