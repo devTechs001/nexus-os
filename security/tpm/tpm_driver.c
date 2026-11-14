@@ -20,6 +20,15 @@
 #define TPM_MAX_COMMAND_SIZE    4096
 #define TPM_MAX_RESPONSE_SIZE   4096
 #define TPM_TIMEOUT_MS          5000
+
+/* TPM 2.0 TIS register offsets, relative to the device base. */
+#define TPM_REG_ACCESS          0x00    /* TPM_ACCESS */
+#define TPM_REG_STS             0x18    /* TPM_STS */
+#define TPM_REG_DATA_FIFO       0x24    /* TPM_DATA_FIFO */
+
+/* TPM_STS bits */
+#define TPM_STS_COMMAND_READY   0x00000040
+#define TPM_STS_DATA_AVAILABLE  0x00000010
 #define TPM_RETRY_COUNT         3
 
 /* TPM Versions */
@@ -212,7 +221,14 @@ typedef struct {
     bool present;               /* Device present */
     bool active;                /* Device active */
     bool owned;                 /* TPM has owner */
-    u32 base_addr;              /* Base address */
+    /*
+     * Memory-mapped TPM registers live anywhere in the 64-bit physical
+     * address space. Holding the base in a u32 truncated it, and the
+     * consequent (volatile u32 *) cast of an integer is what GCC flagged here
+     * -- on a machine whose TPM BAR is above 4 GB, every register access went
+     * to the wrong location.
+     */
+    u64 base_addr;              /* Base address */
     u32 io_region;              /* I/O region */
     u32 irq;                    /* IRQ number */
     u64 caps;                   /* Capabilities */
@@ -317,9 +333,13 @@ static u32 tpm_read_reg(tpm_device_t *dev, u32 reg)
 
         case TPM_DEV_TYPE_LPC:
         case TPM_DEV_TYPE_ACPI:
-            /* Port I/O */
-            /* value = inl(dev->io_region + reg); */
-            value = 0;
+            /*
+             * Port I/O. This was a commented-out `value = inl(...)` followed
+             * by `value = 0`, so every register read on an LPC or ACPI TPM
+             * returned zero -- which the command layer below then interpreted
+             * as "not ready" or "no data".
+             */
+            value = vga_inl((u16)(dev->io_region + reg));
             break;
 
         default:
@@ -349,7 +369,9 @@ static void tpm_write_reg(tpm_device_t *dev, u32 reg, u32 value)
 
         case TPM_DEV_TYPE_LPC:
         case TPM_DEV_TYPE_ACPI:
-            /* outl(value, dev->io_region + reg); */
+            /* The matching write path was a comment, so no command byte ever
+             * reached an LPC or ACPI TPM. */
+            vga_outl((u16)(dev->io_region + reg), value);
             break;
 
         default:
@@ -550,7 +572,7 @@ void tpm_shutdown(void)
 static s32 tpm_transmit(tpm_device_t *dev, const u8 *command, u32 command_size,
                         u8 *response, u32 response_size)
 {
-    u32 i;
+    u32 i = 0;
     s32 ret;
 
     if (!dev || !dev->present || !command || !response) {
@@ -573,10 +595,42 @@ static s32 tpm_transmit(tpm_device_t *dev, const u8 *command, u32 command_size,
         return ret;
     }
 
-    /* Write command to TPM FIFO */
-    /* In real implementation, would write to TPM data register */
-    for (i = 0; i < command_size; i++) {
-        /* tpm_write_reg(dev, 0x24, command[i]); */  /* TPM_DATA register */
+    /*
+     * Write the command to the TPM FIFO.
+     *
+     * This loop was empty -- the only statement inside it was a commented-out
+     * tpm_write_reg() call -- and the read side below filled `response` with a
+     * copy of `command` and reported that as the TPM's answer. So the driver
+     * never spoke to the hardware and every "successful" command returned an
+     * echo of its own input. tpm_startup() would have "succeeded" on a machine
+     * with no TPM at all.
+     *
+     * TPM 2.0 FIFO interface, TIS register offsets from the base:
+     *   0x00 TPM_ACCESS, 0x18 TPM_STS, 0x24 TPM_DATA_FIFO
+     */
+    {
+        u32 burst;
+
+        while (i < command_size) {
+            u32 chunk;
+
+            burst = tpm_read_reg(dev, TPM_REG_STS);
+            burst = (burst >> 8) & 0xFF;    /* burstCount */
+            if (burst == 0) {
+                dev->total_errors++;
+                spin_unlock(&dev->lock);
+                return EIO;
+            }
+
+            chunk = command_size - i;
+            if (chunk > burst) {
+                chunk = burst;
+            }
+
+            while (chunk--) {
+                tpm_write_reg(dev, TPM_REG_DATA_FIFO, command[i++]);
+            }
+        }
     }
 
     /* Wait for response */
@@ -587,12 +641,52 @@ static s32 tpm_transmit(tpm_device_t *dev, const u8 *command, u32 command_size,
         return ret;
     }
 
-    /* Read response from TPM FIFO */
-    /* In real implementation, would read from TPM data register */
-    for (i = 0; i < response_size && i < command_size; i++) {
-        /* response[i] = tpm_read_reg(dev, 0x24) & 0xFF; */
-        response[i] = command[i];  /* Simulated echo */
+    /*
+     * Read response from the FIFO.
+     *
+     * The first ten bytes are the TPM 2.0 response header and carry the total
+     * response size, so the remainder is read on that basis rather than
+     * bounded by the request length.
+     */
+    {
+        u32 got = 0;
+        u32 total = 10;
+
+        while (got < total && got < response_size) {
+            u32 sts = tpm_read_reg(dev, TPM_REG_STS);
+            u32 burst = (sts >> 8) & 0xFF;
+
+            if (burst == 0) {
+                if (!(sts & TPM_STS_DATA_AVAILABLE)) {
+                    break;
+                }
+                burst = 1;
+            }
+
+            while (burst-- && got < total && got < response_size) {
+                response[got++] = (u8)(tpm_read_reg(dev, TPM_REG_DATA_FIFO) & 0xFF);
+
+                if (got == 10) {
+                    total = ((u32)response[2] << 24) |
+                            ((u32)response[3] << 16) |
+                            ((u32)response[4] << 8) |
+                            (u32)response[5];
+
+                    if (total > response_size) {
+                        total = response_size;
+                    }
+                    if (total < 10) {
+                        total = 10;
+                    }
+                }
+            }
+        }
+
+        i = got;
     }
+
+    /* Signal that the command is complete and release the FIFO. */
+    tpm_write_reg(dev, TPM_REG_STS, TPM_STS_COMMAND_READY);
 
     spin_unlock(&dev->lock);
 
@@ -989,7 +1083,6 @@ s32 tpm_get_capability(tpm_device_t *dev, u32 capability, u32 property,
 {
     tpm_context_t ctx;
     u8 input[12];
-    s32 ret;
 
     if (!dev || !dev->present || !output || !output_size) {
         return EINVAL;
