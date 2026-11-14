@@ -6,6 +6,7 @@
 #include "sched.h"
 #include "../include/kernel.h"
 #include "../include/elf.h"
+#include "../include/userspace.h"
 #include "../sync/sync.h"
 #include "../../drivers/video/console.h"
 
@@ -904,15 +905,6 @@ pid_t wait_for_children(int *exit_code, int options)
 /*===========================================================================*/
 /*                         INIT PROCESS                                      */
 /*===========================================================================*/
-
-/*
- * The userspace image handed to us by the bootloader, captured from the
- * multiboot2 module tag in kernel_main() (kernel/core/kernel.c).
- */
-extern u64  g_userspace_module_start;
-extern u64  g_userspace_module_end;
-extern char g_userspace_module_name[];
-extern bool g_userspace_module_present;
 
 /**
  * init_start_userspace - Load the init module and enter ring 3

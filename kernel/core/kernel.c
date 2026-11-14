@@ -9,6 +9,7 @@
  */
 
 #include "../include/kernel.h"
+#include "../include/userspace.h"
 #include "../include/types.h"
 #include "../include/config.h"
 
@@ -669,7 +670,7 @@ __section(".bss") char g_boot_cmdline[512];
  * one or whatever the interactive boot menu selected. Userspace init reads this
  * through SYS_GET_CMDLINE, so it must outlive kernel_main().
  */
-__section(".bss") char g_boot_cmdline_effective[512];
+__section(".bss") char g_boot_cmdline_effective[BOOT_CMDLINE_MAX];
 
 /*
  * The userspace init image, as delivered by the bootloader.
@@ -681,7 +682,7 @@ __section(".bss") char g_boot_cmdline_effective[512];
  */
 u64  g_userspace_module_start;
 u64  g_userspace_module_end;
-char g_userspace_module_name[128];
+char g_userspace_module_name[USERSPACE_MODULE_NAME_MAX];
 bool g_userspace_module_present;
 
 /**

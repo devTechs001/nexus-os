@@ -1423,7 +1423,22 @@ check-build: $(OBJECTS)
 	  echo "  [ERR]   linking them into the kernel reintroduces the multiple-definition failure"; \
 	  exit 1; \
 	fi
-	@echo "  [CHECK] link inputs OK - $(words $(C_OBJECTS)) C objects"
+	@missing=""; \
+	for sym in g_userspace_module_present g_userspace_module_start \
+	           g_userspace_module_end g_userspace_module_name \
+	           g_boot_cmdline_effective boot_cmdline_set_effective; do \
+	  nm -g --defined-only $(BUILD_DIR)/kernel.o 2>/dev/null | grep -q " $$sym\$$" || missing="$$missing $$sym"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "  [ERR]   boot-to-userspace handoff symbol(s) not defined by kernel.c:"; \
+	  printf '            %s\n' $$missing; \
+	  echo "  [ERR]   these are declared in kernel/include/userspace.h and defined in"; \
+	  echo "  [ERR]   kernel/core/kernel.c; process.c and syscall_handlers.c both read them"; \
+	  echo "  [ERR]   an undefined reference to one of these at link time means kernel.c"; \
+	  echo "  [ERR]   is stale, not that the scheduler or syscall layer is wrong"; \
+	  exit 1; \
+	fi
+	@echo "  [CHECK] link inputs OK - $(words $(C_OBJECTS)) C objects, handoff symbols present"
 
 # Link kernel
 #

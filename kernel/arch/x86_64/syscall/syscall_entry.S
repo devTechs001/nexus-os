@@ -251,8 +251,6 @@ syscall_get_kernel_stack:
     ret
     .size syscall_get_kernel_stack, . - syscall_get_kernel_stack
 
-    .section .note.GNU-stack,"",@progbits
-
 /*
  *===========================================================================
  * Ring 3 transition

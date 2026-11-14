@@ -10,10 +10,10 @@
 #include "../sched/sched.h"
 
 /*
- * The command line in force for this boot, filled in by kernel_main() in
- * kernel/core/kernel.c. SYS_GET_CMDLINE serves it to userspace init.
+ * g_boot_cmdline_effective and the module handoff state are declared once, in
+ * kernel/include/userspace.h, and defined in kernel/core/kernel.c.
  */
-extern char g_boot_cmdline_effective[];
+#include "../include/userspace.h"
 #include "../mm/mm.h"
 #include "../ipc/ipc.h"
 
