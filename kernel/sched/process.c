@@ -5,6 +5,7 @@
 
 #include "sched.h"
 #include "../include/kernel.h"
+#include "../include/elf.h"
 #include "../sync/sync.h"
 #include "../../drivers/video/console.h"
 
@@ -17,9 +18,13 @@ extern int arch_copy_files(struct task_struct *parent, struct task_struct *child
 extern void arch_set_return_value(struct task_struct *task, int value);
 extern int arch_load_binary(struct task_struct *task, const char *path,
                             char **argv, char **envp);
+/* Defined below; used by init_start_userspace() earlier in this file. */
+int arch_exec_user(struct task_struct *task, u64 entry);
 
 /* ELF64 loader (kernel/core/elf_loader.c) */
 extern int elf_exec(const char *path, u64 *entry, u64 *image_size, u32 *segments);
+extern int elf_load_module(const char *name, const u8 *image, u64 image_size,
+                           elf_image_t *img);
 extern u64 elf_alloc_user_stack(void);
 
 /*===========================================================================*/
@@ -900,6 +905,87 @@ pid_t wait_for_children(int *exit_code, int options)
 /*                         INIT PROCESS                                      */
 /*===========================================================================*/
 
+/*
+ * The userspace image handed to us by the bootloader, captured from the
+ * multiboot2 module tag in kernel_main() (kernel/core/kernel.c).
+ */
+extern u64  g_userspace_module_start;
+extern u64  g_userspace_module_end;
+extern char g_userspace_module_name[];
+extern bool g_userspace_module_present;
+
+/**
+ * init_start_userspace - Load the init module and enter ring 3
+ *
+ * Returns: does not return on success; negative error code if the image could
+ *          not be started, in which case the caller keeps the kernel thread.
+ *
+ * This is the step the tree was missing. init_thread() printed a banner and
+ * slept forever, so PID 1 never left ring 0: the userspace ELF loader had no
+ * caller, arch_exec_user() had no caller, and the 40k lines of libc/libsys/init
+ * code had never been linked, let alone run.
+ *
+ * Three things happen here:
+ *   1. The module bytes are validated and their PT_LOAD segments are copied to
+ *      a kernel-heap image (elf_load_module -> elf_load_buffer).
+ *   2. A user stack is allocated and its top computed.
+ *   3. arch_exec_user() drops to ring 3 at the entry point. It never returns.
+ */
+static int init_start_userspace(void)
+{
+    u64 entry = 0;
+    u64 image_size = 0;
+    u32 segments = 0;
+    int rc;
+
+    elf_image_t img;
+
+    if (!g_userspace_module_present) {
+        pr_warn("[INIT] No userspace module from the bootloader\n");
+        return -ENOENT;
+    }
+
+    image_size = g_userspace_module_end - g_userspace_module_start;
+    if (image_size == 0) {
+        pr_err("[INIT] Userspace module is empty\n");
+        return -ENOEXEC;
+    }
+
+    pr_info("[INIT] Loading userspace image '%s' (%llu bytes)\n",
+            g_userspace_module_name,
+            (unsigned long long)image_size);
+
+    rc = elf_load_module(g_userspace_module_name,
+                         (const u8 *)(uintptr_t)g_userspace_module_start,
+                         image_size, &img);
+    if (rc != 0) {
+        pr_err("[INIT] Userspace image rejected (%d)\n", rc);
+        return rc;
+    }
+
+    entry = img.entry;
+    if (!entry) {
+        pr_err("[INIT] Userspace image has no entry point\n");
+        return -ENOEXEC;
+    }
+
+    segments = img.segment_count;
+    pr_info("[INIT] Userspace ready: entry 0x%llX, %llu bytes, %u segments\n",
+            (unsigned long long)entry,
+            (unsigned long long)img.size, segments);
+
+    /*
+     * arch_exec_user() allocates the user stack itself and transfers control
+     * to ring 3. It only returns if the transition failed.
+     */
+    rc = arch_exec_user(init_task, entry);
+    if (rc != 0) {
+        pr_err("[INIT] Cannot enter ring 3 (%d)\n", rc);
+    }
+
+    return rc;
+}
+
 /**
  * init_thread - Init process main function
  * @arg: Unused
@@ -910,8 +996,23 @@ pid_t wait_for_children(int *exit_code, int options)
 static void init_thread(void *arg)
 {
     boot_params_t *params = get_boot_params();
+    int rc;
+
+    (void)arg;
 
     pr_info("Init process started (PID: %u)\n", init_task->pid);
+
+    /*
+     * Hand control to the real userspace init.
+     *
+     * If the module is missing or malformed - a GRUB configuration without the
+     * module line, a truncated ISO, an image built by an older toolchain - the
+     * kernel keeps running this thread and prints the boot banner below, so a
+     * broken userspace image degrades to a kernel-only boot instead of a
+     * dead machine.
+     */
+    rc = init_start_userspace();
+    pr_warn("[INIT] Userspace init unavailable (%d); continuing in-kernel\n", rc);
 
     /* Initialize system services */
     pr_info("Init: Starting system services...\n");

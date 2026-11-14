@@ -664,6 +664,52 @@ extern boot_params_t g_boot_params;
 /* Global buffer for boot menu command line */
 __section(".bss") char g_boot_cmdline[512];
 
+/*
+ * The command line actually in force for this boot: either the GRUB-provided
+ * one or whatever the interactive boot menu selected. Userspace init reads this
+ * through SYS_GET_CMDLINE, so it must outlive kernel_main().
+ */
+__section(".bss") char g_boot_cmdline_effective[512];
+
+/*
+ * The userspace init image, as delivered by the bootloader.
+ *
+ * Captured from the multiboot2 module tag during kernel_main(). The kernel does
+ * not copy it: GRUB places modules in low memory that stays mapped and
+ * untouched, and the ELF loader copies the segments it needs into its own
+ * allocation. These are plain physical addresses the tag supplied.
+ */
+u64  g_userspace_module_start;
+u64  g_userspace_module_end;
+char g_userspace_module_name[128];
+bool g_userspace_module_present;
+
+/**
+ * boot_cmdline_set_effective - Record the command line userspace should see
+ * @src: NUL-terminated option string to copy (may be NULL)
+ *
+ * Bounded copy: the bootloader's command line is attacker-controlled input and
+ * may be longer than the buffer.
+ */
+void boot_cmdline_set_effective(const char *src)
+{
+    const char *cmdline = (const char *)src;
+
+    if (!cmdline) {
+        g_boot_cmdline_effective[0] = '\0';
+        return;
+    }
+
+    for (u32 i = 0; i < sizeof(g_boot_cmdline_effective) - 1; i++) {
+        g_boot_cmdline_effective[i] = cmdline[i];
+        if (cmdline[i] == '\0') {
+            return;
+        }
+    }
+
+    g_boot_cmdline_effective[sizeof(g_boot_cmdline_effective) - 1] = '\0';
+}
+
 /* External boot menu entry point */
 extern void boot_menu_main(void);
 
@@ -731,26 +777,86 @@ void kernel_main(u64 multiboot_info)
                 g_boot_params.gfx_depth = ((u8 *)tag)[28];
                 g_boot_params.gfx_type = ((u8 *)tag)[29];
             }
+            /*
+             * Type 3 = module tag.
+             *
+             * Layout (multiboot2 spec, 8-byte tag header then payload):
+             *   +0   u32 type      = 3
+             *   +4   u32 size
+             *   +8   u32 mod_start  physical start of the module
+             *   +12  u32 mod_end    physical end (exclusive)
+             *   +16  char[] string  the module's command line / file name
+             *
+             * The userspace init image arrives this way: it is packaged into
+             * the ISO as a GRUB "module" directive and is the only way it can
+             * reach the kernel, because no root filesystem is mounted at boot
+             * and the VFS-backed ELF loader has nothing to read from.
+             *
+             * Modules are handed to us in the order they appear in grub.cfg.
+             * The first one is PID 1; any further modules are ignored for now.
+             */
+            else if (type == 3 && size >= 16) {
+                if (!g_userspace_module_present) {
+                    g_userspace_module_start = tag[2];
+                    g_userspace_module_end = tag[3];
+
+                    /*
+                     * The name follows the fixed fields and may be a
+                     * zero-length string; bound it so a malformed tag cannot
+                     * make us read past the tag's own size.
+                     */
+                    const char *mod_name = (const char *)((u8 *)tag + 16);
+                    u32 name_space = size - 16;
+                    u32 n = 0;
+
+                    while (n + 1 < sizeof(g_userspace_module_name) &&
+                           n < name_space && mod_name[n]) {
+                        g_userspace_module_name[n] = mod_name[n];
+                        n++;
+                    }
+                    g_userspace_module_name[n] = '\0';
+
+                    g_userspace_module_present = true;
+
+                    printk("[BOOT] Userspace module: %llu bytes at 0x%llX %s\n",
+                           (unsigned long long)(g_userspace_module_end -
+                                                g_userspace_module_start),
+                           (unsigned long long)g_userspace_module_start,
+                           g_userspace_module_name);
+                }
+            }
 
             /* Move to next tag (align to 8 bytes) */
             offset += (size + 7) & ~7;
         }
     }
 
-    /* Parse boot parameters or show menu */
+    /*
+     * Parse boot parameters or show menu.
+     *
+     * Whichever string ends up in force is also copied into
+     * g_boot_cmdline_effective. Userspace init reads it through
+     * SYS_GET_CMDLINE and parses the same options the kernel did, which it
+     * could not do before: init_get_cmdline() was declared and called in
+     * userspace/init/init.c but defined nowhere, so the option string never
+     * reached PID 1 and every init option was ignored.
+     */
     if (cmdline && cmdline[0]) {
         parse_boot_params(cmdline);
+        boot_cmdline_set_effective(cmdline);
     } else {
         printk("[BOOT] No command line provided. Launching Interactive Boot Menu...\n");
         boot_menu_main();
-        
+
         /* If boot_menu_main returns, it has filled g_boot_cmdline */
         if (g_boot_cmdline[0]) {
             printk("[BOOT] Booting with parameters: %s\n", g_boot_cmdline);
             parse_boot_params(g_boot_cmdline);
+            boot_cmdline_set_effective(g_boot_cmdline);
         } else {
             printk("[BOOT] No selection made, using default VMware mode\n");
             parse_boot_params("quiet splash virt=vmware");
+            boot_cmdline_set_effective("quiet splash virt=vmware");
         }
     }
 

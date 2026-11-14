@@ -28,11 +28,18 @@ section .multiboot
         db 0xD6, 0x50, 0x52, 0xE8
         ; Architecture: 0 (i386 protected mode)
         db 0x00, 0x00, 0x00, 0x00
-        ; Header length: 48 bytes (0x30)
-        db 0x30, 0x00, 0x00, 0x00
-        ; Checksum: 0x17ADAEFA (little-endian)
-        ; Verified: 0xE85250D6 + 0 + 48 + 0x17ADAEFA = 0x100000000 (wraps to 0)
-        db 0xFA, 0xAE, 0xAD, 0x17
+        ; Header length: 72 bytes (0x48)
+        ;   16 header
+        ; +  8 framebuffer tag header + 12 payload      = 36, padded to 40
+        ; +  8 module-alignment tag                      = 48
+        ; +  8 information-request tag header + 4 value  = 60, padded to 64
+        ; +  8 end tag                                   = 72
+        db 0x48, 0x00, 0x00, 0x00
+        ; Checksum: 0x17ADAEE2 (little-endian)
+        ; multiboot2 requires magic + architecture + length + checksum == 0
+        ; modulo 2^32. Verified:
+        ;   0xE85250D6 + 0x00000000 + 0x00000048 + 0x17ADAEE2 = 0x100000000
+        db 0xE2, 0xAE, 0xAD, 0x17
 
         ; Framebuffer tag (request graphics mode) - Type 5
         dw 5                      ; Type (5 = framebuffer)
@@ -41,11 +48,34 @@ section .multiboot
         dd 1024                   ; Width (1024)
         dd 768                    ; Height (768)
         dd 32                     ; Depth (32 bpp)
-
-        ; Padding to ensure 8-byte alignment for the next tag (End Tag)
+        ; Pad the tag to an 8-byte boundary (8 + 12 = 20 -> 24)
         dd 0
 
-        ; End tag (must be 8-byte aligned) - Type 0
+        ; Module alignment tag - Type 6
+        ;
+        ; Asks the loader to page-align the modules it passes us. The userspace
+        ; image is copied into memory a page at a time; paging it in from a
+        ; page-aligned source means one source page maps to one destination
+        ; page with no shared-page edge case at either end.
+        dw 6                      ; Type (6 = module alignment)
+        dw 0                      ; Flags
+        dd 8                      ; Size (8 bytes total)
+
+        ; Information request tag - Type 1
+        ;
+        ; Without this tag the bootloader is not required to provide the tags
+        ; named here, and no module tag would appear in the multiboot
+        ; information structure. The kernel would then find no userspace image
+        ; and PID 1 could never start. Requesting type 3 (modules) makes the
+        ; loader supply it.
+        dw 1                      ; Type (1 = information request)
+        dw 0                      ; Flags
+        dd 16                     ; Size (16 bytes total)
+        dd 3                      ; Requested tag type: 3 = modules
+        ; Pad to 8-byte boundary (8 + 4 = 12 -> 16)
+        dd 0
+
+        ; End tag - Type 0 (must be 8-byte aligned, and ends the header)
         dw 0                      ; Type (0 = end)
         dw 0                      ; Flags
         dd 8                      ; Size (8 bytes total)

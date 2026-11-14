@@ -1151,6 +1151,24 @@ struct syscall_entry syscall_table[NR_SYSCALLS] = {
         .flags = SYSCALL_F_NATIVE,
         .nargs = 3
     },
+
+    /*=======================================================================*/
+    /* Additions: calls userspace needs that the POSIX set does not cover    */
+    /*=======================================================================*/
+
+    /* 95 */ [SYS_MKNOD] = {
+        .handler = sys_mknod,
+        .name = "mknod",
+        .flags = SYSCALL_F_NATIVE,
+        .nargs = 3
+    },
+
+    /* 96 */ [SYS_GET_CMDLINE] = {
+        .handler = sys_getcmdline,
+        .name = "getcmdline",
+        .flags = SYSCALL_F_NATIVE,
+        .nargs = 2
+    },
 };
 
 /*===========================================================================*/
