@@ -790,46 +790,71 @@ input_driver_t *input_get_driver(void)
  * input_poll_char - Pop the next typed character
  *
  * Returns: Character (0x20..0x7E), '\n', '\b', 27, or 0 when nothing is queued
+ *
+ * Scans the ring buffer for the oldest keyboard event and removes ONLY that
+ * entry. An earlier version popped from the head and discarded anything that
+ * was not a key event, which silently ate every mouse-motion event the PS/2
+ * driver queued - so any GUI polling characters each frame destroyed the
+ * cursor position that the pointer code depends on.
  */
 int input_poll_char(void)
 {
-    input_event_t ev;
-
-    /*
-     * Drain until a printable or editing key is found. The driver queues
-     * releases and relative motion too; those are skipped without consuming
-     * anything the caller would have wanted.
-     */
-    for (u32 guard = 0; guard < 64; guard++) {
-        if (input_read_event(&ev) != 0) {
-            return 0;
-        }
-
-        if (ev.type != EV_KEY) {
-            continue;
-        }
-
-        /* The PS/2 driver puts the translated character in value (0 = release). */
-        if (ev.value <= 0) {
-            continue;
-        }
-
-        char c = (char)(ev.value & 0xFF);
-
-        if (c == '\n' || c == '\r' || c == '\b') {
-            return (c == '\r') ? '\n' : c;
-        }
-
-        if (c >= 0x20 && c < 0x7F) {
-            return (int)c;
-        }
-
-        if (ev.code == KEY_ESC) {
-            return 27;
-        }
+    if (!g_input_driver.initialized) {
+        return 0;
     }
 
-    return 0;
+    u32 head = g_input_driver.event_head;
+    u32 tail = g_input_driver.event_tail;
+
+    if (head == tail) {
+        return 0;
+    }
+
+    /* Find the oldest keyboard press without disturbing anything else. */
+    s32 want = -1;
+    int found = 0;
+
+    for (u32 i = tail; i != head; i = (i + 1) % INPUT_EVENT_QUEUE_SIZE) {
+        input_event_t *ev = &g_input_driver.event_queue[i];
+
+        if (ev->type != EV_KEY || ev->value <= 0) {
+            continue;
+        }
+
+        char c = (char)(ev->value & 0xFF);
+
+        if (c == '\n' || c == '\r' || c == '\b') {
+            found = (c == '\r') ? '\n' : c;
+        } else if (c >= 0x20 && c < 0x7F) {
+            found = (int)c;
+        } else if (ev->code == KEY_ESC) {
+            found = 27;
+        } else {
+            continue;   /* not a character we surface; leave it queued */
+        }
+
+        want = (s32)i;
+        break;
+    }
+
+    if (want < 0) {
+        return 0;
+    }
+
+    /*
+     * Remove that single entry by shifting the newer events down over it.
+     * Keystrokes are rare relative to the queue size, so the cost is trivial
+     * and every other event keeps its original order.
+     */
+    for (u32 i = (u32)want; i != head; ) {
+        u32 next = (i + 1) % INPUT_EVENT_QUEUE_SIZE;
+        g_input_driver.event_queue[i] = g_input_driver.event_queue[next];
+        i = next;
+    }
+
+    g_input_driver.event_head = (head + INPUT_EVENT_QUEUE_SIZE - 1) % INPUT_EVENT_QUEUE_SIZE;
+
+    return found;
 }
 
 /**
