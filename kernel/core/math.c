@@ -223,6 +223,33 @@ float sinf(float x)
 }
 
 /**
+ * tanf - Tangent
+ * @x: Angle in radians
+ *
+ * Returns: tan(x)
+ *
+ * Declared in kernel/include/math.h and never defined anywhere in the tree, so
+ * every caller was an unresolved symbol at link time -- which a per-file
+ * compile cannot detect. sinf() and cosf() below already exist.
+ *
+ * Evaluated as sin(x)/cos(x). cos(x) is zero at pi/2, so a guard returns a
+ * saturated value rather than dividing by zero and producing an infinity or a
+ * NaN that would propagate silently through a caller's arithmetic.
+ */
+float tanf(float x)
+{
+    float s = sinf(x);
+    float c = cosf(x);
+
+    /* |cos| < 1e-6 around the poles. */
+    if (c < 0.000001f && c > -0.000001f) {
+        return (s < 0.0f) ? -3.4e38f : 3.4e38f;
+    }
+
+    return s / c;
+}
+
+/**
  * cosf - Cosine
  * @x: Angle in radians
  *
@@ -324,6 +351,25 @@ float asinf(float x)
     }
 
     return atan2f(x, sqrtf(1.0f - x * x));
+}
+
+/**
+ * acosf - Arccosine
+ * @x: Value in [-1, 1]
+ *
+ * Returns: acos(x) in radians, or 0 if out of range
+ *
+ * Declared in kernel/include/math.h and never defined, like tanf() above;
+ * asinf() has existed all along. Supplied identity:
+ *
+ *   acos(x) = pi/2 - asin(x)
+ *
+ * which shares asinf's clamping and quadrant behaviour instead of introducing
+ * a second series with its own edge cases.
+ */
+float acosf(float x)
+{
+    return 1.57079632679f - asinf(x);
 }
 
 /**
