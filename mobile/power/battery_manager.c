@@ -63,7 +63,6 @@ static struct {
 static void update_battery_info(void);
 static void check_battery_alerts(void);
 static void update_power_save_mode(void);
-static s32 calculate_signal_level(s32 signal_dbm, u32 network_type);
 
 /*===========================================================================*/
 /*                         BATTERY MANAGER INITIALIZATION                    */
@@ -661,42 +660,15 @@ void battery_set_health_callback(void (*callback)(s32 health))
 /*                         UTILITY FUNCTIONS                                 */
 /*===========================================================================*/
 
-/**
- * calculate_signal_level - Calculate signal level from dBm
- * @signal_dbm: Signal strength in dBm
- * @network_type: Network type
+/*
+ * calculate_signal_level() moved to mobile/telephony/ril.c.
  *
- * Returns: Signal level (0-4)
+ * It is a signal-strength calculation, not a battery concern, and this file
+ * lives under mobile/power. It was also `static` here and therefore invisible
+ * to its only caller: ril.c calls calculate_signal_level() and was left with
+ * an unresolved symbol that no build ever reported, because neither file was
+ * compiled.
  */
-static s32 calculate_signal_level(s32 signal_dbm, u32 network_type)
-{
-    /* Different thresholds for different network types */
-    switch (network_type) {
-        case NETWORK_TYPE_LTE:
-        case NETWORK_TYPE_5G:
-            if (signal_dbm >= -80) return 4;
-            if (signal_dbm >= -90) return 3;
-            if (signal_dbm >= -100) return 2;
-            if (signal_dbm >= -110) return 1;
-            return 0;
-        
-        case NETWORK_TYPE_UMTS:
-        case NETWORK_TYPE_HSDPA:
-        case NETWORK_TYPE_HSPA:
-            if (signal_dbm >= -75) return 4;
-            if (signal_dbm >= -85) return 3;
-            if (signal_dbm >= -95) return 2;
-            if (signal_dbm >= -105) return 1;
-            return 0;
-        
-        default:
-            if (signal_dbm >= -70) return 4;
-            if (signal_dbm >= -80) return 3;
-            if (signal_dbm >= -90) return 2;
-            if (signal_dbm >= -100) return 1;
-            return 0;
-    }
-}
 
 /**
  * battery_get_charging_type - Get current charging type

@@ -38,10 +38,16 @@
 /*                         DATA STRUCTURES                                   */
 /*===========================================================================*/
 
-/**
- * Widget Data
+/*
+ * Dashboard Widget Data.
+ *
+ * This was `typedef struct widget { ... } widget_t;`, and gui/widgets/widgets.h
+ * declares a *completely different* `struct widget` (a GUI control inheriting
+ * from window_t). Including both - which dashboard.c must, since it uses the
+ * widget toolkit - was a hard redefinition error. Renamed to what it is; the
+ * tag and the typedef stay together so callbacks still match.
  */
-typedef struct widget {
+typedef struct dash_widget {
     u32 widget_id;                  /* Widget ID */
     u32 type;                       /* Widget Type */
     char title[128];                /* Widget Title */
@@ -54,10 +60,17 @@ typedef struct widget {
     bool draggable;                 /* Is Draggable */
     bool resizable;                 /* Is Resizable */
     void *data;                     /* Widget Data */
-    void (*on_update)(struct widget *);
-    void (*on_click)(struct widget *);
-    void (*on_collapse)(struct widget *);
-    struct widget *next;            /* Next Widget */
+    void (*on_update)(struct dash_widget *);
+    void (*on_click)(struct dash_widget *);
+    void (*on_collapse)(struct dash_widget *);
+    struct dash_widget *next;       /* Next Widget */
+
+    /*
+     * The toolkit widget backing this dashboard item, if one was created.
+     * Events arrive through here; without it a dashboard item was plain data
+     * with nothing that could be clicked.
+     */
+    struct widget *gui;
 } widget_item_t;
 
 /**

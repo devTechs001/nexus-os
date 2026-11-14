@@ -379,15 +379,33 @@ widget_item_t *dashboard_add_widget(dashboard_t *dash, u32 type, const char *tit
     widget->draggable = true;
     widget->resizable = true;
     
+    /*
+     * Give the item a real toolkit widget and bind its events.
+     *
+     * on_widget_clicked() and on_widget_collapse() bridged the toolkit's
+     * widget callbacks to the dashboard's own item handlers, and neither was
+     * ever attached to anything: dashboard items were plain data structures
+     * with no widget behind them, so clicking or collapsing one could not be
+     * delivered. Attaching here covers every item, since this is the only
+     * place one is created.
+     */
+    widget->gui = panel_create(NULL, 0, 0, 1, 1);
+    if (widget->gui) {
+        widget->gui->user_data = widget;
+        widget->gui->on_click = on_widget_clicked;
+        /* The toolkit has no collapse event; double-click toggles it. */
+        widget->gui->on_double_click = on_widget_collapse;
+    }
+
     /* Add to list */
     widget->next = dash->widgets;
     dash->widgets = widget;
     dash->widget_count++;
-    
+
     if (dash->on_widget_added) {
         dash->on_widget_added(widget);
     }
-    
+
     return widget;
 }
 

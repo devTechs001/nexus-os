@@ -102,7 +102,14 @@ typedef struct {
     char distribution[64];
     char components[256];
     bool enabled;
-    bool signed;
+    /*
+     * Whether this repository's index is GPG-signed.
+     *
+     * The field was named `signed`, which is a C keyword - the declaration
+     * parsed as "both signed and _Bool in declaration specifiers" and the file
+     * could not be compiled.
+     */
+    bool is_signed;
     char gpg_key[512];
     int priority;
     package_t *packages;

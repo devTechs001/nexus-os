@@ -7,6 +7,9 @@
  */
 
 #include "../security.h"
+/* SHA256_DIGEST_SIZE and friends live here; without this include the array
+ * sizes below could not be resolved. */
+#include "../crypto/crypto.h"
 
 /*===========================================================================*/
 /*                         TPM CONFIGURATION                                 */

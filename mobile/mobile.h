@@ -125,7 +125,16 @@
 typedef struct battery_info {
     s32 level;                    /* Battery level percentage (0-100) */
     s32 voltage;                  /* Battery voltage in millivolts */
-    s32 current;                  /* Battery current in milliamps */
+    /*
+     * Battery current in milliamps.
+     *
+     * This field was named `current`, which is a macro in
+     * kernel/include/kernel.h expanding to get_current(). Any translation unit
+     * that included both headers saw this declaration mangled into
+     * `get_current`, and mobile/telephony/ril.c and
+     * mobile/power/battery_manager.c both failed to compile because of it.
+     */
+    s32 current_ma;
     s32 temperature;              /* Battery temperature in tenths of °C */
     s32 health;                   /* Battery health status */
     s32 status;                   /* Battery charging status */
